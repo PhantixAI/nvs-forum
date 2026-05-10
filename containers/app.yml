@@ -1,0 +1,73 @@
+templates:
+  ## PostgreSQL is external (RDS) — do NOT include postgres.template.yml
+  - "templates/redis.template.yml"
+  - "templates/web.template.yml"
+  - "templates/web.ratelimited.template.yml"
+  - "templates/web.ssl.template.yml"
+  - "templates/web.letsencrypt.ssl.template.yml"
+
+expose:
+  - "80:80"
+  - "443:443"
+
+volumes:
+  - volume:
+      host: /var/discourse/shared/standalone
+      guest: /shared
+  - volume:
+      host: /var/discourse/shared/standalone/log/var-log
+      guest: /var/log
+
+params:
+  db_default_text_search_config: "pg_catalog.english"
+  db_shared_buffers: "128MB"
+  db_work_mem: "10MB"
+  version: master
+  ## Replace <GITHUB_PAT> with a fine-grained token (Contents: read-only) for PhantixAI/nvs-forum
+  git_url: https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-forum.git
+
+env:
+  LANG: en_US.UTF-8
+  ## 2 workers for 2 GB RAM instance
+  UNICORN_WORKERS: 2
+
+  ## ===== DISCOURSE BASE =====
+  DISCOURSE_HOSTNAME: navodians.com
+  DISCOURSE_DEVELOPER_EMAILS: 'support@navodians.com'
+
+  ## ===== EXTERNAL RDS POSTGRESQL =====
+  DISCOURSE_DB_USERNAME: navodian_admin
+  DISCOURSE_DB_PASSWORD: '<DB_PASSWORD>'
+  DISCOURSE_DB_HOST: navodians-pg15.cdey8w2mceyp.ap-south-1.rds.amazonaws.com
+  DISCOURSE_DB_PORT: 5432
+  DISCOURSE_DB_NAME: discourse
+  DISCOURSE_DB_BACKUP_PORT: 5432
+
+  ## ===== AMAZON SES SMTP =====
+  DISCOURSE_SMTP_ADDRESS: email-smtp.ap-south-1.amazonaws.com
+  DISCOURSE_SMTP_PORT: 587
+  DISCOURSE_SMTP_USER_NAME: '<SES_SMTP_USERNAME>'
+  DISCOURSE_SMTP_PASSWORD: '<SES_SMTP_PASSWORD>'
+  DISCOURSE_SMTP_AUTHENTICATION: login
+  DISCOURSE_SMTP_ENABLE_START_TLS: true
+  DISCOURSE_SMTP_DOMAIN: navodians.com
+  DISCOURSE_NOTIFICATION_EMAIL: 'noreply@navodians.com'
+
+  ## ===== LET'S ENCRYPT =====
+  LETSENCRYPT_ACCOUNT_EMAIL: support@navodians.com
+
+  ## ===== S3 + CLOUDFRONT =====
+  DISCOURSE_USE_S3: true
+  DISCOURSE_S3_REGION: ap-south-1
+  DISCOURSE_S3_ACCESS_KEY_ID: '<S3_ACCESS_KEY_ID>'
+  DISCOURSE_S3_SECRET_ACCESS_KEY: '<S3_SECRET_ACCESS_KEY>'
+  DISCOURSE_S3_BUCKET: navodians-forum-uploads
+  DISCOURSE_S3_BACKUP_BUCKET: navodians-forum-backups
+  DISCOURSE_BACKUP_LOCATION: s3
+  DISCOURSE_S3_USE_ACLS: false
+  DISCOURSE_S3_CDN_URL: https://cdn.navodians.com
+  DISCOURSE_CDN_URL: ""
+
+run:
+  - exec: echo "Beginning of custom commands"
+  - exec: echo "End of custom commands"

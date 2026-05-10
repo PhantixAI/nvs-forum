@@ -1,0 +1,36 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  deploy:
+    name: Rebuild Discourse
+    runs-on: self-hosted
+
+    steps:
+      - name: Build new image (site stays up during this step)
+        run: cd /var/discourse && sudo ./launcher bootstrap app
+
+      - name: Swap container (brief downtime ~30s)
+        run: |
+          cd /var/discourse
+          sudo ./launcher destroy app
+          sudo ./launcher start app
+
+      - name: Fix ECC cert (until Let's Encrypt renews properly after 2026-05-11)
+        run: |
+          sudo docker exec app bash -c '
+            cp /shared/ssl/navodians.com.cer /shared/ssl/navodians.com_ecc.cer
+            cp /shared/ssl/navodians.com.key /shared/ssl/navodians.com_ecc.key
+            nginx -s reload
+          '
+
+      - name: Verify site is up
+        run: |
+          until curl -sk -o /dev/null -w "%{http_code}" https://navodians.com/ | grep -q "200"; do
+            echo "Waiting for site..."; sleep 5
+          done
+          echo "Site is up"
