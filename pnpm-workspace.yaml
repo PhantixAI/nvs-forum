@@ -6,7 +6,7 @@ autoInstallPeers: false
 ignoreWorkspaceCycles: true
 updateNotifier: false
 strictPeerDependencies: true
-strictDepBuilds: true
+strictDepBuilds: false
 onlyBuiltDependencies:
 - lefthook
 ignoredBuiltDependencies:

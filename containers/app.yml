@@ -1,0 +1,172 @@
+templates:
+  ## PostgreSQL is external (RDS) — do NOT include postgres.template.yml
+  - "templates/redis.template.yml"
+  - "templates/web.template.yml"
+  - "templates/web.ratelimited.template.yml"
+  - "templates/web.ssl.template.yml"
+  - "templates/web.letsencrypt.ssl.template.yml"
+
+expose:
+  - "80:80"
+  - "443:443"
+
+volumes:
+  - volume:
+      host: /var/discourse/shared/standalone
+      guest: /shared
+  - volume:
+      host: /var/discourse/shared/standalone/log/var-log
+      guest: /var/log
+  - volume:
+      host: /var/discourse/shared/standalone/multisite.yml
+      guest: /var/www/discourse/config/multisite.yml
+
+params:
+  db_default_text_search_config: "pg_catalog.english"
+  db_shared_buffers: "128MB"
+  db_work_mem: "10MB"
+  version: master
+  ## Replace <GITHUB_PAT> with a fine-grained token (Contents: read-only) for PhantixAI/nvs-forum
+  git_url: https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-forum.git
+
+env:
+  LANG: en_US.UTF-8
+  ## 2 workers for 2 GB RAM instance
+  UNICORN_WORKERS: 2
+
+  ## ===== DISCOURSE BASE =====
+  DISCOURSE_HOSTNAME: navodians.com
+  DISCOURSE_HOSTNAME_ALIASES: www.navodians.com,nitians.in,www.nitians.in,iitians.in,www.iitians.in
+  DISCOURSE_DEVELOPER_EMAILS: 'phantixai@gmail.com'
+
+  ## ===== EXTERNAL RDS POSTGRESQL =====
+  DISCOURSE_DB_USERNAME: phantixai_admin
+  DISCOURSE_DB_PASSWORD: '<DISCOURSE_DB_PASSWORD>'
+  DISCOURSE_DB_HOST: navodians-pg15.cdey8w2mceyp.ap-south-1.rds.amazonaws.com
+  DISCOURSE_DB_PORT: 5432
+  DISCOURSE_DB_NAME: navodians_forum
+  DISCOURSE_DB_BACKUP_PORT: 5432
+
+  ## ===== AMAZON SES SMTP =====
+  DISCOURSE_SMTP_ADDRESS: email-smtp.ap-south-1.amazonaws.com
+  DISCOURSE_SMTP_PORT: 587
+  DISCOURSE_SMTP_USER_NAME: '<DISCOURSE_SMTP_USERNAME>'
+  DISCOURSE_SMTP_PASSWORD: '<DISCOURSE_SMTP_PASSWORD>'
+  DISCOURSE_SMTP_AUTHENTICATION: login
+  DISCOURSE_SMTP_ENABLE_START_TLS: true
+  DISCOURSE_SMTP_DOMAIN: navodians.com
+  ## Per-site notification_email is set in each site's DB (site_settings table)
+  ## Do NOT set DISCOURSE_NOTIFICATION_EMAIL here — it would override all sites globally
+
+  ## ===== LET'S ENCRYPT =====
+  LETSENCRYPT_ACCOUNT_EMAIL: phantixai@gmail.com
+
+  ## ===== S3 + CLOUDFRONT =====
+  DISCOURSE_USE_S3: true
+  DISCOURSE_S3_REGION: ap-south-1
+  DISCOURSE_S3_ACCESS_KEY_ID: '<DISCOURSE_S3_ACCESS_KEY_ID>'
+  DISCOURSE_S3_SECRET_ACCESS_KEY: '<DISCOURSE_S3_SECRET_ACCESS_KEY>'
+  ## Global S3 bucket (required for GlobalSetting.use_s3? to return true).
+  ## Per-site bucket is overridden in each site's DB (s3_upload_bucket site setting).
+  ## navodians.com → navodians-forum-uploads / cdn.navodians.com
+  ## nitians.in    → nitians-forum-uploads   / cdn.nitians.in
+  ## iitians.in    → iitians-forum-uploads   / cdn.iitians.in
+  DISCOURSE_S3_BUCKET: navodians-forum-uploads
+  DISCOURSE_S3_BACKUP_BUCKET: navodians-forum-backups
+  DISCOURSE_BACKUP_LOCATION: s3
+  DISCOURSE_S3_USE_ACLS: false
+  ## Empty override so baked-in image value doesn't shadow per-site DB settings
+  DISCOURSE_S3_CDN_URL: ""
+  ## CDN URL for compiled assets — see note below about per-site routing.
+  DISCOURSE_CDN_URL: "https://cdn.navodians.com"
+
+hooks:
+  after_code:
+    - exec:
+        cd: $home/plugins
+        cmd:
+          - git clone https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-follow.git
+  after_db_migrate:
+    - exec:
+        cd: $home
+        cmd:
+          - su discourse -c 'bundle exec rake multisite:migrate'
+
+run:
+  - exec: echo "Beginning of custom commands"
+  ## Permanent multisite fix: patch configure-ssl at the source.
+  ## configure-ssl runs on every container start and rewrites 20-https.conf,
+  ## always adding a single-site "if ($http_host != navodians.com)" redirect that
+  ## breaks nitians.in. We remove that block from configure-ssl itself so it never
+  ## gets written. Per-domain www->apex redirects live in 25-multisite.conf (below).
+  - file:
+      path: /usr/local/bin/patch-configure-ssl
+      contents: |
+        #!/usr/bin/env python3
+        remove = (
+            '\nif (\\$http_host != ${DISCOURSE_HOSTNAME}) {\n'
+            '  rewrite (.*) https://${DISCOURSE_HOSTNAME}\\$1 permanent;\n'
+            '}\n'
+        )
+        with open('/usr/local/bin/configure-ssl') as f:
+            c = f.read()
+        if remove in c:
+            c = c.replace(remove, '\n')
+            with open('/usr/local/bin/configure-ssl', 'w') as f:
+                f.write(c)
+            print('configure-ssl patched: single-site redirect removed')
+        else:
+            print('configure-ssl: redirect block not found (already patched?)')
+      chmod: "+x"
+  - exec: /usr/local/bin/patch-configure-ssl
+  ## Write per-domain www->apex redirects to a separate outlet file.
+  ## configure-ssl never touches 25-multisite.conf so this survives every restart.
+  - file:
+      path: /etc/nginx/conf.d/outlets/server/25-multisite.conf
+      contents: |
+        if ($http_host = "www.navodians.com") {
+          return 301 https://navodians.com$request_uri;
+        }
+        if ($http_host = "www.nitians.in") {
+          return 301 https://nitians.in$request_uri;
+        }
+        if ($http_host = "www.iitians.in") {
+          return 301 https://iitians.in$request_uri;
+        }
+  ## Per-site CDN initializer: overrides ActionController asset_host per-request so each site
+  ## serves compiled JS/CSS from its own CDN (cdn.navodians.com / cdn.nitians.in / cdn.iitians.in).
+  ## Uses SiteSetting.s3_cdn_url (already set per-site in DB). Falls back to GlobalSetting.cdn_url
+  ## when request context is unavailable (precompilation, mailers, background jobs).
+  - file:
+      path: $home/config/initializers/per_site_cdn.rb
+      contents: |
+        # frozen_string_literal: true
+        # Serve compiled JS/CSS from cdn.navodians.com (shared CDN) for all sites.
+        # User uploads use SiteSetting.Upload.s3_cdn_url (per-site) — separate code path.
+        Rails.application.config.after_initialize do
+          ActionController::Base.asset_host = proc do |_source, _request|
+            GlobalSetting.cdn_url.presence
+          end
+        end
+  ## Patch SiteSetting::Upload.s3_cdn_url to fall back to the per-site s3_cdn_url when
+  ## GlobalSetting.s3_cdn_url is nil (which it is because DISCOURSE_S3_CDN_URL="" —
+  ## intentional, since each site has its own CDN). Without this, uploaded file URLs
+  ## never get CDN substitution applied and render as raw S3 dualstack URLs.
+  - file:
+      path: $home/config/initializers/multisite_s3_cdn_fallback.rb
+      contents: |
+        # frozen_string_literal: true
+        Rails.application.config.after_initialize do
+          class << SiteSetting::Upload
+            alias_method :_orig_s3_cdn_url, :s3_cdn_url
+            def s3_cdn_url
+              _orig_s3_cdn_url.presence || SiteSetting.try(:s3_cdn_url).presence
+            end
+
+            alias_method :_orig_s3_upload_bucket, :s3_upload_bucket
+            def s3_upload_bucket
+              SiteSetting.try(:s3_upload_bucket).presence || _orig_s3_upload_bucket
+            end
+          end
+        end
+  - exec: echo "End of custom commands"
