@@ -1,5 +1,5 @@
 strictPeerDependencies: true
-strictDepBuilds: true
+strictDepBuilds: false
 onlyBuiltDependencies:
 - lefthook
 ignoredBuiltDependencies:
