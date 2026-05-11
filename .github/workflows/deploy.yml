@@ -20,12 +20,15 @@ jobs:
           sudo ./launcher destroy app
           sudo ./launcher start app
 
-      - name: Fix ECC cert (until Let's Encrypt renews properly after 2026-05-11)
+      - name: Fix ECC cert
         run: |
+          until sudo docker exec app sv status nginx | grep -q "^run:"; do
+            echo "Waiting for nginx to start..."; sleep 5
+          done
           sudo docker exec app bash -c '
             cp /shared/ssl/navodians.com.cer /shared/ssl/navodians.com_ecc.cer
             cp /shared/ssl/navodians.com.key /shared/ssl/navodians.com_ecc.key
-            nginx -s reload
+            sv reload nginx
           '
 
       - name: Verify site is up
