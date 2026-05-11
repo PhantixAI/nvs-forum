@@ -6,7 +6,7 @@ Production Discourse forum running on AWS Lightsail + RDS + S3 + CloudFront + SE
 
 | Resource | Details |
 |---|---|
-| Compute | AWS Lightsail `navodians-forum` — `small_3_1` (2 GB RAM, Ubuntu 24.04) |
+| Compute | AWS Lightsail `navodians-forum-4gb` — `medium_3_1` (4 GB RAM, Ubuntu 24.04) |
 | IP | `52.66.136.102` (static) |
 | Database | RDS PostgreSQL 15 — `navodians-pg15.cdey8w2mceyp.ap-south-1.rds.amazonaws.com` |
 | Storage | S3 `navodians-forum-uploads` (assets/uploads), `navodians-forum-backups` |
@@ -89,22 +89,40 @@ The `containers/app.yml` in this repo uses `<PLACEHOLDER>` values — fill them 
 | `<SES_SMTP_USERNAME>` / `<SES_SMTP_PASSWORD>` | creds file |
 | `<S3_ACCESS_KEY_ID>` / `<S3_SECRET_ACCESS_KEY>` | creds file |
 
-## After Every Rebuild (until Let's Encrypt ECC cert is renewed)
+## SSL Certificate Management
 
-Let's Encrypt rate-limited — proper ECC cert available after 2026-05-11. Until then, fix nginx after each rebuild:
+Let's Encrypt RSA cert issued 2026-05-11, expires 2026-08-09. Auto-renews via container cron job.
+
+### If nginx fails to start after a rebuild (ECC cert issue)
+
+The bootstrap runs `letsencrypt` and may fail to issue the ECC cert (rate limit: 5 certs/7 days).
+Fix by copying the RSA cert to the ECC paths:
 
 ```bash
 sudo docker exec app bash -c '
   cp /shared/ssl/navodians.com.cer /shared/ssl/navodians.com_ecc.cer
   cp /shared/ssl/navodians.com.key /shared/ssl/navodians.com_ecc.key
-  nginx -s reload
+  sv reload nginx
 '
 ```
 
-After May 11, run this inside the container to issue a proper ECC cert:
+### Re-issuing cert (after rate limit resets or cert expires)
+
 ```bash
-sudo docker exec -it app bash
-/usr/local/bin/letsencrypt
+sudo docker exec app bash -c '/usr/local/bin/letsencrypt'
+# Then fix ECC paths as above
+```
+
+### Server migration — protect certs before bootstrap
+
+Bootstrap overwrites cert files if it can't issue a new one. Always backup before rebuilding on a new server:
+
+```bash
+sudo cp /var/discourse/shared/standalone/ssl/navodians.com.cer /tmp/navodians.com.cer.bak
+sudo cp /var/discourse/shared/standalone/ssl/navodians.com.key /tmp/navodians.com.key.bak
+# After bootstrap, if certs are empty, restore:
+sudo cp /tmp/navodians.com.cer.bak /var/discourse/shared/standalone/ssl/navodians.com.cer
+sudo cp /tmp/navodians.com.key.bak /var/discourse/shared/standalone/ssl/navodians.com.key
 ```
 
 ## Useful Commands
