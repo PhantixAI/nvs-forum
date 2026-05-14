@@ -33,6 +33,7 @@ env:
 
   ## ===== DISCOURSE BASE =====
   DISCOURSE_HOSTNAME: navodians.com
+  DISCOURSE_HOSTNAME_ALIASES: www.navodians.com
   DISCOURSE_DEVELOPER_EMAILS: 'support@navodians.com'
 
   ## ===== EXTERNAL RDS POSTGRESQL =====
@@ -67,6 +68,14 @@ env:
   DISCOURSE_S3_USE_ACLS: false
   DISCOURSE_S3_CDN_URL: https://cdn.navodians.com
   DISCOURSE_CDN_URL: ""
+
+hooks:
+  after_code:
+    - exec:
+        cd: $home/plugins
+        cmd:
+          - git clone https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-follow.git
+          - git clone https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-fontawesome-pro.git
 
 run:
   - exec: echo "Beginning of custom commands"
