@@ -17,6 +17,9 @@ volumes:
   - volume:
       host: /var/discourse/shared/standalone/log/var-log
       guest: /var/log
+  - volume:
+      host: /var/discourse/shared/standalone/multisite.yml
+      guest: /var/www/discourse/config/multisite.yml
 
 params:
   db_default_text_search_config: "pg_catalog.english"
@@ -33,7 +36,7 @@ env:
 
   ## ===== DISCOURSE BASE =====
   DISCOURSE_HOSTNAME: navodians.com
-  DISCOURSE_HOSTNAME_ALIASES: www.navodians.com
+  DISCOURSE_HOSTNAME_ALIASES: www.navodians.com,nitians.in,www.nitians.in
   DISCOURSE_DEVELOPER_EMAILS: 'support@navodians.com'
 
   ## ===== EXTERNAL RDS POSTGRESQL =====
@@ -52,7 +55,8 @@ env:
   DISCOURSE_SMTP_AUTHENTICATION: login
   DISCOURSE_SMTP_ENABLE_START_TLS: true
   DISCOURSE_SMTP_DOMAIN: navodians.com
-  DISCOURSE_NOTIFICATION_EMAIL: 'noreply@navodians.com'
+  ## Per-site notification_email is set in each site's DB (site_settings table)
+  ## Do NOT set DISCOURSE_NOTIFICATION_EMAIL here — it would override all sites globally
 
   ## ===== LET'S ENCRYPT =====
   LETSENCRYPT_ACCOUNT_EMAIL: support@navodians.com
@@ -79,4 +83,40 @@ hooks:
 
 run:
   - exec: echo "Beginning of custom commands"
+  ## Multisite nginx fix: write script to file (avoids shell $-interpolation), then run it.
+  ## Removes single-site redirect from 20-https.conf; writes per-domain www→apex redirects
+  ## to a separate 25-multisite.conf that configure-letsencrypt never touches.
+  - file:
+      path: /usr/local/bin/multisite-nginx-fix
+      contents: |
+        #!/usr/bin/env python3
+        import re, sys
+
+        conf = '/etc/nginx/conf.d/outlets/server/20-https.conf'
+        with open(conf) as f:
+            c = f.read()
+
+        # Remove the single-site "if ($http_host != navodians.com)" redirect block
+        c = re.sub(
+            r'if \(\$http_host != navodians\.com\) \{\s*rewrite[^\n]+\n\}\n?',
+            '',
+            c,
+        )
+        with open(conf, 'w') as f:
+            f.write(c)
+
+        # Write per-domain www->apex redirects to a separate outlet file
+        with open('/etc/nginx/conf.d/outlets/server/25-multisite.conf', 'w') as f:
+            f.write(
+                'if ($http_host = "www.navodians.com") {\n'
+                '  return 301 https://navodians.com$request_uri;\n'
+                '}\n'
+                'if ($http_host = "www.nitians.in") {\n'
+                '  return 301 https://nitians.in$request_uri;\n'
+                '}\n'
+            )
+
+        print('nginx multisite redirect configured')
+      chmod: "+x"
+  - exec: /usr/local/bin/multisite-nginx-fix
   - exec: echo "End of custom commands"
