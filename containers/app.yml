@@ -66,16 +66,20 @@ DISCOURSE_DB_BACKUP_PORT: 5432
   DISCOURSE_S3_REGION: ap-south-1
   DISCOURSE_S3_ACCESS_KEY_ID: '<S3_ACCESS_KEY_ID>'
   DISCOURSE_S3_SECRET_ACCESS_KEY: '<S3_SECRET_ACCESS_KEY>'
-  ## S3 bucket and CDN URL are set per-site in the DB (see site settings)
+  ## Global S3 bucket (required for GlobalSetting.use_s3? to return true).
+  ## Per-site bucket is overridden in each site's DB (s3_upload_bucket site setting).
   ## navodians.com → navodians-forum-uploads / cdn.navodians.com
   ## nitians.in    → nitians-forum-uploads   / cdn.nitians.in
   ## iitians.in    → iitians-forum-uploads   / cdn.iitians.in
+  DISCOURSE_S3_BUCKET: navodians-forum-uploads
   DISCOURSE_S3_BACKUP_BUCKET: navodians-forum-backups
   DISCOURSE_BACKUP_LOCATION: s3
   DISCOURSE_S3_USE_ACLS: false
   ## Empty override so baked-in image value doesn't shadow per-site DB settings
   DISCOURSE_S3_CDN_URL: ""
-  DISCOURSE_CDN_URL: ""
+  ## Fallback CDN for compiled assets (used during precompilation and background jobs).
+  ## At request time, per_site_cdn.rb initializer overrides this with each site's s3_cdn_url.
+  DISCOURSE_CDN_URL: https://cdn.navodians.com
 
 hooks:
   after_code:
@@ -126,4 +130,33 @@ run:
         if ($http_host = "www.iitians.in") {
           return 301 https://iitians.in$request_uri;
         }
+  ## Per-site CDN initializer: overrides ActionController asset_host per-request so each site
+  ## serves compiled JS/CSS from its own CDN (cdn.navodians.com / cdn.nitians.in / cdn.iitians.in).
+  ## Uses SiteSetting.s3_cdn_url (already set per-site in DB). Falls back to GlobalSetting.cdn_url
+  ## when request context is unavailable (precompilation, mailers, background jobs).
+  - file:
+      path: $home/config/initializers/per_site_cdn.rb
+      contents: |
+        # frozen_string_literal: true
+        Rails.application.config.after_initialize do
+          ActionController::Base.asset_host = proc do |_source, request|
+            if request
+              begin
+                SiteSetting.s3_cdn_url.presence || GlobalSetting.cdn_url
+              rescue StandardError
+                GlobalSetting.cdn_url
+              end
+            else
+              GlobalSetting.cdn_url
+            end
+          end
+        end
+  ## Upload compiled assets to all 3 S3 buckets after every rebuild so each site's CDN can serve them.
+  ## Second and third runs are fast (mostly skipped — same digested filenames).
+  - exec:
+      cd: $home
+      cmd:
+        - RAILS_DB=navodians RAILS_ENV=production USE_DB_S3_CONFIG=1 bundle exec rake s3:upload_assets
+        - RAILS_DB=nitians RAILS_ENV=production USE_DB_S3_CONFIG=1 bundle exec rake s3:upload_assets
+        - RAILS_DB=iitians RAILS_ENV=production USE_DB_S3_CONFIG=1 bundle exec rake s3:upload_assets
   - exec: echo "End of custom commands"
