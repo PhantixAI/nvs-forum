@@ -20,27 +20,22 @@ jobs:
           sudo ./launcher destroy app
           sudo ./launcher start app
 
-      - name: Fix ECC cert
+      - name: Wait for nginx and apply multisite fix
         run: |
           until sudo docker exec app sv status nginx | grep -q "^run:"; do
             echo "Waiting for nginx to start..."; sleep 5
           done
           sudo docker exec app bash -c '
-            cp /shared/ssl/navodians.com.cer /shared/ssl/navodians.com_ecc.cer
-            cp /shared/ssl/navodians.com.key /shared/ssl/navodians.com_ecc.key
+            sed -i "/http_host != /,/^}/d" /usr/local/bin/configure-ssl
+            /usr/local/bin/configure-ssl
             sv reload nginx
           '
 
-      - name: Sync assets to S3
+      - name: Verify all sites are up
         run: |
-          sudo docker exec app bash -c '
-            git config --global --add safe.directory /var/www/discourse 2>/dev/null || true
-            cd /var/www/discourse && bundle exec rake s3:upload_assets
-          '
-
-      - name: Verify site is up
-        run: |
-          until curl -sk -o /dev/null -w "%{http_code}" https://navodians.com/ | grep -q "200"; do
-            echo "Waiting for site..."; sleep 5
+          for site in navodians.com nitians.in iitians.in; do
+            until curl -sk -o /dev/null -w "%{http_code}" https://$site/ | grep -q "200"; do
+              echo "Waiting for $site..."; sleep 5
+            done
+            echo "$site is up"
           done
-          echo "Site is up"
