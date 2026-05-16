@@ -36,7 +36,7 @@ env:
 
   ## ===== DISCOURSE BASE =====
   DISCOURSE_HOSTNAME: navodians.com
-  DISCOURSE_HOSTNAME_ALIASES: www.navodians.com,nitians.in,www.nitians.in
+  DISCOURSE_HOSTNAME_ALIASES: www.navodians.com,nitians.in,www.nitians.in,iitians.in,www.iitians.in
   DISCOURSE_DEVELOPER_EMAILS: 'support@navodians.com'
 
   ## ===== EXTERNAL RDS POSTGRESQL =====
@@ -45,7 +45,7 @@ env:
   DISCOURSE_DB_HOST: navodians-pg15.cdey8w2mceyp.ap-south-1.rds.amazonaws.com
   DISCOURSE_DB_PORT: 5432
   DISCOURSE_DB_NAME: discourse
-  DISCOURSE_DB_BACKUP_PORT: 5432
+DISCOURSE_DB_BACKUP_PORT: 5432
 
   ## ===== AMAZON SES SMTP =====
   DISCOURSE_SMTP_ADDRESS: email-smtp.ap-south-1.amazonaws.com
@@ -66,11 +66,15 @@ env:
   DISCOURSE_S3_REGION: ap-south-1
   DISCOURSE_S3_ACCESS_KEY_ID: '<S3_ACCESS_KEY_ID>'
   DISCOURSE_S3_SECRET_ACCESS_KEY: '<S3_SECRET_ACCESS_KEY>'
-  DISCOURSE_S3_BUCKET: navodians-forum-uploads
+  ## S3 bucket and CDN URL are set per-site in the DB (see site settings)
+  ## navodians.com → navodians-forum-uploads / cdn.navodians.com
+  ## nitians.in    → nitians-forum-uploads   / cdn.nitians.in
+  ## iitians.in    → iitians-forum-uploads   / cdn.iitians.in
   DISCOURSE_S3_BACKUP_BUCKET: navodians-forum-backups
   DISCOURSE_BACKUP_LOCATION: s3
   DISCOURSE_S3_USE_ACLS: false
-  DISCOURSE_S3_CDN_URL: https://cdn.navodians.com
+  ## Empty override so baked-in image value doesn't shadow per-site DB settings
+  DISCOURSE_S3_CDN_URL: ""
   DISCOURSE_CDN_URL: ""
 
 hooks:
@@ -83,40 +87,43 @@ hooks:
 
 run:
   - exec: echo "Beginning of custom commands"
-  ## Multisite nginx fix: write script to file (avoids shell $-interpolation), then run it.
-  ## Removes single-site redirect from 20-https.conf; writes per-domain www→apex redirects
-  ## to a separate 25-multisite.conf that configure-letsencrypt never touches.
+  ## Permanent multisite fix: patch configure-ssl at the source.
+  ## configure-ssl runs on every container start and rewrites 20-https.conf,
+  ## always adding a single-site "if ($http_host != navodians.com)" redirect that
+  ## breaks nitians.in. We remove that block from configure-ssl itself so it never
+  ## gets written. Per-domain www->apex redirects live in 25-multisite.conf (below).
   - file:
-      path: /usr/local/bin/multisite-nginx-fix
+      path: /usr/local/bin/patch-configure-ssl
       contents: |
         #!/usr/bin/env python3
-        import re, sys
-
-        conf = '/etc/nginx/conf.d/outlets/server/20-https.conf'
-        with open(conf) as f:
-            c = f.read()
-
-        # Remove the single-site "if ($http_host != navodians.com)" redirect block
-        c = re.sub(
-            r'if \(\$http_host != navodians\.com\) \{\s*rewrite[^\n]+\n\}\n?',
-            '',
-            c,
+        remove = (
+            '\nif (\\$http_host != ${DISCOURSE_HOSTNAME}) {\n'
+            '  rewrite (.*) https://${DISCOURSE_HOSTNAME}\\$1 permanent;\n'
+            '}\n'
         )
-        with open(conf, 'w') as f:
-            f.write(c)
-
-        # Write per-domain www->apex redirects to a separate outlet file
-        with open('/etc/nginx/conf.d/outlets/server/25-multisite.conf', 'w') as f:
-            f.write(
-                'if ($http_host = "www.navodians.com") {\n'
-                '  return 301 https://navodians.com$request_uri;\n'
-                '}\n'
-                'if ($http_host = "www.nitians.in") {\n'
-                '  return 301 https://nitians.in$request_uri;\n'
-                '}\n'
-            )
-
-        print('nginx multisite redirect configured')
+        with open('/usr/local/bin/configure-ssl') as f:
+            c = f.read()
+        if remove in c:
+            c = c.replace(remove, '\n')
+            with open('/usr/local/bin/configure-ssl', 'w') as f:
+                f.write(c)
+            print('configure-ssl patched: single-site redirect removed')
+        else:
+            print('configure-ssl: redirect block not found (already patched?)')
       chmod: "+x"
-  - exec: /usr/local/bin/multisite-nginx-fix
+  - exec: /usr/local/bin/patch-configure-ssl
+  ## Write per-domain www->apex redirects to a separate outlet file.
+  ## configure-ssl never touches 25-multisite.conf so this survives every restart.
+  - file:
+      path: /etc/nginx/conf.d/outlets/server/25-multisite.conf
+      contents: |
+        if ($http_host = "www.navodians.com") {
+          return 301 https://navodians.com$request_uri;
+        }
+        if ($http_host = "www.nitians.in") {
+          return 301 https://nitians.in$request_uri;
+        }
+        if ($http_host = "www.iitians.in") {
+          return 301 https://iitians.in$request_uri;
+        }
   - exec: echo "End of custom commands"
