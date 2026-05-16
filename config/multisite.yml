@@ -1,0 +1,38 @@
+navodians:
+  adapter: postgresql
+  database: navodians_forum
+  username: phantixai_admin
+  password: "<DB_PASSWORD>"
+  host: navodians-pg15.cdey8w2mceyp.ap-south-1.rds.amazonaws.com
+  port: 5432
+  pool: 5
+  timeout: 5000
+  host_names:
+    - navodians.com
+    - www.navodians.com
+
+nitians:
+  adapter: postgresql
+  database: nitians_forum
+  username: phantixai_admin
+  password: "<DB_PASSWORD>"
+  host: navodians-pg15.cdey8w2mceyp.ap-south-1.rds.amazonaws.com
+  port: 5432
+  pool: 5
+  timeout: 5000
+  host_names:
+    - nitians.in
+    - www.nitians.in
+
+iitians:
+  adapter: postgresql
+  database: iitians_forum
+  username: phantixai_admin
+  password: "<DB_PASSWORD>"
+  host: navodians-pg15.cdey8w2mceyp.ap-south-1.rds.amazonaws.com
+  port: 5432
+  pool: 5
+  timeout: 5000
+  host_names:
+    - iitians.in
+    - www.iitians.in
