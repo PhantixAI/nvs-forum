@@ -11,6 +11,45 @@ jobs:
     runs-on: self-hosted
 
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Write app.yml with secrets
+        env:
+          NVS_GITHUB_PAT: ${{ secrets.NVS_GITHUB_PAT }}
+          DISCOURSE_DB_PASSWORD: ${{ secrets.DISCOURSE_DB_PASSWORD }}
+          DISCOURSE_SMTP_USERNAME: ${{ secrets.DISCOURSE_SMTP_USERNAME }}
+          DISCOURSE_SMTP_PASSWORD: ${{ secrets.DISCOURSE_SMTP_PASSWORD }}
+          DISCOURSE_S3_ACCESS_KEY_ID: ${{ secrets.DISCOURSE_S3_ACCESS_KEY_ID }}
+          DISCOURSE_S3_SECRET_ACCESS_KEY: ${{ secrets.DISCOURSE_S3_SECRET_ACCESS_KEY }}
+        run: |
+          python3 - << 'PYEOF' > /tmp/discourse_app.yml
+          import os, sys
+          content = open('containers/app.yml').read()
+          for placeholder, envvar in [
+              ('<GITHUB_PAT>', 'NVS_GITHUB_PAT'),
+              ('<DISCOURSE_DB_PASSWORD>', 'DISCOURSE_DB_PASSWORD'),
+              ('<DISCOURSE_SMTP_USERNAME>', 'DISCOURSE_SMTP_USERNAME'),
+              ('<DISCOURSE_SMTP_PASSWORD>', 'DISCOURSE_SMTP_PASSWORD'),
+              ('<DISCOURSE_S3_ACCESS_KEY_ID>', 'DISCOURSE_S3_ACCESS_KEY_ID'),
+              ('<DISCOURSE_S3_SECRET_ACCESS_KEY>', 'DISCOURSE_S3_SECRET_ACCESS_KEY'),
+          ]:
+              content = content.replace(placeholder, os.environ[envvar])
+          sys.stdout.write(content)
+          PYEOF
+          sudo cp /tmp/discourse_app.yml /var/discourse/containers/app.yml
+          rm /tmp/discourse_app.yml
+
+      - name: Write multisite.yml with secrets
+        env:
+          DISCOURSE_DB_PASSWORD: ${{ secrets.DISCOURSE_DB_PASSWORD }}
+        run: |
+          python3 - << 'PYEOF' | sudo tee /var/discourse/shared/standalone/multisite.yml > /dev/null
+          import os, sys
+          content = open('config/multisite.yml').read()
+          content = content.replace('<DISCOURSE_DB_PASSWORD>', os.environ['DISCOURSE_DB_PASSWORD'])
+          sys.stdout.write(content)
+          PYEOF
+
       - name: Build new image (site stays up during this step)
         run: cd /var/discourse && sudo ./launcher bootstrap app
 

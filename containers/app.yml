@@ -37,21 +37,21 @@ env:
   ## ===== DISCOURSE BASE =====
   DISCOURSE_HOSTNAME: navodians.com
   DISCOURSE_HOSTNAME_ALIASES: www.navodians.com,nitians.in,www.nitians.in,iitians.in,www.iitians.in
-  DISCOURSE_DEVELOPER_EMAILS: 'support@navodians.com'
+  DISCOURSE_DEVELOPER_EMAILS: 'phantixai@gmail.com'
 
   ## ===== EXTERNAL RDS POSTGRESQL =====
-  DISCOURSE_DB_USERNAME: navodian_admin
-  DISCOURSE_DB_PASSWORD: '<DB_PASSWORD>'
+  DISCOURSE_DB_USERNAME: phantixai_admin
+  DISCOURSE_DB_PASSWORD: '<DISCOURSE_DB_PASSWORD>'
   DISCOURSE_DB_HOST: navodians-pg15.cdey8w2mceyp.ap-south-1.rds.amazonaws.com
   DISCOURSE_DB_PORT: 5432
-  DISCOURSE_DB_NAME: discourse
-DISCOURSE_DB_BACKUP_PORT: 5432
+  DISCOURSE_DB_NAME: navodians_forum
+  DISCOURSE_DB_BACKUP_PORT: 5432
 
   ## ===== AMAZON SES SMTP =====
   DISCOURSE_SMTP_ADDRESS: email-smtp.ap-south-1.amazonaws.com
   DISCOURSE_SMTP_PORT: 587
-  DISCOURSE_SMTP_USER_NAME: '<SES_SMTP_USERNAME>'
-  DISCOURSE_SMTP_PASSWORD: '<SES_SMTP_PASSWORD>'
+  DISCOURSE_SMTP_USER_NAME: '<DISCOURSE_SMTP_USERNAME>'
+  DISCOURSE_SMTP_PASSWORD: '<DISCOURSE_SMTP_PASSWORD>'
   DISCOURSE_SMTP_AUTHENTICATION: login
   DISCOURSE_SMTP_ENABLE_START_TLS: true
   DISCOURSE_SMTP_DOMAIN: navodians.com
@@ -59,13 +59,13 @@ DISCOURSE_DB_BACKUP_PORT: 5432
   ## Do NOT set DISCOURSE_NOTIFICATION_EMAIL here — it would override all sites globally
 
   ## ===== LET'S ENCRYPT =====
-  LETSENCRYPT_ACCOUNT_EMAIL: support@navodians.com
+  LETSENCRYPT_ACCOUNT_EMAIL: phantixai@gmail.com
 
   ## ===== S3 + CLOUDFRONT =====
   DISCOURSE_USE_S3: true
   DISCOURSE_S3_REGION: ap-south-1
-  DISCOURSE_S3_ACCESS_KEY_ID: '<S3_ACCESS_KEY_ID>'
-  DISCOURSE_S3_SECRET_ACCESS_KEY: '<S3_SECRET_ACCESS_KEY>'
+  DISCOURSE_S3_ACCESS_KEY_ID: '<DISCOURSE_S3_ACCESS_KEY_ID>'
+  DISCOURSE_S3_SECRET_ACCESS_KEY: '<DISCOURSE_S3_SECRET_ACCESS_KEY>'
   ## Global S3 bucket (required for GlobalSetting.use_s3? to return true).
   ## Per-site bucket is overridden in each site's DB (s3_upload_bucket site setting).
   ## navodians.com → navodians-forum-uploads / cdn.navodians.com
@@ -86,6 +86,11 @@ hooks:
         cd: $home/plugins
         cmd:
           - git clone https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-follow.git
+  after_db_migrate:
+    - exec:
+        cd: $home
+        cmd:
+          - su discourse -c 'bundle exec rake multisite:migrate'
 
 run:
   - exec: echo "Beginning of custom commands"

@@ -2,7 +2,7 @@ navodians:
   adapter: postgresql
   database: navodians_forum
   username: phantixai_admin
-  password: "38V4HYJQQCm4ZLMLprDzQMWUbGbF"
+  password: "<DISCOURSE_DB_PASSWORD>"
   host: navodians-pg15.cdey8w2mceyp.ap-south-1.rds.amazonaws.com
   port: 5432
   pool: 5
@@ -15,7 +15,7 @@ nitians:
   adapter: postgresql
   database: nitians_forum
   username: phantixai_admin
-  password: "38V4HYJQQCm4ZLMLprDzQMWUbGbF"
+  password: "<DISCOURSE_DB_PASSWORD>"
   host: navodians-pg15.cdey8w2mceyp.ap-south-1.rds.amazonaws.com
   port: 5432
   pool: 5
@@ -28,7 +28,7 @@ iitians:
   adapter: postgresql
   database: iitians_forum
   username: phantixai_admin
-  password: "38V4HYJQQCm4ZLMLprDzQMWUbGbF"
+  password: "<DISCOURSE_DB_PASSWORD>"
   host: navodians-pg15.cdey8w2mceyp.ap-south-1.rds.amazonaws.com
   port: 5432
   pool: 5
