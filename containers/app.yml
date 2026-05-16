@@ -86,7 +86,6 @@ hooks:
         cd: $home/plugins
         cmd:
           - git clone https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-follow.git
-          - git clone https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-fontawesome-pro.git
 
 run:
   - exec: echo "Beginning of custom commands"
