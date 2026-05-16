@@ -77,9 +77,8 @@ DISCOURSE_DB_BACKUP_PORT: 5432
   DISCOURSE_S3_USE_ACLS: false
   ## Empty override so baked-in image value doesn't shadow per-site DB settings
   DISCOURSE_S3_CDN_URL: ""
-  ## Fallback CDN for compiled assets (used during precompilation and background jobs).
-  ## At request time, per_site_cdn.rb initializer overrides this with each site's s3_cdn_url.
-  DISCOURSE_CDN_URL: https://cdn.navodians.com
+  ## CDN URL for compiled assets — see note below about per-site routing.
+  DISCOURSE_CDN_URL: "https://cdn.navodians.com"
 
 hooks:
   after_code:
@@ -138,17 +137,11 @@ run:
       path: $home/config/initializers/per_site_cdn.rb
       contents: |
         # frozen_string_literal: true
+        # Serve compiled JS/CSS from cdn.navodians.com (shared CDN) for all sites.
+        # User uploads use SiteSetting.Upload.s3_cdn_url (per-site) — separate code path.
         Rails.application.config.after_initialize do
-          ActionController::Base.asset_host = proc do |_source, request|
-            if request
-              begin
-                SiteSetting.s3_cdn_url.presence || GlobalSetting.cdn_url
-              rescue StandardError
-                GlobalSetting.cdn_url
-              end
-            else
-              GlobalSetting.cdn_url
-            end
+          ActionController::Base.asset_host = proc do |_source, _request|
+            GlobalSetting.cdn_url.presence
           end
         end
   ## Upload compiled assets to all 3 S3 buckets after every rebuild so each site's CDN can serve them.
