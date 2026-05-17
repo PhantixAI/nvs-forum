@@ -148,12 +148,4 @@ run:
             GlobalSetting.cdn_url.presence
           end
         end
-  ## Upload compiled assets to all 3 S3 buckets after every rebuild so each site's CDN can serve them.
-  ## Second and third runs are fast (mostly skipped — same digested filenames).
-  - exec:
-      cd: $home
-      cmd:
-        - RAILS_DB=navodians RAILS_ENV=production USE_DB_S3_CONFIG=1 bundle exec rake s3:upload_assets
-        - RAILS_DB=nitians RAILS_ENV=production USE_DB_S3_CONFIG=1 bundle exec rake s3:upload_assets
-        - RAILS_DB=iitians RAILS_ENV=production USE_DB_S3_CONFIG=1 bundle exec rake s3:upload_assets
   - exec: echo "End of custom commands"
