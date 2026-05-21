@@ -148,4 +148,20 @@ run:
             GlobalSetting.cdn_url.presence
           end
         end
+  ## Patch SiteSetting::Upload.s3_cdn_url to fall back to the per-site s3_cdn_url when
+  ## GlobalSetting.s3_cdn_url is nil (which it is because DISCOURSE_S3_CDN_URL="" —
+  ## intentional, since each site has its own CDN). Without this, uploaded file URLs
+  ## never get CDN substitution applied and render as raw S3 dualstack URLs.
+  - file:
+      path: $home/config/initializers/multisite_s3_cdn_fallback.rb
+      contents: |
+        # frozen_string_literal: true
+        Rails.application.config.after_initialize do
+          class << SiteSetting::Upload
+            alias_method :_orig_s3_cdn_url, :s3_cdn_url
+            def s3_cdn_url
+              _orig_s3_cdn_url.presence || SiteSetting.try(:s3_cdn_url).presence
+            end
+          end
+        end
   - exec: echo "End of custom commands"
