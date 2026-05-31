@@ -163,10 +163,7 @@ run:
               _orig_s3_cdn_url.presence || SiteSetting.try(:s3_cdn_url).presence
             end
 
-            alias_method :_orig_s3_bucket, :s3_bucket
-            def s3_bucket
-              SiteSetting.try(:s3_upload_bucket).presence || _orig_s3_bucket
-            end
+
           end
         end
   - exec: echo "End of custom commands"
