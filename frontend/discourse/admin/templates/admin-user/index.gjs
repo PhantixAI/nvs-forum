@@ -466,6 +466,39 @@ export default <template>
       </div>
     </div>
 
+    {{#if
+      (or
+        @controller.model.is_batch_moderator
+        @controller.model.can_grant_batch_moderator
+        @controller.model.can_revoke_batch_moderator
+      )
+    }}
+      <div class="display-row">
+        <div class="field">{{i18n "admin.user.batch_moderator"}}</div>
+        <div class="value">{{i18nYesNo
+            @controller.model.is_batch_moderator
+          }}</div>
+        <div class="controls">
+          {{#if @controller.model.can_revoke_batch_moderator}}
+            <DButton
+              class="btn-default"
+              @action={{@controller.revokeBatchModerator}}
+              @icon="shield"
+              @label="admin.user.revoke_batch_moderator"
+            />
+          {{/if}}
+          {{#if @controller.model.can_grant_batch_moderator}}
+            <DButton
+              class="btn-default"
+              @action={{@controller.grantBatchModerator}}
+              @icon="shield"
+              @label="admin.user.grant_batch_moderator"
+            />
+          {{/if}}
+        </div>
+      </div>
+    {{/if}}
+
     <div class="display-row">
       <div class="field">{{i18n "trust_level"}}</div>
       <div class="value">

@@ -51,12 +51,22 @@ RSpec.describe DiscourseAi::Completions::Endpoints::GoogleVertexAi do
     )
   end
 
-  it "sends a Google Cloud bearer token" do
+  it "sends an ADC-derived token as an Authorization bearer header" do
     endpoint.stubs(:access_token).returns("vertex-token")
 
     request = endpoint.send(:prepare_request, "{}")
 
     expect(request["Authorization"]).to eq("Bearer vertex-token")
+    expect(request["x-goog-api-key"]).to be_nil
+  end
+
+  it "sends a configured api_key via x-goog-api-key, not Authorization" do
+    model.update!(api_key: "configured-key")
+
+    request = endpoint.send(:prepare_request, "{}")
+
+    expect(request["x-goog-api-key"]).to eq("configured-key")
+    expect(request["Authorization"]).to be_nil
   end
 
   it "strips unsupported generation parameters for Gemini 3.8" do

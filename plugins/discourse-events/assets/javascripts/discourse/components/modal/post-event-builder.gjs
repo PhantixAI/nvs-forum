@@ -7,6 +7,7 @@ import AdvancedModeToggle from "discourse/components/advanced-mode-toggle";
 import Form from "discourse/components/form";
 import GroupSelector from "discourse/components/group-selector";
 import PluginOutlet from "discourse/components/plugin-outlet";
+import DTooltip from "discourse/float-kit/components/d-tooltip";
 import lazyHash from "discourse/helpers/lazy-hash";
 import { extractError } from "discourse/lib/ajax-error";
 import { adjustedRangeEnd } from "discourse/lib/time-utils";
@@ -18,7 +19,12 @@ import DConditionalLoadingSection from "discourse/ui-kit/d-conditional-loading-s
 import DDateInput from "discourse/ui-kit/d-date-input";
 import DDateTimeInput from "discourse/ui-kit/d-date-time-input";
 import DModal from "discourse/ui-kit/d-modal";
+import dIcon from "discourse/ui-kit/helpers/d-icon";
 import { i18n } from "discourse-i18n";
+import {
+  showBatchEventOption as shouldShowBatchEventOption,
+  showEventScope as shouldShowEventScope,
+} from "../../lib/calendar-event-scope.js";
 import { MAX_HOSTS } from "../../lib/constants.js";
 import { recurrenceContext } from "../../lib/event-recurrence.js";
 import {
@@ -39,6 +45,7 @@ import CompactEventEditor from "../compact-event-editor.gjs";
 
 export default class PostEventBuilder extends Component {
   @service dialog;
+  @service site;
   @service siteSettings;
   @service currentUser;
 
@@ -200,6 +207,14 @@ export default class PostEventBuilder extends Component {
       this.siteSettings.chat_enabled &&
       (this.currentUser.admin || this.currentUser.moderator)
     );
+  }
+
+  get showEventScope() {
+    return shouldShowEventScope(this.site);
+  }
+
+  get showBatchEventOption() {
+    return shouldShowBatchEventOption(this.site);
   }
 
   get isAdvancedScreen() {
@@ -661,6 +676,7 @@ export default class PostEventBuilder extends Component {
       startsAt: this.startsAt ?? null,
       endsAt: this.endsAt ?? null,
       allDay: !!this.event.allDay,
+      eventScope: this.event.eventScope ?? "batch",
       showLocalTime: !!this.event.showLocalTime,
       chatEnabled: !!this.event.chatEnabled,
       livestream: !!this.event.livestream,
@@ -804,22 +820,69 @@ export default class PostEventBuilder extends Component {
                   </field.Control>
                 </form.Field>
 
-                <form.Field
-                  @format="full"
-                  @name="allDay"
-                  @onSet={{this.handleAllDayChange}}
-                  @title={{i18n
-                    "discourse_post_event.builder_modal.all_day.label"
-                  }}
-                  @type="checkbox"
-                  as |field|
-                >
-                  <field.Control>
-                    {{i18n
-                      "discourse_post_event.builder_modal.all_day.description"
-                    }}
-                  </field.Control>
-                </form.Field>
+                <form.Row as |row|>
+                  <row.Col @size={{if this.showEventScope 6 12}}>
+                    <form.Field
+                      @format="full"
+                      @name="allDay"
+                      @onSet={{this.handleAllDayChange}}
+                      @title={{i18n
+                        "discourse_post_event.builder_modal.all_day.label"
+                      }}
+                      @type="checkbox"
+                      as |field|
+                    >
+                      <field.Control>
+                        {{i18n
+                          "discourse_post_event.builder_modal.all_day.description"
+                        }}
+                      </field.Control>
+                    </form.Field>
+                  </row.Col>
+
+                  {{#if this.showEventScope}}
+                    <row.Col @size={{6}}>
+                      <form.Field
+                        @format="medium"
+                        @name="eventScope"
+                        @onSet={{fn this.syncFieldToEvent "eventScope"}}
+                        @showTitle={{false}}
+                        @title={{i18n
+                          "discourse_post_event.builder_modal.event_scope.label"
+                        }}
+                        @type="select"
+                        @validation="required"
+                        as |field|
+                      >
+                        <div class="post-event-builder__event-scope">
+                          <DTooltip
+                            class="post-event-builder__event-scope-icon"
+                          >
+                            <:trigger>{{dIcon "people-group"}}</:trigger>
+                            <:content>
+                              {{i18n
+                                "discourse_post_event.builder_modal.event_scope.label"
+                              }}
+                            </:content>
+                          </DTooltip>
+                          <field.Control as |select|>
+                            {{#if this.showBatchEventOption}}
+                              <select.Option @value="batch">{{i18n
+                                  "discourse_post_event.builder_modal.event_scope.batch"
+                                }}</select.Option>
+                            {{/if}}
+                            <select.Option @value="college">{{i18n
+                                "discourse_post_event.builder_modal.event_scope.college"
+                              }}</select.Option>
+                            <select.Option @value="forum">{{i18n
+                                "discourse_post_event.builder_modal.event_scope.forum"
+                              }}</select.Option>
+                          </field.Control>
+                        </div>
+                      </form.Field>
+                    </row.Col>
+                  {{/if}}
+                </form.Row>
 
                 <form.Field
                   @format="full"

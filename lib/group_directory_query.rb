@@ -59,6 +59,23 @@ class GroupDirectoryQuery
     end
 
     groups = DiscoursePluginRegistry.apply_modifier(:groups_index_query, groups, modifier_context)
+
+    if SiteSetting.enable_batch_moderation
+      # Batch-moderation cohort groups are managed exclusively via the admin
+      # users list now (see Admin::UsersController#grant_batch_moderator) --
+      # they're excluded from the general directory for everyone, staff
+      # included, so this page stays about real groups. Direct /g/:name
+      # navigation is untouched.
+      groups =
+        groups.where.not(
+          id:
+            GroupCustomField.where(
+              name: BatchModeration::GroupSync::CUSTOM_FIELD_FLAG,
+              value: "t",
+            ).select(:group_id),
+        )
+    end
+
     type_filters.delete(:non_automatic)
     type_filters -= %i[my owner] if user.blank?
 

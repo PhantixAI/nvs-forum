@@ -71,7 +71,12 @@ export default <template>
             @showLogin={{routeAction "showLogin"}}
           />
 
-          {{#if @controller.currentUser.admin}}
+          {{#if
+            (and
+              @controller.currentUser.admin
+              (not @controller.model.is_batch_moderation_group)
+            )
+          }}
             {{#if @controller.model.automatic}}
               <DButton
                 class="btn-default"

@@ -1,0 +1,425 @@
+import { click, fillIn, visit } from "@ember/test-helpers";
+import { test } from "qunit";
+import { acceptance } from "discourse/tests/helpers/qunit-helpers";
+import selectKit from "discourse/tests/helpers/select-kit-helper";
+
+const STATUSES = [
+  "scheduled",
+  "pending",
+  "skipped",
+  "sent",
+  "delivered",
+  "bounced",
+  "complained",
+];
+
+function invite(id, email, delivery_status) {
+  return {
+    id,
+    invite_key: `key${id}`,
+    link: `http://localhost:3000/invites/key${id}`,
+    email,
+    domain: null,
+    emailed: true,
+    delivery_status,
+    can_delete_invite: true,
+    custom_message: null,
+    created_at: "2026-09-23T04:47:13.195Z",
+    updated_at: "2026-09-23T04:47:13.195Z",
+    expires_at: "2026-12-22T04:47:00.000Z",
+    expired: false,
+    topics: [],
+    groups: [],
+  };
+}
+
+acceptance("User invited - delivery status filter", function (needs) {
+  needs.user();
+
+  let invitedRequests;
+  let reinviteAllRequests;
+  let reinviteRequests;
+  let destroyAllRequests;
+  let sendNowRequests;
+
+  needs.hooks.beforeEach(() => {
+    invitedRequests = [];
+    reinviteAllRequests = [];
+    reinviteRequests = [];
+    destroyAllRequests = [];
+    sendNowRequests = [];
+  });
+
+  needs.pretender((server, helper) => {
+    server.get("/u/eviltrout/invited.json", (request) => {
+      invitedRequests.push(request.queryParams);
+      const status = request.queryParams.status;
+      const all =
+        request.queryParams.filter === "redeemed"
+          ? []
+          : [
+              invite(1, "skipped@nit.ac.in", "skipped"),
+              invite(2, "sent@nit.ac.in", "sent"),
+              invite(3, "scheduled@nit.ac.in", "scheduled"),
+            ];
+
+      return helper.response({
+        invites: status ? all.filter((i) => i.delivery_status === status) : all,
+        can_see_invite_details: true,
+        counts: { pending: 3, expired: 0, redeemed: 0, total: 3 },
+        available_domains: ["ac.in", "nit.ac.in"],
+        available_statuses: STATUSES,
+      });
+    });
+
+    server.post("/invites/send-now", (request) => {
+      sendNowRequests.push(helper.parsePostData(request.requestBody));
+      return helper.response({ success: "OK", delivery_status: "pending" });
+    });
+
+    server.post("/invites/reinvite-all", (request) => {
+      reinviteAllRequests.push(helper.parsePostData(request.requestBody));
+      return helper.response({ success: "OK" });
+    });
+
+    server.post("/invites/reinvite", (request) => {
+      reinviteRequests.push(helper.parsePostData(request.requestBody));
+      return helper.response({ success: "OK" });
+    });
+
+    server.post("/invites/destroy-all", (request) => {
+      destroyAllRequests.push(helper.parsePostData(request.requestBody));
+      return helper.response({ success: "OK" });
+    });
+  });
+
+  test("renders a pill for sent and skipped invites", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    assert.dom(".delivery-status-pill.--skipped").hasText("Skipped");
+    assert.dom(".delivery-status-pill.--sent").hasText("Sent");
+  });
+
+  test("filters by status and resends only that status", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    const statusFilter = selectKit(".invite-status-filter");
+    await statusFilter.expand();
+    await statusFilter.selectRowByValue("skipped");
+
+    assert.strictEqual(invitedRequests.at(-1).status, "skipped");
+    assert.dom(".delivery-status-pill.--skipped").exists();
+    assert.dom(".delivery-status-pill.--sent").doesNotExist();
+
+    await click(".user-invite-buttons .btn .d-icon-arrows-rotate");
+    assert
+      .dom(".resend-invite-modal")
+      .includesText('with status "Skipped"', "confirm names the status");
+    await click(".resend-invite-modal .resend-invite-confirm");
+
+    assert.strictEqual(reinviteAllRequests.length, 1);
+    assert.strictEqual(reinviteAllRequests[0].status, "skipped");
+  });
+
+  test("deletes only the filtered status after a warning and confirmation, leaving resend untouched", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    const statusFilter = selectKit(".invite-status-filter");
+    await statusFilter.expand();
+    await statusFilter.selectRowByValue("skipped");
+
+    await click(".resend-delete-combo .fk-d-menu__trigger");
+    await click(".fk-d-menu .delete-all-invites");
+
+    assert
+      .dom(".dialog-body")
+      .includesText('with status "Skipped"', "the warning names the status");
+    await click(".dialog-footer .btn-danger");
+
+    assert.strictEqual(destroyAllRequests.length, 1);
+    assert.strictEqual(destroyAllRequests[0].status, "skipped");
+    assert.strictEqual(
+      reinviteAllRequests.length,
+      0,
+      "deleting does not also resend"
+    );
+
+    // The combo button's own primary action still works unaffected by the
+    // menu it now carries.
+    await click(".resend-delete-combo .d-combo-button-button");
+    await click(".resend-invite-modal .resend-invite-confirm");
+
+    assert.strictEqual(reinviteAllRequests.length, 1);
+  });
+
+  test("includes the active search term when resending all invites", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    // The search box only renders once a filter is active or the tab count
+    // exceeds the always-visible threshold (see showSearch) -- select a
+    // domain first so `.user-invite-search input` exists to fill in.
+    const domainFilter = selectKit(".invite-domain-filter");
+    await domainFilter.expand();
+    await domainFilter.selectRowByValue("nit.ac.in");
+
+    await fillIn(".user-invite-search input", "nit");
+    await click(".user-invite-buttons .btn .d-icon-arrows-rotate");
+    await click(".resend-invite-modal .resend-invite-confirm");
+
+    assert.strictEqual(reinviteAllRequests.length, 1);
+    assert.strictEqual(reinviteAllRequests[0].search, "nit");
+  });
+
+  test("passes keywords and ai_personalization along with a bulk resend", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    await click(".user-invite-buttons .btn .d-icon-arrows-rotate");
+    await fillIn(".resend-invite-modal textarea", "robotics club");
+    await click(".resend-invite-modal .resend-invite-confirm");
+
+    assert.strictEqual(reinviteAllRequests.length, 1);
+    assert.strictEqual(reinviteAllRequests[0].keywords, "robotics club");
+    assert.strictEqual(reinviteAllRequests[0].ai_personalization, "true");
+  });
+
+  test("sends schedule_send false with ai_personalization false for an immediate bulk resend", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    await click(".user-invite-buttons .btn .d-icon-arrows-rotate");
+
+    const aiPersonalization = selectKit(".resend-invite-ai-personalization");
+    await aiPersonalization.expand();
+    await aiPersonalization.selectRowByValue("false");
+
+    const scheduleSend = selectKit(".resend-invite-schedule-send");
+    await scheduleSend.expand();
+    await scheduleSend.selectRowByValue("false");
+
+    await click(".resend-invite-modal .resend-invite-confirm");
+
+    assert.strictEqual(reinviteAllRequests.length, 1);
+    assert.strictEqual(reinviteAllRequests[0].ai_personalization, "false");
+    assert.strictEqual(reinviteAllRequests[0].schedule_send, "false");
+  });
+
+  test("sends schedule_send true with ai_personalization false for a paced bulk resend", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    await click(".user-invite-buttons .btn .d-icon-arrows-rotate");
+
+    const aiPersonalization = selectKit(".resend-invite-ai-personalization");
+    await aiPersonalization.expand();
+    await aiPersonalization.selectRowByValue("false");
+
+    // scheduleSend already defaults to "true" -- left untouched here to also
+    // cover the default, rather than redundantly reselecting it.
+    await click(".resend-invite-modal .resend-invite-confirm");
+
+    assert.strictEqual(reinviteAllRequests.length, 1);
+    assert.strictEqual(reinviteAllRequests[0].ai_personalization, "false");
+    assert.strictEqual(reinviteAllRequests[0].schedule_send, "true");
+  });
+
+  test("resends a single invite with its own keywords from the kebab menu", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    await click(
+      "table.user-invite-list tbody tr:nth-child(1) .d-icon-ellipsis-vertical"
+    );
+    await click(".resend-invite");
+    await fillIn(".resend-invite-modal textarea", "math olympiad");
+    await click(".resend-invite-modal .resend-invite-confirm");
+
+    assert.strictEqual(reinviteRequests.length, 1);
+    assert.strictEqual(reinviteRequests[0].keywords, "math olympiad");
+    assert.strictEqual(reinviteRequests[0].ai_personalization, "true");
+  });
+
+  test("shows Send Now only for a scheduled invite, and sends it when clicked", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    await click(
+      "table.user-invite-list tbody tr:nth-child(1) .d-icon-ellipsis-vertical"
+    );
+    assert
+      .dom(".send-now-invite")
+      .doesNotExist("a skipped row has no Send Now action");
+
+    await click(
+      "table.user-invite-list tbody tr:nth-child(3) .d-icon-ellipsis-vertical"
+    );
+    assert.dom(".send-now-invite").exists("the scheduled row offers Send Now");
+
+    await click(".send-now-invite");
+
+    assert.strictEqual(sendNowRequests.length, 1);
+    assert.strictEqual(sendNowRequests[0].invite_id, "3");
+  });
+
+  test("offers the ac.in umbrella domain alongside specific institute domains", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    const domainFilter = selectKit(".invite-domain-filter");
+    await domainFilter.expand();
+
+    assert.true(
+      domainFilter.rowByValue("ac.in").exists(),
+      "ac.in is offered as a domain filter option"
+    );
+
+    await domainFilter.selectRowByValue("ac.in");
+    assert.strictEqual(invitedRequests.at(-1).domain, "ac.in");
+  });
+
+  test("hides the status filter on the redeemed tab", async function (assert) {
+    await visit("/u/eviltrout/invited/redeemed");
+
+    assert.dom(".invite-status-filter").doesNotExist();
+    assert.dom(".invite-domain-filter").exists();
+  });
+});
+
+acceptance(
+  "User invited - allow_any_email (unbound) invite row",
+  function (needs) {
+    needs.user();
+
+    needs.pretender((server, helper) => {
+      server.get("/u/eviltrout/invited.json", () => {
+        return helper.response({
+          // Mirrors Jobs::BulkInvite#send_invite's shape for an
+          // allow_any_email row once sent: email is nil, the real
+          // recipient lives in description, and the serializer now
+          // includes emailed/delivery_status for it too (see
+          // InviteSerializer#has_recipient?).
+          invites: [
+            {
+              id: 99,
+              invite_key: "key99",
+              link: "http://localhost:3000/invites/key99",
+              email: null,
+              description: "asharani@ee.nits.ac.in",
+              domain: null,
+              emailed: true,
+              delivery_status: "sent",
+              can_delete_invite: true,
+              custom_message: null,
+              max_redemptions_allowed: 1,
+              redemption_count: 0,
+              created_at: "2026-09-23T04:47:13.195Z",
+              updated_at: "2026-09-23T04:47:13.195Z",
+              expires_at: "2026-12-22T04:47:00.000Z",
+              expired: false,
+              topics: [],
+              groups: [],
+            },
+          ],
+          can_see_invite_details: true,
+          counts: { pending: 1, expired: 0, redeemed: 0, total: 1 },
+          available_domains: [],
+          available_statuses: STATUSES,
+        });
+      });
+    });
+
+    test("still shows the delivery pill and the preview/resend kebab items", async function (assert) {
+      await visit("/u/eviltrout/invited/pending");
+
+      assert.dom(".delivery-status-pill.--sent").exists();
+
+      await click(
+        "table.user-invite-list tbody tr:nth-child(1) .d-icon-ellipsis-vertical"
+      );
+      assert.dom(".preview-sent-email").exists();
+      assert.dom(".resend-invite").exists();
+    });
+  }
+);
+
+acceptance("User invited - resend failure", function (needs) {
+  needs.user();
+
+  needs.pretender((server, helper) => {
+    server.get("/u/eviltrout/invited.json", () => {
+      return helper.response({
+        invites: [invite(1, "sent@nit.ac.in", "sent")],
+        can_see_invite_details: true,
+        counts: { pending: 1, expired: 0, redeemed: 0, total: 1 },
+        available_domains: ["nit.ac.in"],
+        available_statuses: STATUSES,
+      });
+    });
+
+    // Matches InvitesController#resend_invite's response when
+    // BulkInvitePersonalization::Generator raises GenerationFailed --
+    // Invite#reinvite must not swallow this (see invite.js), or the
+    // modal closes looking successful despite the failure.
+    server.post("/invites/reinvite", () => {
+      return helper.response(422, {
+        errors: [
+          "Couldn't generate a personalized email for this invite right now.",
+        ],
+      });
+    });
+  });
+
+  test("keeps the modal open, rather than closing it, when the resend fails", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    await click(
+      "table.user-invite-list tbody tr:nth-child(1) .d-icon-ellipsis-vertical"
+    );
+    await click(".resend-invite");
+    assert.dom(".resend-invite-modal").exists();
+
+    await click(".resend-invite-modal .resend-invite-confirm");
+
+    assert.dom(".resend-invite-modal").exists("the modal is still open");
+  });
+});
+
+acceptance("User invited - redeemed tab emails", function (needs) {
+  needs.user();
+
+  needs.pretender((server, helper) => {
+    server.get("/u/eviltrout/invited.json", () => {
+      return helper.response({
+        invites: [
+          {
+            id: 1,
+            redeemed_at: "2026-09-23T04:47:13.195Z",
+            email: "originally-invited@example.com",
+            invite_source: "email",
+            user: {
+              id: 99,
+              username: "redeemer",
+              name: "Redeemer",
+              avatar_template: "/images/avatar.png",
+              email: "actually-redeemed-with@example.com",
+              topics_entered: 1,
+              posts_read_count: 2,
+              last_seen_at: "2026-09-23T04:47:13.195Z",
+            },
+          },
+        ],
+        can_see_invite_details: true,
+        counts: { pending: 0, expired: 0, redeemed: 1, total: 0 },
+        available_domains: [],
+        available_statuses: STATUSES,
+      });
+    });
+  });
+
+  test("shows the invited and account email columns, and no longer shows Read Time/Days Visited", async function (assert) {
+    await visit("/u/eviltrout/invited/redeemed");
+
+    assert
+      .dom("table.user-invite-list tbody tr:nth-child(1)")
+      .includesText("originally-invited@example.com")
+      .includesText("actually-redeemed-with@example.com");
+    assert.dom("table.user-invite-list thead").doesNotIncludeText("Read Time");
+    assert
+      .dom("table.user-invite-list thead")
+      .doesNotIncludeText("Days Visited");
+  });
+});

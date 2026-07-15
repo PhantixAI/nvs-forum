@@ -141,6 +141,15 @@ Discourse::Application.routes.draw do
     delete "admin/impersonate" => "admin/impersonate#destroy",
            :constraints => ImpersonatorConstraint.new
 
+    # Reachable by both staff and Batch Moderators (a non-staff role) --
+    # pulled out of the StaffConstraint-gated `namespace :admin` block below
+    # so a Batch Moderator can view their own cohort here. Every other
+    # /admin route stays staff-only, unchanged.
+    get "/admin/users/list" => "admin/users#index",
+        :constraints => StaffOrBatchModeratorConstraint.new
+    get "/admin/users/list/:query" => "admin/users#index",
+        :constraints => StaffOrBatchModeratorConstraint.new
+
     namespace :admin, constraints: StaffConstraint.new do
       get "" => "admin#index"
       get "search" => "search#index"
@@ -173,8 +182,6 @@ Discourse::Application.routes.draw do
 
       resources :users, id: RouteFormat.username, only: %i[index destroy] do
         collection do
-          get "list" => "users#index"
-          get "list/:query" => "users#index"
           get "ip-info" => "users#ip_info"
           delete "delete-others-with-same-ip" => "users#delete_other_accounts_with_same_ip"
           get "total-others-with-same-ip" => "users#total_other_accounts_with_same_ip"
@@ -191,6 +198,8 @@ Discourse::Application.routes.draw do
         put "grant_admin", constraints: AdminConstraint.new
         put "revoke_moderation", constraints: AdminConstraint.new
         put "grant_moderation", constraints: AdminConstraint.new
+        put "revoke_batch_moderator", constraints: AdminConstraint.new
+        put "grant_batch_moderator", constraints: AdminConstraint.new
         put "approve"
         post "log_out", constraints: AdminConstraint.new
         put "activate"
@@ -256,6 +265,7 @@ Discourse::Application.routes.draw do
           get "rejected"
           get "incoming/:id" => "email_logs#incoming"
           get "incoming_from_bounced/:id" => "email_logs#incoming_from_bounced"
+          get "invite_sent/:invite_id" => "email_logs#invite_sent"
         end
       end
 
@@ -658,6 +668,7 @@ Discourse::Application.routes.draw do
     post "session/login-code" => "session#create_login_code"
     post "session/login-code/verify" => "session#verify_login_code"
     post "session/password-reset-code/verify" => "session#redeem_password_reset_code"
+    put "session/login-code/finalize" => "session#finalize_login_code_signup"
     get "session/otp/:token" => "session#one_time_password", :constraints => { token: /[0-9a-f]+/ }
     post "session/otp/:token" => "session#one_time_password", :constraints => { token: /[0-9a-f]+/ }
     get "session/2fa" => "session#second_factor_auth_show"
@@ -702,6 +713,10 @@ Discourse::Application.routes.draw do
     put "edit-directory-columns" => "edit_directory_columns#update", :format => :json
     get "access-control/grantees/search" => "access_control_lists#search_grantees"
     post "access-control/evaluate" => "access_control_lists#evaluate"
+
+    put "batch-moderation/users/:id/suspend" => "batch_moderation#suspend"
+    put "batch-moderation/users/:id/silence" => "batch_moderation#silence"
+    put "batch-moderation/users/:id/report" => "batch_moderation#report"
 
     %w[users u].each_with_index do |root_path, index|
       get "#{root_path}" => "users#index", :constraints => { format: "html" }
@@ -1745,8 +1760,10 @@ Discourse::Application.routes.draw do
 
     post "invites/upload_csv" => "invites#upload_csv"
     post "invites/destroy-all-expired" => "invites#destroy_all_expired"
+    post "invites/destroy-all" => "invites#destroy_all_invites"
     post "invites/reinvite" => "invites#resend_invite"
     post "invites/reinvite-all" => "invites#resend_all_invites"
+    post "invites/send-now" => "invites#send_now_invite"
     delete "invites" => "invites#destroy"
     put "invites/show/:id" => "invites#perform_accept_invitation", :as => "perform_accept_invite"
     get "invites/retrieve" => "invites#retrieve"

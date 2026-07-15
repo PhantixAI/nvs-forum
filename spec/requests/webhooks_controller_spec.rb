@@ -876,7 +876,7 @@ RSpec.describe WebhooksController do
 
     it "hard bounces using the original message ID" do
       user = Fabricate(:user, email: email)
-      email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: email)
+      email_log = Fabricate(:email_log, user: user, ses_message_id: message_id, to_address: email)
 
       post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
       expect(response.status).to eq(200)
@@ -890,7 +890,7 @@ RSpec.describe WebhooksController do
     it "does not bounce an email log with a different original message ID" do
       user = Fabricate(:user, email: email)
       email_log =
-        Fabricate(:email_log, user: user, message_id: "other-message-id", to_address: email)
+        Fabricate(:email_log, user: user, ses_message_id: "other-ses-message-id", to_address: email)
 
       post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
       expect(response.status).to eq(200)
@@ -977,7 +977,7 @@ RSpec.describe WebhooksController do
 
     it "does not increase the bounce score for duplicate notifications" do
       user = Fabricate(:user, email: email)
-      email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: email)
+      email_log = Fabricate(:email_log, user: user, ses_message_id: message_id, to_address: email)
 
       post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
       expect(response.status).to eq(200)
@@ -994,7 +994,7 @@ RSpec.describe WebhooksController do
 
       it "stores the normalized bounce error code" do
         user = Fabricate(:user, email: email)
-        email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: email)
+        email_log = Fabricate(:email_log, user: user, ses_message_id: message_id, to_address: email)
 
         post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
         expect(response.status).to eq(200)
@@ -1008,7 +1008,7 @@ RSpec.describe WebhooksController do
 
       it "rejects notifications with 406 and does not process the bounce" do
         user = Fabricate(:user, email: email)
-        email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: email)
+        email_log = Fabricate(:email_log, user: user, ses_message_id: message_id, to_address: email)
 
         post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
         expect(response.status).to eq(406)
@@ -1027,7 +1027,7 @@ RSpec.describe WebhooksController do
 
       it "rejects with 406 and does not process the bounce" do
         user = Fabricate(:user, email: email)
-        email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: email)
+        email_log = Fabricate(:email_log, user: user, ses_message_id: message_id, to_address: email)
 
         post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload_with_other_topic }
         expect(response.status).to eq(406)
@@ -1042,7 +1042,7 @@ RSpec.describe WebhooksController do
 
       it "rejects with 406" do
         user = Fabricate(:user, email: email)
-        email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: email)
+        email_log = Fabricate(:email_log, user: user, ses_message_id: message_id, to_address: email)
 
         post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
         expect(response.status).to eq(406)

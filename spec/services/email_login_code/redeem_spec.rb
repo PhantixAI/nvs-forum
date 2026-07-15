@@ -182,7 +182,7 @@ RSpec.describe EmailLoginCode::Redeem do
     end
 
     context "when a full name is required at signup" do
-      before { SiteSetting.full_name_requirement = "required_at_signup" }
+      before { stub_full_name_requirement("required_at_signup") }
 
       it { is_expected.to fail_a_policy(:required_full_name_provided) }
 

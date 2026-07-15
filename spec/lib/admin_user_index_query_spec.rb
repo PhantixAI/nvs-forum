@@ -405,4 +405,90 @@ RSpec.describe AdminUserIndexQuery do
       end
     end
   end
+
+  describe "cohort filtering" do
+    fab!(:college_field) { Fabricate(:user_field, name: "College", requirement: "optional") }
+    fab!(:type_field) { Fabricate(:user_field, name: "I am", requirement: "optional") }
+    fab!(:admin)
+
+    def set_college(user, college)
+      user.custom_fields["#{User::USER_FIELD_PREFIX}#{college_field.id}"] = college
+      user.save_custom_fields(true, run_validations: false)
+    end
+
+    def set_member_type(user, value)
+      user.custom_fields["#{User::USER_FIELD_PREFIX}#{type_field.id}"] = value
+      user.save_custom_fields(true, run_validations: false)
+    end
+
+    it "filters by the given cohort field value" do
+      matching = Fabricate(:user)
+      set_college(matching, "NIT Trichy")
+      other = Fabricate(:user)
+      set_college(other, "NIT Warangal")
+
+      query =
+        AdminUserIndexQuery.new(
+          { filters: { college_field.id => "NIT Trichy" }.to_json },
+          guardian: admin.guardian,
+        )
+
+      ids = real_users(query).pluck(:id)
+      expect(ids).to include(matching.id)
+      expect(ids).not_to include(other.id)
+    end
+
+    it "treats a missing guardian as a non-staff viewer instead of raising" do
+      query = AdminUserIndexQuery.new({ filters: { college_field.id => "NIT Trichy" }.to_json })
+
+      expect { query.find_users_query.to_sql }.not_to raise_error
+    end
+
+    it "is a no-op when filters is blank" do
+      query = AdminUserIndexQuery.new({ filters: nil }, guardian: admin.guardian)
+      expect { query.find_users_query.to_sql }.not_to raise_error
+    end
+
+    it "restricts staff_only to the cohort staff member-type, not admin/moderator" do
+      staff_member = Fabricate(:user)
+      set_member_type(staff_member, "Dean/Professor/Staff")
+      regular = Fabricate(:user)
+
+      query = AdminUserIndexQuery.new({ staff_only: "true" }, guardian: admin.guardian)
+
+      ids = real_users(query).pluck(:id)
+      expect(ids).to include(staff_member.id)
+      expect(ids).not_to include(regular.id)
+      expect(ids).not_to include(admin.id)
+    end
+  end
+
+  describe "query classification" do
+    fab!(:type_field) { Fabricate(:user_field, name: "I am", requirement: "optional") }
+    fab!(:admin)
+
+    def set_member_type(user, value)
+      user.custom_fields["#{User::USER_FIELD_PREFIX}#{type_field.id}"] = value
+      user.save_custom_fields(true, run_validations: false)
+    end
+
+    it "'staff' query classifies by admin/moderator, not the cohort staff member-type" do
+      # This is the pre-existing, unmodified admin nav tab's meaning of
+      # "Staff" (see the frontend's `query: "staff"` route param) -- the
+      # cohort-based classification asserted here at one point collided
+      # with it. The cohort classification has its own, separate
+      # `staff_only` param/CohortFilter.institute_staff_only (see
+      # AdminUserIndexQuery#filter_staff_only), which is not this.
+      cohort_staff_member = Fabricate(:user)
+      set_member_type(cohort_staff_member, "Dean/Professor/Staff")
+      moderator = Fabricate(:user, moderator: true)
+
+      query = AdminUserIndexQuery.new({ query: "staff" }, guardian: admin.guardian)
+
+      ids = real_users(query).pluck(:id)
+      expect(ids).to include(moderator.id)
+      expect(ids).to include(admin.id)
+      expect(ids).not_to include(cohort_staff_member.id)
+    end
+  end
 end

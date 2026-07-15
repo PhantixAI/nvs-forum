@@ -14,6 +14,13 @@ RSpec.describe Invite do
     it { is_expected.to rate_limit }
     it { is_expected.to validate_length_of(:custom_message).is_at_most(1000) }
     it { is_expected.to validate_length_of(:description).is_at_most(100) }
+    it { is_expected.to validate_length_of(:recipient_name).is_at_most(100) }
+
+    it do
+      is_expected.to validate_length_of(:recipient_keywords).is_at_most(
+        Invite::RECIPIENT_KEYWORDS_MAX_LENGTH,
+      )
+    end
 
     it "allows invites with valid emails" do
       invite = Fabricate.build(:invite, email: "test@example.com", invited_by: user)
@@ -40,6 +47,45 @@ RSpec.describe Invite do
     it "does not allow an invite with blocked email" do
       invite = Invite.create(email: "test@mailinator.com", invited_by: user)
       expect(invite).not_to be_valid
+    end
+
+    context "with a restricted allowed_email_domains setting" do
+      fab!(:admin)
+
+      # Create the invite before restricting allowed_email_domains -- otherwise the
+      # fabricator's own invited_by user creation gets blocked by the same validator this
+      # context is testing (see the identical gotcha noted in invite_redeemer_spec.rb).
+      it "still blocks a regular user's invite to a non-allowlisted domain" do
+        invite = Fabricate.build(:invite, email: "someone@not-allowed.example", invited_by: user)
+        SiteSetting.allowed_email_domains = "allowed.example"
+
+        expect(invite).not_to be_valid
+      end
+
+      it "allows an admin's invite to a non-allowlisted domain (this is the production bug: a bulk-invite CSV row with a personal gmail/yahoo address, sent by an admin, used to fail here)" do
+        invite = Fabricate.build(:invite, email: "someone@not-allowed.example", invited_by: admin)
+        SiteSetting.allowed_email_domains = "allowed.example"
+
+        expect(invite).to be_valid
+      end
+
+      it "still enforces email format for an admin's invite -- only the domain check is skipped" do
+        invite = Fabricate.build(:invite, email: "asjdso", invited_by: admin)
+        SiteSetting.allowed_email_domains = "allowed.example"
+
+        expect(invite).not_to be_valid
+      end
+
+      it "still enforces the blocklist (ScreenedEmail) for an admin's invite -- only the domain check is skipped" do
+        ScreenedEmail.create!(
+          email: "blocked@not-allowed.example",
+          action_type: ScreenedEmail.actions[:block],
+        )
+        invite = Fabricate.build(:invite, email: "blocked@not-allowed.example", invited_by: admin)
+        SiteSetting.allowed_email_domains = "allowed.example"
+
+        expect(invite).not_to be_valid
+      end
     end
 
     it "does not allow an invalid email address" do
@@ -98,6 +144,35 @@ RSpec.describe Invite do
       invite.update!(email: nil)
       expect(invite.email_token).to eq(nil)
     end
+
+    it "derives email_domain from description when email is blank and description looks like an email" do
+      invite =
+        Fabricate(:invite, email: nil, description: "student@nit.ac.in", max_redemptions_allowed: 5)
+      expect(invite.email_domain).to eq("nit.ac.in")
+    end
+
+    it "does not derive email_domain from a description that isn't email-shaped" do
+      invite =
+        Fabricate(
+          :invite,
+          email: nil,
+          description: "shared at the career fair",
+          max_redemptions_allowed: 5,
+        )
+      expect(invite.email_domain).to eq(nil)
+    end
+
+    it "prefers email over description when both are present" do
+      invite = Fabricate(:invite, email: "bound@example.com", description: "other@nit.ac.in")
+      expect(invite.email_domain).to eq("example.com")
+    end
+
+    it "updates email_domain when description changes on an otherwise-unbound invite" do
+      invite =
+        Fabricate(:invite, email: nil, description: "student@nit.ac.in", max_redemptions_allowed: 5)
+      invite.update!(description: "other@mnit.ac.in")
+      expect(invite.email_domain).to eq("mnit.ac.in")
+    end
   end
 
   describe ".generate" do
@@ -148,6 +223,106 @@ RSpec.describe Invite do
         Invite.generate(user, email: "test@example.com").destroy!
         invite = Invite.generate(user, email: "test@example.com")
         expect(invite).to be_present
+      end
+
+      it "persists recipient_name and recipient_keywords when given" do
+        invite =
+          Invite.generate(
+            user,
+            email: "test@example.com",
+            recipient_name: "Priya",
+            recipient_keywords: "robotics club, class of 2022",
+          )
+        expect(invite.recipient_name).to eq("Priya")
+        expect(invite.recipient_keywords).to eq("robotics club, class of 2022")
+      end
+
+      it "leaves recipient_name and recipient_keywords nil when not given" do
+        invite = Invite.generate(user, email: "test@example.com")
+        expect(invite.recipient_name).to eq(nil)
+        expect(invite.recipient_keywords).to eq(nil)
+      end
+
+      it "derives email_domain from email" do
+        invite = Invite.generate(user, email: "test@example.com")
+        expect(invite.email_domain).to eq("example.com")
+      end
+
+      it "updates email_domain when email changes" do
+        invite = Invite.generate(user, email: "test@example.com")
+        invite.update!(email: "other@nit.ac.in")
+        expect(invite.email_domain).to eq("nit.ac.in")
+      end
+
+      it "persists skip_personalization when given, defaulting to false" do
+        invite = Invite.generate(user, email: "test@example.com", skip_personalization: true)
+        expect(invite.skip_personalization).to eq(true)
+
+        invite2 = Invite.generate(user, email: "test2@example.com")
+        expect(invite2.skip_personalization).to eq(false)
+      end
+
+      it "updates the personalization context of a reused invite from the new row" do
+        Invite.generate(
+          user,
+          email: "test@example.com",
+          recipient_name: "Old Name",
+          recipient_keywords: "old",
+          skip_personalization: false,
+        )
+
+        invite =
+          Invite.generate(
+            user,
+            email: "test@example.com",
+            recipient_name: "Priya",
+            recipient_keywords: "robotics",
+            skip_personalization: true,
+          )
+
+        expect(Invite.where(email: "test@example.com").count).to eq(1)
+        expect(invite.recipient_name).to eq("Priya")
+        expect(invite.recipient_keywords).to eq("robotics")
+        expect(invite.skip_personalization).to eq(true)
+      end
+
+      it "leaves the personalization context of a reused invite alone when not passed" do
+        Invite.generate(
+          user,
+          email: "test@example.com",
+          recipient_name: "Priya",
+          skip_personalization: true,
+        )
+
+        invite = Invite.generate(user, email: "test@example.com")
+
+        expect(invite.recipient_name).to eq("Priya")
+        expect(invite.skip_personalization).to eq(true)
+      end
+
+      it "persists allow_any_email when given, defaulting to false" do
+        invite = Invite.generate(user, email: "test@example.com", allow_any_email: true)
+        expect(invite.allow_any_email).to eq(true)
+
+        invite2 = Invite.generate(user, email: "test2@example.com")
+        expect(invite2.allow_any_email).to eq(false)
+      end
+
+      it "persists schedule_send when given, defaulting to true" do
+        invite = Invite.generate(user, email: "test@example.com", schedule_send: false)
+        expect(invite.schedule_send).to eq(false)
+
+        invite2 = Invite.generate(user, email: "test2@example.com")
+        expect(invite2.schedule_send).to eq(true)
+      end
+
+      it "updates schedule_send on a reused invite from the new row" do
+        Invite.generate(user, email: "test@example.com", schedule_send: true)
+
+        invite = Invite.generate(user, email: "test@example.com", schedule_send: false)
+
+        expect(Invite.where(email: "test@example.com").count).to eq(1)
+        expect(invite.schedule_send).to eq(false)
       end
     end
 
@@ -589,6 +764,62 @@ RSpec.describe Invite do
           partially_redeemed_invite,
         )
       end
+
+      it "filters by domain when given" do
+        nit_invite = Fabricate(:invite, invited_by: inviter, email: "student@nit.ac.in")
+
+        expect(Invite.pending(inviter, domain: "nit.ac.in")).to contain_exactly(nit_invite)
+        expect(Invite.pending(inviter, domain: "example.com")).to contain_exactly(pending_invite)
+      end
+
+      it "filters by delivery status when given, combined with domain" do
+        skipped =
+          Fabricate(
+            :invite,
+            invited_by: inviter,
+            email: "skipped@nit.ac.in",
+            emailed_status: Invite.emailed_status_types[:skipped],
+          )
+        Fabricate(
+          :invite,
+          invited_by: inviter,
+          email: "other@example.com",
+          emailed_status: Invite.emailed_status_types[:skipped],
+        )
+
+        expect(Invite.pending(inviter, status: "skipped").count).to eq(2)
+        expect(Invite.pending(inviter, domain: "nit.ac.in", status: "skipped")).to contain_exactly(
+          skipped,
+        )
+      end
+
+      it "treats ac.in as an umbrella domain matching every *.ac.in invite" do
+        nit_invite = Fabricate(:invite, invited_by: inviter, email: "student@nit.ac.in")
+        mnit_invite = Fabricate(:invite, invited_by: inviter, email: "student@mnit.ac.in")
+        bare_ac_in_invite = Fabricate(:invite, invited_by: inviter, email: "student@ac.in")
+
+        expect(Invite.pending(inviter, domain: "ac.in")).to contain_exactly(
+          nit_invite,
+          mnit_invite,
+          bare_ac_in_invite,
+        )
+        expect(Invite.pending(inviter, domain: "nit.ac.in")).to contain_exactly(nit_invite)
+      end
+
+      it "combines the ac.in umbrella domain with a status filter" do
+        skipped_at_nit =
+          Fabricate(
+            :invite,
+            invited_by: inviter,
+            email: "skipped@nit.ac.in",
+            emailed_status: Invite.emailed_status_types[:skipped],
+          )
+        Fabricate(:invite, invited_by: inviter, email: "sent@mnit.ac.in")
+
+        expect(Invite.pending(inviter, domain: "ac.in", status: "skipped")).to contain_exactly(
+          skipped_at_nit,
+        )
+      end
     end
 
     describe "#expired" do
@@ -597,6 +828,18 @@ RSpec.describe Invite do
           expired_invite,
           partially_redeemed_and_expired_invite,
         )
+      end
+
+      it "filters by domain when given" do
+        expect(Invite.expired(inviter, domain: "example.com")).to contain_exactly(expired_invite)
+        expect(Invite.expired(inviter, domain: "nit.ac.in")).to be_empty
+      end
+
+      it "treats ac.in as an umbrella domain matching every *.ac.in invite" do
+        nit_invite =
+          Fabricate(:invite, invited_by: inviter, email: "student@nit.ac.in", expires_at: 1.day.ago)
+
+        expect(Invite.expired(inviter, domain: "ac.in")).to contain_exactly(nit_invite)
       end
     end
 
@@ -607,6 +850,22 @@ RSpec.describe Invite do
           partially_redeemed_invite_user,
           redeemed_and_expired_invite_user,
           partially_redeemed_and_expired_invite_user,
+        )
+      end
+
+      it "filters by domain when given" do
+        expect(Invite.redeemed_users(inviter, domain: "example.com").map(&:user)).to include(
+          redeemed_invite_user,
+        )
+        expect(Invite.redeemed_users(inviter, domain: "nit.ac.in")).to be_empty
+      end
+
+      it "treats ac.in as an umbrella domain matching every *.ac.in invite" do
+        nit_invite = Fabricate(:invite, invited_by: inviter, email: "student@nit.ac.in")
+        nit_invite_user = nit_invite.redeem
+
+        expect(Invite.redeemed_users(inviter, domain: "ac.in").map(&:user)).to contain_exactly(
+          nit_invite_user,
         )
       end
 
@@ -625,6 +884,49 @@ RSpec.describe Invite do
           partially_redeemed_and_expired_invite_user,
         )
       end
+    end
+  end
+
+  describe ".search_filter" do
+    fab!(:inviter, :user)
+    fab!(:invite) { Fabricate(:invite, invited_by: inviter, email: "billybob@example.com") }
+    fab!(:other_invite) { Fabricate(:invite, invited_by: inviter, email: "jimtom@example.com") }
+
+    # Invite.pending (rather than a bare Invite.where) is the base relation
+    # here because search_filter's SQL references users.username, which
+    # requires the LEFT JOIN that pending/expired/redeemed_users already
+    # provide at every real call site (UsersController#invited,
+    # InvitesController#resend_all_invites).
+    it "returns the relation unchanged when search is blank" do
+      expect(
+        Invite.search_filter(Invite.pending(inviter), nil, show_emails: true),
+      ).to contain_exactly(invite, other_invite)
+    end
+
+    it "matches on email when show_emails is true" do
+      expect(
+        Invite.search_filter(Invite.pending(inviter), "billybob", show_emails: true),
+      ).to contain_exactly(invite)
+    end
+
+    it "only matches on username, not email, when show_emails is false" do
+      expect(
+        Invite.search_filter(Invite.pending(inviter), "billybob", show_emails: false),
+      ).to be_empty
+    end
+
+    it "matches allow_any_email invites via description" do
+      unbound =
+        Invite.generate(
+          inviter,
+          email: nil,
+          description: "priya@nit.ac.in",
+          max_redemptions_allowed: 1,
+        )
+
+      expect(
+        Invite.search_filter(Invite.pending(inviter), "priya", show_emails: true),
+      ).to contain_exactly(unbound)
     end
   end
 
@@ -661,6 +963,233 @@ RSpec.describe Invite do
       invite.resend_invite
       expect(invite).not_to be_expired
       expect(invite.invalidated_at).to be_nil
+    end
+
+    it "sends immediately, unlike requeue_for_paced_resend" do
+      invite.resend_invite
+      expect(Jobs::InviteEmail.jobs.size).to eq(1)
+    end
+  end
+
+  describe "#requeue_for_paced_resend" do
+    fab!(:invite)
+
+    it "resets expiry like resend_invite, but sets emailed_status to bulk_pending instead of sending immediately" do
+      invite.update!(invalidated_at: 10.days.ago, expires_at: 10.days.ago)
+      expect(invite).to be_expired
+
+      invite.requeue_for_paced_resend
+
+      expect(invite).not_to be_expired
+      expect(invite.invalidated_at).to be_nil
+      expect(invite.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+      expect(Jobs::InviteEmail.jobs).to be_empty
+    end
+  end
+
+  describe ".claim_for_immediate_send" do
+    fab!(:invite)
+
+    it "claims a bulk_pending invite, flipping it to sending" do
+      invite.update_column(:emailed_status, Invite.emailed_status_types[:bulk_pending])
+
+      claimed = Invite.claim_for_immediate_send(invite.id)
+
+      expect(claimed.id).to eq(invite.id)
+      expect(claimed.emailed_status).to eq(Invite.emailed_status_types[:sending])
+    end
+
+    it "claims a plain pending invite the same way" do
+      invite.update_column(:emailed_status, Invite.emailed_status_types[:pending])
+
+      claimed = Invite.claim_for_immediate_send(invite.id)
+
+      expect(claimed.emailed_status).to eq(Invite.emailed_status_types[:sending])
+    end
+
+    it "returns nil without changing anything for a non-claimable status" do
+      %i[sending sent skipped not_required].each do |status|
+        invite.update_column(:emailed_status, Invite.emailed_status_types[status])
+
+        expect(Invite.claim_for_immediate_send(invite.id)).to be_nil
+        expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[status])
+      end
+    end
+
+    it "returns nil for an id that doesn't exist" do
+      expect(Invite.claim_for_immediate_send(-1)).to be_nil
+    end
+  end
+
+  describe "#latest_sent_email_log" do
+    fab!(:invite)
+
+    it "returns nil when the invite has never been emailed" do
+      expect(invite.latest_sent_email_log).to be_nil
+    end
+
+    it "returns the most recently created invite-type email log for this invite" do
+      older =
+        Fabricate(:email_log, invite_id: invite.id, email_type: "invite", created_at: 1.day.ago)
+      newer = Fabricate(:email_log, invite_id: invite.id, email_type: "invite")
+
+      expect(invite.latest_sent_email_log).to eq(newer)
+      expect(invite.latest_sent_email_log).not_to eq(older)
+    end
+
+    it "ignores email logs for a different invite or a different email type" do
+      Fabricate(:email_log, invite_id: Fabricate(:invite).id, email_type: "invite")
+      Fabricate(:email_log, invite_id: invite.id, email_type: "signup")
+
+      expect(invite.latest_sent_email_log).to be_nil
+    end
+  end
+
+  describe "#delivery_status" do
+    fab!(:invite)
+
+    it "returns nil when no email is required" do
+      invite.update!(emailed_status: Invite.emailed_status_types[:not_required])
+      expect(invite.delivery_status).to be_nil
+    end
+
+    it "returns scheduled for pending and bulk_pending" do
+      invite.update!(emailed_status: Invite.emailed_status_types[:pending])
+      expect(invite.delivery_status).to eq("scheduled")
+
+      invite.update!(emailed_status: Invite.emailed_status_types[:bulk_pending])
+      expect(invite.delivery_status).to eq("scheduled")
+    end
+
+    it "returns pending while actively sending" do
+      invite.update!(emailed_status: Invite.emailed_status_types[:sending])
+      expect(invite.delivery_status).to eq("pending")
+    end
+
+    it "returns skipped, ignoring any earlier EmailLog, when a send was held back" do
+      Fabricate(:email_log, invite_id: invite.id, email_type: "invite", delivered_at: Time.current)
+      invite.update!(emailed_status: Invite.emailed_status_types[:skipped])
+      expect(invite.delivery_status).to eq("skipped")
+    end
+
+    context "when emailed_status is sent" do
+      before { invite.update!(emailed_status: Invite.emailed_status_types[:sent]) }
+
+      it "returns sent when there is no EmailLog yet" do
+        expect(invite.delivery_status).to eq("sent")
+      end
+
+      it "returns sent when the EmailLog has no bounce/delivery/complaint data" do
+        Fabricate(:email_log, invite_id: invite.id, email_type: "invite")
+        expect(invite.delivery_status).to eq("sent")
+      end
+
+      it "returns delivered when the EmailLog has delivered_at set" do
+        Fabricate(
+          :email_log,
+          invite_id: invite.id,
+          email_type: "invite",
+          delivered_at: Time.current,
+        )
+        expect(invite.delivery_status).to eq("delivered")
+      end
+
+      it "returns bounced when the EmailLog is bounced" do
+        Fabricate(:email_log, invite_id: invite.id, email_type: "invite", bounced: true)
+        expect(invite.delivery_status).to eq("bounced")
+      end
+
+      it "returns complained when the EmailLog has complained_at set" do
+        Fabricate(
+          :email_log,
+          invite_id: invite.id,
+          email_type: "invite",
+          complained_at: Time.current,
+        )
+        expect(invite.delivery_status).to eq("complained")
+      end
+
+      it "prefers complained over bounced when both are set" do
+        Fabricate(
+          :email_log,
+          invite_id: invite.id,
+          email_type: "invite",
+          bounced: true,
+          complained_at: Time.current,
+        )
+        expect(invite.delivery_status).to eq("complained")
+      end
+
+      it "accepts a preloaded EmailLog instead of querying for it" do
+        preloaded = Fabricate(:email_log, invite_id: invite.id, email_type: "invite", bounced: true)
+        expect(invite.delivery_status(preloaded)).to eq("bounced")
+        # explicitly passing nil means "no email log", even if one exists
+        expect(invite.delivery_status(nil)).to eq("sent")
+      end
+    end
+  end
+
+  describe ".with_delivery_status" do
+    fab!(:inviter, :user)
+
+    def invite_with(status, *logs)
+      invite =
+        Fabricate(
+          :invite,
+          invited_by: inviter,
+          emailed_status: Invite.emailed_status_types.fetch(status),
+        )
+      logs.each_with_index do |attrs, index|
+        Fabricate(
+          :email_log,
+          {
+            invite_id: invite.id,
+            email_type: "invite",
+            created_at: (logs.size - index).hours.ago,
+          }.merge(attrs),
+        )
+      end
+      invite
+    end
+
+    fab!(:invites) do
+      [
+        invite_with(:not_required),
+        invite_with(:pending),
+        invite_with(:bulk_pending),
+        invite_with(:sending),
+        invite_with(:skipped, { delivered_at: Time.current }),
+        invite_with(:sent),
+        invite_with(:sent, {}),
+        invite_with(:sent, { delivered_at: Time.current }),
+        invite_with(:sent, { bounced: true }),
+        invite_with(:sent, { complained_at: Time.current }),
+        invite_with(:sent, { bounced: true, complained_at: Time.current }),
+        # resent after a bounce: only the latest log counts
+        invite_with(:sent, { bounced: true }, { delivered_at: Time.current }),
+        # a non-invite email log must not affect the outcome
+        invite_with(:sent, { email_type: "signup", bounced: true }),
+      ]
+    end
+
+    it "matches #delivery_status for every status" do
+      Invite::DELIVERY_STATUSES.each do |status|
+        expected = invites.select { |invite| invite.reload.delivery_status == status }
+
+        expect(Invite.with_delivery_status(Invite.all, status)).to contain_exactly(*expected),
+        "mismatch for #{status}"
+      end
+    end
+
+    it "covers every invite that has a delivery status" do
+      matched =
+        Invite::DELIVERY_STATUSES.sum { |s| Invite.with_delivery_status(Invite.all, s).count }
+
+      expect(matched).to eq(invites.count { |invite| invite.reload.delivery_status.present? })
+    end
+
+    it "returns nothing for an unknown status" do
+      expect(Invite.with_delivery_status(Invite.all, "nope")).to be_empty
     end
   end
 

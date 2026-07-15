@@ -39,6 +39,32 @@ RSpec.describe EmailValidator do
     end
   end
 
+  describe "skip_email_domain_validation" do
+    it "bypasses only the domain check, not format or blocklist" do
+      SiteSetting.allowed_email_domains = "allowed.example"
+      ScreenedEmail.create!(
+        email: "blocked@allowed.example",
+        action_type: ScreenedEmail.actions[:block],
+      )
+
+      allowed_user = Fabricate.build(:user, email: "sam@not-allowed.example")
+      allowed_user.skip_email_domain_validation = true
+      validator = EmailValidator.new(attributes: :email)
+      validator.validate_each(allowed_user, :email, allowed_user.email)
+      expect(allowed_user.errors[:email]).to be_blank
+
+      malformed_user = Fabricate.build(:user, email: "not-an-email")
+      malformed_user.skip_email_domain_validation = true
+      validator.validate_each(malformed_user, :email, malformed_user.email)
+      expect(malformed_user.errors[:email]).to be_present
+
+      blocked_user = Fabricate.build(:user, email: "blocked@allowed.example")
+      blocked_user.skip_email_domain_validation = true
+      validator.validate_each(blocked_user, :email, blocked_user.email)
+      expect(blocked_user.errors[:email]).to be_present
+    end
+  end
+
   describe "auto approve email domains" do
     it "works as expected" do
       SiteSetting.auto_approve_email_domains = "example.com"

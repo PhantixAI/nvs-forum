@@ -64,4 +64,50 @@ RSpec.describe Jobs::UpdateUsername do
     expect(category.description).to include(new_username)
     expect(category.description).not_to include(old_username)
   end
+
+  it "updates the usernames stored in batch moderation notifications" do
+    recipient = Fabricate(:admin)
+    old_username = user.username
+    other_notification = Fabricate(:notification, user: recipient, notification_type: 1)
+    other_data = other_notification.data
+
+    status_change =
+      Notification.create!(
+        user: recipient,
+        notification_type: Notification.types[:batch_moderation_status_change],
+        data: {
+          granted: true,
+          actor_username: old_username,
+          user_username: old_username,
+          user_id: user.id,
+        }.to_json,
+      )
+    action =
+      Notification.create!(
+        user: recipient,
+        notification_type: Notification.types[:batch_moderation_action],
+        data: {
+          action: "suspend",
+          actor_username: "someone",
+          target_username: old_username,
+        }.to_json,
+      )
+
+    described_class.new.execute(
+      user_id: user.id,
+      old_username:,
+      new_username: "renamed_user",
+      avatar_template: user.avatar_template,
+    )
+
+    expect(Notification.find(status_change.id).data_hash).to include(
+      actor_username: "renamed_user",
+      user_username: "renamed_user",
+    )
+    expect(Notification.find(action.id).data_hash).to include(
+      actor_username: "someone",
+      target_username: "renamed_user",
+    )
+    expect(other_notification.reload.data).to eq(other_data)
+  end
 end

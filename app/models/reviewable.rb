@@ -86,7 +86,14 @@ class Reviewable < ActiveRecord::Base
   end
 
   def self.types
-    [ReviewableFlaggedPost, ReviewableQueuedPost, ReviewableUser, ReviewablePost]
+    [
+      ReviewableFlaggedPost,
+      ReviewableQueuedPost,
+      ReviewableUser,
+      ReviewablePost,
+      ReviewableBatchModerationReport,
+      ReviewableBulkInvite,
+    ]
   end
 
   def self.scrubbable_types

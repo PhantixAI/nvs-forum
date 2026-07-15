@@ -26,6 +26,10 @@ export default class AdminUsersListShowRoute extends DiscourseRoute {
           ? accountType
           : USER_ACCOUNT_TYPES.HUMAN,
       activation: query === "new" ? queryParams.activation : null,
+      filters: queryParams.filters ?? null,
+      staffOnly: queryParams.staff_only === "true",
+      moderatorOnly: queryParams.moderator_only === "true",
+      batchModeratorOnly: queryParams.batch_moderator_only === "true",
       bulkSelectedUsersMap: {},
       displayBulkActions: false,
     });

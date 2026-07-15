@@ -3,6 +3,7 @@
 // Common styles for "user-info" component
 .user-info {
   display: flex;
+  align-items: center;
   gap: 1em;
   margin-bottom: 0.75rem;
 
@@ -20,6 +21,7 @@
 
     .name-line {
       display: flex;
+      align-items: center;
       flex-wrap: wrap;
       gap: 0 0.5em;
 

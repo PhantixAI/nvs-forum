@@ -17,10 +17,15 @@ module DiscourseEvents
                  :duration,
                  :occurrences,
                  :all_day,
-                 :custom_fields
+                 :custom_fields,
+                 :event_scope
 
       def category_id
         object.post&.topic&.category_id
+      end
+
+      def event_scope
+        DiscourseEvents::CalendarEventScope.scope_for(custom_fields)
       end
 
       def post

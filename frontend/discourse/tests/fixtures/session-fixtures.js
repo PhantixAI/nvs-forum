@@ -24,6 +24,7 @@ const sessionFixtures = {
       trust_level: 4,
       can_edit: true,
       can_invite_to_forum: true,
+      can_bulk_invite_to_forum: true,
       can_ignore_users: true,
       can_mute_users: true,
       can_send_private_messages: true,

@@ -7,7 +7,18 @@ class GroupShowSerializer < BasicGroupSerializer
              :mentionable,
              :messageable,
              :flair_icon,
-             :flair_type
+             :flair_type,
+             :is_batch_moderation_group
+
+  def is_batch_moderation_group
+    BatchModeration::GroupSync.batch_group?(object)
+  end
+
+  # See the comment on `is_group_owner` below -- same reasoning applies here.
+  def can_admin_group
+    return false if is_batch_moderation_group
+    super
+  end
 
   def self.admin_attributes(*attrs)
     attributes(*attrs)
@@ -39,11 +50,15 @@ class GroupShowSerializer < BasicGroupSerializer
                    :allow_unknown_sender_topic_replies,
                    :associated_group_ids
 
+  # Deliberately gated on the *real* ownership flag (is_group_owner_display),
+  # not the batch-moderation-aware is_group_owner -- these are a member's own
+  # notification preferences for the group, unrelated to the group-management
+  # UI that is_group_owner intentionally hides for batch-moderation groups.
   def self.admin_or_owner_attributes(*attrs)
     attributes(*attrs)
     attrs.each do |attr|
       define_method "include_#{attr}?" do
-        scope.is_admin? || (include_is_group_owner? && is_group_owner)
+        scope.is_admin? || (include_is_group_owner? && is_group_owner_display)
       end
     end
   end
@@ -71,7 +86,16 @@ class GroupShowSerializer < BasicGroupSerializer
     authenticated? && fetch_group_user&.owner
   end
 
+  # A batch group's ownership is managed exclusively via the admin-only
+  # grant/revoke Batch Moderator actions, not the stock group-page UI --
+  # forcing this (and `can_admin_group` below) false here, rather than
+  # relying on each frontend consumer to check `is_batch_moderation_group`
+  # itself, is what actually hides the Manage tab, "Add Users" button, and
+  # the member dropdown's owner-toggle for these groups, for admins and
+  # cohort owners alike (`can_edit_group?` alone only blocks the mutation
+  # endpoints server-side; it isn't what the frontend keys its UI off of).
   def is_group_owner
+    return false if is_batch_moderation_group
     true
   end
 
@@ -100,11 +124,11 @@ class GroupShowSerializer < BasicGroupSerializer
   end
 
   def include_flair_icon?
-    flair_icon.present? && (is_group_owner || scope.is_admin?)
+    flair_icon.present? && (is_group_owner_display || scope.is_admin?)
   end
 
   def include_flair_type?
-    flair_type.present? && (is_group_owner || scope.is_admin?)
+    flair_type.present? && (is_group_owner_display || scope.is_admin?)
   end
 
   %i[watching regular tracking watching_first_post muted].each do |level|
@@ -113,7 +137,8 @@ class GroupShowSerializer < BasicGroupSerializer
     end
 
     define_method("include_#{level}_tags?") do
-      SiteSetting.tagging_enabled? && scope.is_admin? || (include_is_group_owner? && is_group_owner)
+      SiteSetting.tagging_enabled? && scope.is_admin? ||
+        (include_is_group_owner? && is_group_owner_display)
     end
 
     define_method("#{level}_tags") { group_tag_notifications[NotificationLevels.all[level]] || [] }

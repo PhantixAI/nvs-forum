@@ -126,11 +126,11 @@ en:
       # Use Moment.js format string: https://momentjs.com/docs/#/displaying/format/
       long_no_year_no_time: "MMM D"
       # Use Moment.js format string: https://momentjs.com/docs/#/displaying/format/
-      full_no_year_no_time: "MMMM Do"
+      full_no_year_no_time: "MMM Do"
       # Use Moment.js format string: https://momentjs.com/docs/#/displaying/format/
       long_with_year: "MMM D, YYYY h:mm a"
       # Use Moment.js format string: https://momentjs.com/docs/#/displaying/format/
-      long_with_year_no_time: "MMM D, YYYY"
+      long_with_year_no_time: "MMM D 'YY"
       # Use Moment.js format string: https://momentjs.com/docs/#/displaying/format/
       full_with_year_no_time: "MMMM Do, YYYY"
       # Use Moment.js format string: https://momentjs.com/docs/#/displaying/format/
@@ -1257,6 +1257,12 @@ en:
         reviewable_post_voting_comment:
           title: "Flagged Comment"
           noun: "comment"
+        reviewable_batch_moderation_report:
+          title: "Batch Moderation Report"
+          noun: "report"
+        reviewable_bulk_invite:
+          title: "Bulk Invite"
+          noun: "bulk invite"
       flagged_as: "Flagged as"
       post_flagged_as: "Post flagged as"
       chat_flagged_as: "Chat flagged as"
@@ -1456,8 +1462,10 @@ en:
         title: "Edit Directory Columns"
         save: "Save"
         reset_to_default: "Reset to default"
-      group:
-        all: "all groups"
+      staff_only: "Staff Only"
+      staff_badge_title: "Staff"
+      cohort_filter:
+        all: "All %{name}"
       sort:
         label: "Sort by %{criteria}"
 
@@ -1656,6 +1664,7 @@ en:
         remove_all_primary_description: "Remove this group as primary"
         status: "Status"
         owner: "Owner"
+        batch_moderator: "Batch Moderator"
         primary: "Primary"
         forbidden: "You're not allowed to view the members."
         no_filter_matches: "No members match that search."
@@ -1791,6 +1800,31 @@ en:
       confirm_delete_other_accounts: "Are you sure you want to delete these accounts?"
       powered_by: "using <a href='https://maxmind.com'>MaxMindDB</a>"
       copied: "copied"
+
+    batch_moderation:
+      suspend: "Suspend"
+      silence: "Silence"
+      report: "Report"
+      suspend_title: "Suspend %{username}"
+      silence_title: "Silence %{username}"
+      report_title: "Report %{username}"
+      reason: "Reason"
+      reason_placeholder: "Why are you taking this action?"
+      until: "Until"
+      submit: "Submit"
+      cancel: "Cancel"
+      reviewable:
+        reported_by: "Reported by"
+        reported_user: "Reported user"
+        all_reports: "All reports"
+      reviewable_bulk_invite:
+        submitted_by: "Submitted by"
+        invite_count:
+          one: "%{count} invite"
+          other: "%{count} invites"
+        download: "Download CSV"
+      badge_title: "Batch Moderator"
+      system_actor: "the system"
 
     user_fields:
       none: "(select an option)"
@@ -2623,6 +2657,14 @@ en:
         topic: "Topic"
         sent: "Created/Last Sent"
         expires_at: "Expires"
+        delivery_status: "Delivery"
+        delivery_status_scheduled: "Scheduled"
+        delivery_status_pending: "Sending"
+        delivery_status_skipped: "Skipped"
+        delivery_status_sent: "Sent"
+        delivery_status_delivered: "Delivered"
+        delivery_status_bounced: "Bounced"
+        delivery_status_complained: "Marked as spam"
         edit: "Edit"
         remove: "Remove"
         copy_link: "Get Link"
@@ -2630,6 +2672,8 @@ en:
         reinvited: "Invite re-sent"
         removed: "Removed"
         search: "type to search invites…"
+        all_domains: "All domains"
+        all_statuses: "All statuses"
         user: "Invited User"
         none:
           title: "No invites to display."
@@ -2650,12 +2694,20 @@ en:
         remove_all: "Remove Expired Invites"
         removed_all: "All Expired Invites removed!"
         remove_all_confirm: "Are you sure you want to remove all expired invites?"
-        reinvite_all: "Resend All Invites"
+        reinvite_all: "Resend Invites"
         reinvite_all_confirm: "Are you sure you want to resend all invites?"
+        reinvite_all_confirm_domain: "Are you sure you want to resend all invites for %{domain}?"
+        reinvite_all_confirm_status: "Are you sure you want to resend all invites with status \"%{status}\"?"
+        reinvite_all_confirm_domain_status: "Are you sure you want to resend all invites for %{domain} with status \"%{status}\"?"
         reinvited_all: "All Invites Sent!"
-        time_read: "Read Time"
-        days_visited: "Days Visited"
-        account_age_days: "Account age in days"
+        delete_all: "Delete Invites"
+        deleted_all: "Matching invites deleted!"
+        delete_all_confirm: "Are you sure you want to permanently delete all invites? This cannot be undone."
+        delete_all_confirm_domain: "Are you sure you want to permanently delete all invites for %{domain}? This cannot be undone."
+        delete_all_confirm_status: "Are you sure you want to permanently delete all invites with status \"%{status}\"? This cannot be undone."
+        delete_all_confirm_domain_status: "Are you sure you want to permanently delete all invites for %{domain} with status \"%{status}\"? This cannot be undone."
+        invited_email: "Invited Email"
+        account_email: "Account Email"
         create: "Invite"
         generate_link: "Create Invite Link"
         link_generated: "Here's your invite link!"
@@ -2668,6 +2720,27 @@ en:
           error: "There was an error generating Invite link"
         cannot_invite_to_forum: "Sorry, you don't have permission to create invites. Please contact an admin to grant you invite permission."
 
+        resend_invite:
+          modal:
+            title: "Resend invite"
+            title_all: "Resend invites"
+            keywords_label: "Keywords (optional)"
+            keywords_placeholder: "Add context to improve the generated email…"
+            ai_personalization_label: "AI Personalization"
+            ai_personalization_yes: "Yes"
+            ai_personalization_no: "No"
+            schedule_send_label: "Schedule Send"
+            schedule_send_yes: "Yes"
+            schedule_send_no: "No"
+            resend: "Resend"
+
+        sent_email:
+          modal:
+            title: "Last Sent Email"
+            subject: "Subject"
+            body: "Body"
+            headers: "Headers"
+
         invite:
           new_title: "Invite members"
           edit_title: "Edit invite"
@@ -2678,6 +2751,9 @@ en:
           copy_link_and_share_it: "Copy the link below and share it to instantly grant access to this site."
           copy_link: "Copy link"
           link_copied: "Link copied!"
+          preview_sent_email: "Preview last sent email"
+          send_now: "Send Now"
+          send_now_success: "Invite sent."
           share_link: "Share link"
           link_validity_MF: |
             Link is valid for up to { user_count, plural,
@@ -2778,9 +2854,20 @@ en:
             <p>Invite a list of users to get your community going quickly. Prepare a <a href="https://en.wikipedia.org/wiki/Comma-separated_values" target="_blank">CSV file</a> containing at least one row per email address of users you want to invite. The following comma separated information can be provided if you want to add people to groups or send them to a specific topic the first time they sign in.</p>
             <pre>john@smith.com,first_group_name;second_group_name,topic_id</pre>
             <p>Every email address in your uploaded CSV file will be sent an invitation, and you will be able to manage it later.</p>
+            <p>Add a header row to include any of these optional columns, in any order:</p>
+            <ul>
+              <li><code>locale</code> – the language the invitation and signup flow are shown in for that row.</li>
+              <li><code>allow_any_email</code> – set to <code>true</code> to let that invite be redeemed with any email address instead of only the one it was sent to.</li>
+              <li><code>schedule_send</code> – set to <code>false</code> to send that row immediately instead of through the paced, one-at-a-time queue. Defaults to <code>true</code> when left blank.</li>
+              <li><code>skip_personalization</code> – set to <code>true</code> to send that row the plain, non-personalized invitation email.</li>
+              <li><code>name</code> and <code>keywords</code> – recipient context (e.g. their role or interests) used to personalize the invitation email, when enabled.</li>
+            </ul>
+            <pre>email,groups,topic_id,locale,allow_any_email,schedule_send,skip_personalization,name,keywords</pre>
+            <pre>john@smith.com,first_group_name;second_group_name,topic_id,en,true,true,false,Jane Doe,machine learning;robotics</pre>
 
           progress: "Uploaded %{progress}%…"
           success: "File uploaded successfully. You will be notified via message when the process is complete."
+          pending_review: "File uploaded successfully. It has been submitted for staff review and won't be processed until approved."
           error: "Sorry, file should be CSV format."
 
       confirm_access:
@@ -4096,7 +4183,23 @@ en:
         confirm_body: "Success! Notifications have been enabled."
         custom: "Notification from %{username} on %{site_title}"
 
+      batch_moderation_action:
+        suspend: "suspended %{username}"
+        silence: "silenced %{username}"
+        report: "reported %{username}"
+
+      batch_moderation_cohort_change:
+        joined: "joined %{group_name}"
+        left: "left %{group_name}"
+
+      batch_moderation_status_change:
+        granted: "granted Batch Moderator to %{username} (%{group_name})"
+        revoked: "revoked Batch Moderator from %{username} (%{group_name})"
+
       titles:
+        batch_moderation_action: "branch coordinator action"
+        batch_moderation_cohort_change: "cohort change"
+        batch_moderation_status_change: "batch moderator status change"
         mentioned: "mentioned"
         replied: "new reply"
         quoted: "quoted"
@@ -6666,7 +6769,7 @@ en:
               title: "List of all users"
             my_posts:
               content: "My posts"
-              content_drafts: "My drafts"
+              content_drafts: "Drafts"
               title: "My recent topic activity"
               title_drafts: "My unposted drafts"
               draft_count:
@@ -6682,7 +6785,7 @@ en:
               content: "Invite"
               title: "Invite new members"
             my_messages:
-              content: "My messages"
+              content: "Messages"
               title: "My personal messages"
         global_section: "Global section, visible to everyone"
       panels:
@@ -10005,6 +10108,9 @@ en:
           human: "Human accounts"
           bot: "Bot accounts"
           all: "All accounts"
+        site_moderator_only: "Site Moderator"
+        batch_moderator_only: "Batch Moderator"
+        batch_moderator_short: "Batch"
         approved: "Approved?"
         titles:
           active: "Active users"
@@ -10130,6 +10236,9 @@ en:
         grant_admin_confirm: "We've sent you an email to verify the new administrator. Please open it and follow the instructions."
         revoke_moderation: "Revoke Moderation"
         grant_moderation: "Grant Moderation"
+        revoke_batch_moderator: "Revoke Batch Moderator"
+        grant_batch_moderator: "Grant Batch Moderator"
+        batch_moderator: "Batch Moderator"
         unsuspend: "Unsuspend"
         suspend: "Suspend"
         show_flags_received: "Show Flags Received"
