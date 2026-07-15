@@ -115,6 +115,59 @@ RSpec.describe Email::MessageBuilder do
     expect(header_args["x-ms-reactions"]).to eq("disallow")
   end
 
+  describe "subject_override" do
+    let(:template_key) { "message_builder_spec_test_template" }
+
+    before do
+      I18n.backend.store_translations(
+        :en,
+        { template_key.to_sym => { subject_template: "Template-derived subject" } },
+      )
+    end
+
+    after { I18n.backend.reload! }
+
+    it "wins over a template-derived subject when both template: and subject_override: are given" do
+      builder =
+        Email::MessageBuilder.new(
+          "to@to.com",
+          template: template_key,
+          subject_override: "Literal override subject",
+          body: "body",
+        )
+
+      expect(builder.subject).to eq("Literal override subject")
+    end
+
+    it "falls through to the template-derived subject when absent" do
+      builder = Email::MessageBuilder.new("to@to.com", template: template_key, body: "body")
+
+      expect(builder.subject).to eq("Template-derived subject")
+    end
+
+    it "still passes through the message_builder_subject modifier" do
+      plugin_instance = Plugin::Instance.new
+      modifier_block = Proc.new { |subject, _opts| "#{subject} (modified)" }
+      plugin_instance.register_modifier(:message_builder_subject, &modifier_block)
+
+      builder =
+        Email::MessageBuilder.new(
+          "to@to.com",
+          template: template_key,
+          subject_override: "Literal override subject",
+          body: "body",
+        )
+
+      expect(builder.subject).to eq("Literal override subject (modified)")
+    ensure
+      DiscoursePluginRegistry.unregister_modifier(
+        plugin_instance,
+        :message_builder_subject,
+        &modifier_block
+      )
+    end
+  end
+
   describe "recipient_username" do
     it "sets recipient_username when recipient_user is provided" do
       user = Fabricate(:user, username: "recipient_user")

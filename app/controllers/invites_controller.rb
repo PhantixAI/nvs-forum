@@ -3,7 +3,33 @@
 require "csv"
 
 class InvitesController < ApplicationController
-  ALLOWED_BULK_INVITE_COLUMNS = %w[email groups topic_id locale]
+  # allow_any_email: per-row CSV flag consumed by Jobs::BulkInvite -- see there for
+  # what it does. schedule_send: per-row opt-out of the paced, one-at-a-time send
+  # queue -- false sends that row immediately instead (see Jobs::BulkInvite).
+  # skip_personalization: per-row opt-out of AI personalization (see
+  # BulkInvitePersonalization::Generator), even when the site-wide setting is on.
+  # name/keywords: optional per-row context passed to the AI personalization prompt
+  # when enabled; ignored otherwise. A site with a custom User Field named "name",
+  # "keywords", "schedule_send", or "skip_personalization" would have that field's
+  # column shadowed by these -- an accepted tradeoff shared with the other reserved
+  # column names here.
+  ALLOWED_BULK_INVITE_COLUMNS = %w[
+    email
+    groups
+    topic_id
+    locale
+    allow_any_email
+    schedule_send
+    skip_personalization
+    name
+    keywords
+  ]
+
+  # Bounds the raw file bytes persisted verbatim into ReviewableBulkInvite's
+  # payload (see upload_csv) -- unlike the parsed `invites` array, that isn't
+  # otherwise capped by max_bulk_invites, since a file can carry a lot of
+  # padding/garbage without producing many valid rows.
+  MAX_BULK_INVITE_CSV_BYTES = 5.megabytes
 
   requires_login only: %i[
                    create
@@ -14,6 +40,7 @@ class InvitesController < ApplicationController
                    destroy_all_expired
                    resend_invite
                    resend_all_invites
+                   send_now_invite
                    upload_csv
                  ]
 
@@ -308,6 +335,16 @@ class InvitesController < ApplicationController
           return render_json_error(I18n.t("invite.email_invites_disabled"))
         end
 
+        # invite.email here is still the pre-update, persisted value -- update! hasn't run
+        # yet -- so this also covers binding a new email and sending in the same request.
+        # Without this check, a blank-email invite (e.g. an invite link) could be sent via
+        # Jobs::InviteEmail's description-as-recipient fallback just by editing its
+        # description (an ordinary note field) and requesting send_email, even though no
+        # email was ever actually provided for this invite.
+        effective_email = params.has_key?(:email) ? params[:email].presence : invite.email.presence
+        effective_email ||= unbound_invite_recipient(invite) if !params.has_key?(:email)
+        return render_json_error(I18n.t("invite.email_required_to_send")) if effective_email.blank?
+
         if invite.emailed_status != Invite.emailed_status_types[:pending]
           begin
             RateLimiter.new(current_user, "resend-invite-per-hour", 10, 1.hour).performed!
@@ -480,13 +517,112 @@ class InvitesController < ApplicationController
       return render_json_error(I18n.t("invite.email_invites_disabled"))
     end
 
-    params.require(:email)
     RateLimiter.new(current_user, "resend-invite-per-hour", 10, 1.hour).performed!
 
-    invite = Invite.find_by(invited_by_id: current_user.id, email: params[:email])
+    # allow_any_email invites are unbound (email: nil) by design -- their
+    # real recipient lives in description instead (see Jobs::BulkInvite,
+    # Invite.search_filter) -- so looking one up by email, as the bound-invite
+    # path below still does for compatibility, would never find it. The
+    # per-invite resend button (frontend/discourse/app/models/invite.js)
+    # always sends invite_id, which works for both invite shapes.
+    invite =
+      if params[:invite_id].present?
+        Invite.find_by(invited_by_id: current_user.id, id: params[:invite_id])
+      else
+        params.require(:email)
+        Invite.find_by(invited_by_id: current_user.id, email: params[:email])
+      end
     raise Discourse::InvalidParameters.new(:email) if invite.blank?
+
+    # A single invite's LLM call is fast enough to run inline here -- unlike
+    # resend_all_invites below, which can touch a batch too large to
+    # regenerate within one web request.
+    #
+    # An explicit "No" here means "just resend this invite as it already
+    # is" -- custom_subject/custom_message (if this invite has ever been
+    # personalized or given a manual note before) are left untouched, so
+    # InviteMailer#send_invite's existing template selection reuses that
+    # exact email again. A brand new invite that was never personalized
+    # has nothing in those columns to begin with, so it still falls
+    # through to the plain invite_forum_mailer template unchanged.
+    if params[:ai_personalization] != "false"
+      begin
+        result =
+          BulkInvitePersonalization::Generator.personalize(
+            invite,
+            extra_keywords: params[:keywords],
+          )
+        if result.present?
+          invite.update_columns(custom_subject: result[:subject], custom_message: result[:body])
+        end
+      rescue BulkInvitePersonalization::Generator::GenerationFailed => e
+        Discourse.warn_exception(
+          e,
+          message: "Resend personalization failed for invite #{invite.id}",
+        )
+        # Must not fall through to invite.resend_invite below: with AI
+        # personalization on, sending anyway here would mean either the
+        # plain unpersonalized template or -- worse -- a stale body left
+        # over from a previous attempt, neither of which the admin asked
+        # for. Mark it :skipped (same status the batch paths use for this)
+        # so it's visibly held back and can be resent once this clears.
+        invite.update_columns(emailed_status: Invite.emailed_status_types[:skipped])
+        return render_json_error(I18n.t("invite.ai_personalization_failed"))
+      end
+    end
+
     invite.resend_invite
     render json: success_json
+  rescue RateLimiter::LimitExceeded
+    render_json_error(I18n.t("rate_limiter.slow_down"))
+  end
+
+  # "Send Now" on a row still showing the Scheduled status (emailed_status
+  # bulk_pending or pending): sends it immediately and nudges
+  # Jobs::ProcessBulkInviteEmails in case its paced chain is the thing
+  # actually blocking it. Unlike resend_invite above, this must guard against
+  # double-sending an invite the background chain claims at the same moment --
+  # Invite.claim_for_immediate_send's conditional UPDATE is what makes that
+  # safe.
+  def send_now_invite
+    if !SiteSetting.allow_email_invites
+      return render_json_error(I18n.t("invite.email_invites_disabled"))
+    end
+
+    RateLimiter.new(current_user, "send-now-invite-per-hour", 30, 1.hour).performed!
+
+    invite = Invite.find_by(id: params[:invite_id])
+    raise Discourse::InvalidParameters.new(:invite_id) if invite.blank?
+
+    unless guardian.can_see_invite_details?(invite.invited_by)
+      return render_json_error(I18n.t("invite.disabled_errors.invalid_access"), 403)
+    end
+
+    claimed = Invite.claim_for_immediate_send(invite.id)
+    return render_json_error(I18n.t("invite.send_now_not_scheduled")) if claimed.blank?
+
+    begin
+      result = BulkInvitePersonalization::Generator.personalize(claimed)
+      if result.present?
+        claimed.update_columns(custom_subject: result[:subject], custom_message: result[:body])
+      end
+      Jobs.enqueue(:invite_email, invite_id: claimed.id)
+    rescue BulkInvitePersonalization::Generator::GenerationFailed => e
+      Discourse.warn_exception(
+        e,
+        message: "Send-now personalization failed for invite #{claimed.id}",
+      )
+      claimed.update_columns(emailed_status: Invite.emailed_status_types[:skipped])
+      return render_json_error(I18n.t("invite.ai_personalization_failed"))
+    end
+
+    # The actual point of this button: nudge the paced chain too, in case
+    # it's the one that's blocked. Safe to call unconditionally --
+    # ensure_chain! is Redis SETNX-gated, so it's a no-op if a chain for
+    # this site is already alive.
+    ::Jobs::ProcessBulkInviteEmails.ensure_chain!
+
+    render json: success_json.merge(delivery_status: claimed.reload.delivery_status)
   rescue RateLimiter::LimitExceeded
     render_json_error(I18n.t("rate_limiter.slow_down"))
   end
@@ -498,19 +634,127 @@ class InvitesController < ApplicationController
 
     guardian.ensure_can_resend_all_invites!
 
+    # See UsersController#invited for why this is validated against
+    # DOMAIN_REGEX rather than used as-is -- it also becomes part of the
+    # rate-limiter key below.
+    domain = params[:domain].presence if params[:domain].to_s.match?(Invite::DOMAIN_REGEX)
+    status = params[:status].presence if Invite::DELIVERY_STATUSES.include?(params[:status])
+
     begin
-      RateLimiter.new(
-        current_user,
-        "bulk-reinvite-per-day",
-        1,
-        1.day,
-        apply_limit_to_staff: true,
-      ).performed!
+      # Keyed per domain so resending nit.ac.in and iitb.ac.in the same day
+      # are independent, while resending nit.ac.in twice the same day (or
+      # resending everyone) still only gets one shot each. Status is part of
+      # the key too, so retrying the "skipped" invites after a provider
+      # outage isn't blocked by an ordinary resend earlier the same day.
+      # The "ac.in" umbrella domain (see Invite.domain_filter_condition)
+      # forms its own independent bucket here too, same as any other domain
+      # string -- resending it doesn't double-count against (or get blocked
+      # by) an individual institute's own bucket, by design.
+      rate_limit_key = ["bulk-reinvite-per-day", domain, status].compact.join("-")
+      RateLimiter.new(current_user, rate_limit_key, 1, 1.day, apply_limit_to_staff: true).performed!
     rescue RateLimiter::LimitExceeded
       return render_json_error(I18n.t("rate_limiter.slow_down"))
     end
 
-    Invite.pending(current_user).where.not(email: nil).find_each { |invite| invite.resend_invite }
+    # email IS NOT NULL keeps today's normal (bound) invites; the emailed_status clause
+    # additionally picks up unbound allow_any_email invites that were genuinely sent
+    # (see Jobs::BulkInvite) without sweeping in ordinary never-emailed link invites,
+    # which stay at :not_required.
+    invites_to_resend =
+      Invite.pending(current_user, domain:, status:).where(
+        "email IS NOT NULL OR emailed_status != ?",
+        Invite.emailed_status_types[:not_required],
+      )
+    invites_to_resend =
+      Invite.search_filter(
+        invites_to_resend,
+        params[:search],
+        show_emails: guardian.can_see_invite_emails?(current_user),
+      )
+
+    keywords = params[:keywords].presence
+    # Two independent choices: ai_personalization decides what content goes
+    # out (regenerate vs. reuse exactly what's already there);
+    # schedule_send decides how it's sent (paced one-at-a-time vs.
+    # immediately). Unlike the CSV column (Jobs::BulkInvite), a resend
+    # defaults schedule_send to false (burst) when the param is absent --
+    # that's what this action has always done for a caller that doesn't
+    # explicitly ask to be paced (previously gated behind the now-retired
+    # bulk_invite_paced_resend_enabled site setting, defaulting off). The
+    # resend modal always sends this param explicitly going forward.
+    personalize = params[:ai_personalization] != "false"
+    schedule_send = params[:schedule_send] == "true"
+
+    if personalize && schedule_send
+      resend_all_invites_paced(invites_to_resend)
+    elsif personalize
+      # A filtered batch can be hundreds to low thousands of invites, so
+      # regenerating each one's AI text has to happen off-request -- unlike
+      # resend_invite above. Keywords are an optional extra here, not what
+      # decides whether this path is taken.
+      # reorder(nil): invites_to_resend inherits a DISTINCT + ORDER BY
+      # invites.updated_at from Invite.pending, and plucking just :id would
+      # otherwise violate Postgres's "ORDER BY expressions must appear in
+      # the SELECT DISTINCT list" rule.
+      Jobs.enqueue(
+        :resend_invites_with_keywords,
+        invite_ids: invites_to_resend.reorder(nil).pluck(:id),
+        extra_keywords: keywords,
+      )
+    elsif schedule_send
+      # Resend each invite exactly as it already is (leave
+      # custom_subject/custom_message untouched -- InviteMailer#send_invite's
+      # template selection reuses them as-is; an invite with nothing in
+      # those columns still falls through to the plain template unchanged),
+      # but still paced one-at-a-time rather than Jobs::ProcessBulkInviteEmails,
+      # which has no way to skip its own unconditional personalize call for
+      # this batch.
+      cumulative_delay = 0
+      invites_to_resend.find_each do |invite|
+        Jobs.enqueue_in(cumulative_delay.seconds, :resend_invites_paced, invite_id: invite.id)
+        cumulative_delay +=
+          rand(
+            SiteSetting.bulk_invite_email_delay_min_seconds..SiteSetting.bulk_invite_email_delay_max_seconds,
+          )
+      end
+    else
+      invites_to_resend.find_each { |invite| invite.resend_invite }
+    end
+
+    render json: success_json
+  end
+
+  def destroy_all_invites
+    guardian.ensure_can_destroy_all_invites!(current_user)
+
+    # Same scoping as resend_all_invites above -- this sits behind the same
+    # button, so it must affect exactly the set resend would have touched
+    # for the same filters.
+    domain = params[:domain].presence if params[:domain].to_s.match?(Invite::DOMAIN_REGEX)
+    status = params[:status].presence if Invite::DELIVERY_STATUSES.include?(params[:status])
+
+    begin
+      # Separate key from bulk-reinvite-per-day so resending and deleting
+      # the same filtered set the same day don't block each other.
+      rate_limit_key = ["bulk-destroy-invite-per-day", domain, status].compact.join("-")
+      RateLimiter.new(current_user, rate_limit_key, 1, 1.day, apply_limit_to_staff: true).performed!
+    rescue RateLimiter::LimitExceeded
+      return render_json_error(I18n.t("rate_limiter.slow_down"))
+    end
+
+    invites_to_destroy =
+      Invite.pending(current_user, domain:, status:).where(
+        "email IS NOT NULL OR emailed_status != ?",
+        Invite.emailed_status_types[:not_required],
+      )
+    invites_to_destroy =
+      Invite.search_filter(
+        invites_to_destroy,
+        params[:search],
+        show_emails: guardian.can_see_invite_emails?(current_user),
+      )
+
+    invites_to_destroy.find_each { |invite| invite.trash!(current_user) }
 
     render json: success_json
   end
@@ -520,6 +764,21 @@ class InvitesController < ApplicationController
 
     hijack do
       file = params[:file] || params[:files].first
+
+      if file.tempfile.size > MAX_BULK_INVITE_CSV_BYTES
+        return(
+          render json: failed_json.merge(errors: [I18n.t("bulk_invite.file_too_large")]),
+                 status: :unprocessable_entity
+        )
+      end
+
+      # Read independently of the CSV.foreach below (a separate handle via
+      # path, not file.tempfile's own IO position) -- kept verbatim rather
+      # than reconstructed from `invites`, since that array drops any
+      # column whose value is blank on every row (see the `filter` below),
+      # which would otherwise make a Batch Moderator's held-for-review
+      # upload look different from what they actually uploaded.
+      raw_csv = File.read(file.tempfile.path)
 
       csv_header = nil
       invites = []
@@ -560,7 +819,19 @@ class InvitesController < ApplicationController
           )
         end
 
-        Jobs.enqueue(:bulk_invite, invites: invites, current_user_id: current_user.id)
+        # Only admins skip review. Regular moderators can reach this action
+        # (can_bulk_invite_to_forum? was widened to is_staff? to let them
+        # bulk-invite at all -- see "Allow moderators to bulk invite users
+        # via CSV"), and Batch Moderators can reach it too (see
+        # BatchModeration::GuardianExtension#can_bulk_invite_to_forum?), but
+        # neither is trusted to skip review the way an admin is -- the
+        # review step is the access control for everyone except admins.
+        pending_review = !guardian.is_admin?
+        if pending_review
+          ReviewableBulkInvite.submit!(actor: current_user, invites: invites, raw_csv: raw_csv)
+        else
+          Jobs.enqueue(:bulk_invite, invites: invites, current_user_id: current_user.id)
+        end
 
         if invites.count >= SiteSetting.max_bulk_invites
           render json:
@@ -574,7 +845,7 @@ class InvitesController < ApplicationController
                    ),
                  status: :unprocessable_entity
         else
-          render json: success_json
+          render json: success_json.merge(pending_review: pending_review)
         end
       else
         render json: failed_json.merge(errors: [I18n.t("bulk_invite.error")]),
@@ -587,6 +858,42 @@ class InvitesController < ApplicationController
 
   def skip_email_param
     !SiteSetting.allow_email_invites || params[:skip_email]
+  end
+
+  # Re-queues every matching invite through the same one-at-a-time, randomly
+  # paced throttle a fresh bulk CSV upload uses (Jobs::ProcessBulkInviteEmails),
+  # instead of firing an immediate, undelayed email for each one -- otherwise
+  # "resend all" is an easy way to trigger the exact burst-send pattern this
+  # feature exists to avoid, especially for an admin with a large invite list.
+  # Invites still mid-throttle (bulk_pending/sending) are left untouched
+  # rather than requeued, so this can't double-send or reorder them.
+  def resend_all_invites_paced(invites)
+    in_flight_statuses = [
+      Invite.emailed_status_types[:bulk_pending],
+      Invite.emailed_status_types[:sending],
+    ]
+
+    requeued = false
+    invites.find_each do |invite|
+      next if in_flight_statuses.include?(invite.emailed_status)
+      invite.requeue_for_paced_resend
+      requeued = true
+    end
+
+    ::Jobs::ProcessBulkInviteEmails.ensure_chain! if requeued
+  end
+
+  # An unbound bulk invite (see Jobs::BulkInvite#send_invite) has no email, by
+  # design; its recipient lives in the description, and an emailed status other
+  # than :not_required is what marks it as one that really was sent to
+  # someone. A plain invite link stays at :not_required, so editing its
+  # description still can't turn it into a way to send mail.
+  def unbound_invite_recipient(invite)
+    return if invite.email.present?
+    return if invite.emailed_status == Invite.emailed_status_types[:not_required]
+
+    description = params.has_key?(:description) ? params[:description] : invite.description
+    description.presence if EmailAddressValidator.valid_value?(description.to_s)
   end
 
   def show_invite(invite)

@@ -99,4 +99,49 @@ RSpec.describe AdminDetailedUserSerializer do
       expect(group_names).to include(public_group.name, owner_only_group.name)
     end
   end
+
+  describe "batch moderator fields" do
+    fab!(:college_field) { Fabricate(:user_field, name: "College", requirement: "optional") }
+    fab!(:batch_field) { Fabricate(:user_field, name: "Batch", requirement: "optional") }
+
+    before do
+      SiteSetting.enable_batch_moderation = true
+      SiteSetting.batch_moderation_auto_promote_count = 0
+      user.custom_fields["#{User::USER_FIELD_PREFIX}#{college_field.id}"] = "NIT Trichy"
+      user.custom_fields["#{User::USER_FIELD_PREFIX}#{batch_field.id}"] = "2024"
+      user.save_custom_fields(true, run_validations: false)
+      BatchModeration::GroupSync.sync(user)
+    end
+
+    it "exposes can_grant_batch_moderator/is_batch_moderator for an admin" do
+      serializer = described_class.new(user, scope: Guardian.new(admin), root: false)
+      json = serializer.as_json
+
+      expect(json[:is_batch_moderator]).to eq(false)
+      expect(json[:can_grant_batch_moderator]).to eq(true)
+      expect(json[:can_revoke_batch_moderator]).to eq(false)
+    end
+
+    it "reflects is_batch_moderator once granted" do
+      Group.last.add_owner(user)
+
+      serializer = described_class.new(user, scope: Guardian.new(admin), root: false)
+      json = serializer.as_json
+
+      expect(json[:is_batch_moderator]).to eq(true)
+      expect(json[:can_grant_batch_moderator]).to eq(false)
+      expect(json[:can_revoke_batch_moderator]).to eq(true)
+    end
+
+    it "hides the fields entirely when the site setting is disabled" do
+      SiteSetting.enable_batch_moderation = false
+
+      serializer = described_class.new(user, scope: Guardian.new(admin), root: false)
+      json = serializer.as_json
+
+      expect(json).not_to have_key(:is_batch_moderator)
+      expect(json).not_to have_key(:can_grant_batch_moderator)
+      expect(json).not_to have_key(:can_revoke_batch_moderator)
+    end
+  end
 end

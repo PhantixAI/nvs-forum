@@ -1,0 +1,2036 @@
+# Custom Features — Phantix / nvs-forum
+
+Documentation of the features shipped on `master` ahead of upstream `main`:
+requirements, implementation details, and known edge cases. Each feature is
+identified by name and by the files it touches rather than by commit hash,
+since hashes don't survive a rebase or squash. The commits below (oldest
+first, by title) are what these features were built from; if they are
+squashed, the titles double as a ready-made multi-line squash message.
+
+```
+Phantix Deployment
+feat : Trigger production deployment and local changes
+Allow moderators to bulk invite users via CSV
+feat : Mobile Notification Integration
+feat : Enhaced onboarding(registeration, invitation and login) process
+feat : Calendar College Filter
+feat : auth custom field validation fix
+feat : batch moderation
+feat : Calendar Event Visibility
+feat : Asthetics Changes
+feat : Fix for the code login
+feat : Batch moderator allow bulk invite
+feat : Spam handling using Controlled and AI Mode
+feat : remove linkedin mandatory requirement
+fix : Code review fixes across bulk invite, batch moderation, cohort filtering
+feat : AI Email Review
+feat : Domain restriction and OTP Signup flow update
+feat : Fix for the username randomness
+feat : Code review fixes
+```
+
+| # | Feature | Section |
+|---|---|---|
+| 1 | Batch Moderator role, cohort groups, admin users list, notifications | §1 |
+| 2 | Calendar event scope (batch / college / forum) | §2 |
+| 3 | Onboarding: bulk-invite CSV, invite page, OTP page, device auth, email-code domain rule and layout | §3 |
+| 4 | Native push (APNs / FCM) | §4 |
+| 5 | Moderator and Batch Moderator bulk invite | §5 |
+| 6 | Auth custom-field validation hooks | §6 |
+| 7-8 | Local multisite and production deployment | §7, §8 |
+| 9 | LinkedIn OIDC fix | §9 |
+| 10 | AI-personalised, paced bulk invite emails, sent-email preview | §10 |
+| 11 | Name-based usernames, locked full-name requirement | §11 |
+| 12 | Code-review follow-ups | §12 |
+| 13 | Invite email delivery status (SES) | §13 |
+| 14 | Cursor-forum look: header search, Cursor colours and type | §14 |
+
+---
+
+## Rebase and merge guide
+
+**Before you force-push.** `lefthook.yml` has a `pre-push` hook
+(`.lefthook/pre-push/tag-before-force-push.sh`, needs `lefthook install`) that
+tags the remote tip as `backup/<branch>-<timestamp>` before a force push
+overwrites it. **Pushing to `master` starts a production deploy** (see §8), so
+a rebase should be pushed only when a deploy is intended.
+
+**Core files most likely to conflict**, by feature. These are upstream files
+this fork edits in place; everything else is additive.
+
+| Feature | Upstream files edited |
+|---|---|
+| §1 Batch moderation | `config/routes.rb`, `config/site_settings.yml`, `app/models/notification.rb`, `app/models/reviewable.rb`, `app/controllers/{admin/users,groups,directory_items}_controller.rb`, `app/serializers/{user_card,admin_user_list,admin_detailed_user,directory_item,group_show,current_user,web_hook_user}_serializer.rb`, `lib/{admin_user_index_query,directory_items_query}.rb`, `lib/svg_sprite.rb`, `app/helpers/application_helper.rb`, `app/views/layouts/application.html.erb`, `frontend/discourse/discourse.js`, `frontend/discourse/app/components/{user-card-contents,directory-item}.gjs`, `frontend/discourse/app/ui-kit/{d-toggle-switch,d-user-info}.gjs`, `frontend/discourse/app/lib/{notification-types-manager,reviewable-registry}.js`, group and admin-user templates, `config/locales/{client,server}.en.yml` |
+| §3 Onboarding / email-code | `app/services/email_login_code/{request,redeem}.rb`, `app/services/user/action/create_from_verified_email.rb`, `app/controllers/session_controller.rb`, `app/views/layouts/no_ember.html.erb`, `app/views/session/one_time_password.html.erb`, `frontend/discourse/app/components/code-login-form.gjs`, `templates/{login,signup,invites/show}.gjs`, `common/login/code-login-form.scss`, `app/services/user_api_key/device_auth/*` |
+| §4 Push | `Gemfile`, `Gemfile.lock`, `app/models/user_api_key.rb`, `app/controllers/user_api_keys_controller.rb`, `app/services/push_notification_pusher.rb`, `app/jobs/regular/deliver_push_notification.rb` |
+| §5, §10 Invites | `app/controllers/invites_controller.rb`, `app/models/invite.rb`, `app/jobs/regular/{bulk_invite,invite_email}.rb`, `lib/guardian/invite_guardian.rb`, `lib/email/{sender,message_builder}.rb`, `app/controllers/admin/email_logs_controller.rb`, `app/models/email_log.rb` |
+| §6 Auth hooks | `app/controllers/users_controller.rb` |
+| §8 Deploy | `config/multisite.yml`, `containers/app.yml`, `.github/workflows/`, `config/official_plugins.json` (drops `discourse-fontawesome-pro`) |
+| §11 Usernames | `app/jobs/regular/update_username.rb`, `config/site_settings.yml` |
+
+`plugins/discourse-events` is the only bundled plugin the fork edits (§2);
+`nvs-follow` and `nvs-authentication-validations` are separate repos cloned
+into the image at build time (`containers/app.yml`, `after_code`).
+
+**Things to re-check after a rebase**
+
+- `Notification.types`: the fork's ids are 1001-1003 (§1). Confirm upstream
+  hasn't started handing out ids in that range.
+- Fork migrations must stay database-only and idempotent (no models, no
+  `SiteSetting`); they run in timestamp order alongside any new upstream ones.
+  The username backfill deliberately targets the old ids 46-48 and runs before
+  the renumber migration.
+- `frontend/discourse/app/ui-kit/d-toggle-switch.gjs` and `d-user-info.gjs` are
+  upstream ui-kit components extended in place (see §1); a rebase conflict here
+  is the most likely one.
+- `db/structure.sql` is not maintained by this fork; don't regenerate it.
+
+**Running the tests after a rebase**
+
+- The test environment ignores `config/discourse.conf` (`GlobalSetting` uses a
+  blank provider under `RAILS_ENV=test`), so it falls back to the tracked
+  `config/multisite.yml`, i.e. production. Every boot then tries to reach the
+  production RDS hosts and hangs for minutes. Point it at a file that doesn't
+  exist so Discourse boots single-site:
+  `DISCOURSE_MULTISITE_CONFIG_PATH=config/multisite.none.yml bin/rspec ...`.
+- Fork-feature specs (all green at the time of writing):
+  `spec/lib/batch_moderation spec/lib/validators spec/lib/discourse_mcp
+  spec/lib/admin_user_index_query_spec.rb spec/jobs/{process_bulk_invite_emails,bulk_invite,update_username}_spec.rb
+  spec/requests/{invites,directory_items,session,users}_controller_spec.rb
+  spec/models/reviewable_batch_moderation_report_spec.rb spec/models/reviewable_bulk_invite_spec.rb
+  spec/migrations/{backfill_batch_moderation_notification_usernames,reset_full_name_and_random_username_settings,renumber_batch_moderation_notification_types}_spec.rb
+  spec/services/{email_login_code,user} spec/services/apns_push_notification_pusher*_spec.rb
+  spec/serializers spec/tasks/batch_moderation_spec.rb`, plus the frontend
+  `bin/qunit` files `code-login-form-test.gjs`, `login-from-signup-test.js` and
+  `create-account-from-login-test.js`.
+- A full-suite run also fails some upstream specs that aren't ours: libvips
+  image processing, git/release tasks, S3/AWS, date-dependent pageview
+  migrations, and the `PostAlerter` push specs that still assert the removed
+  hub pusher. Compare against the pre-change code before assuming a regression.
+  `notifications_controller_spec` also fails locally because it signs in inside
+  a `fab!` block; it passes when the sign-in moves to a per-example `before`.
+- `spec/support/test_setup.rb` pins `full_name_requirement` to
+  `hidden_at_signup` for specs (§11), and the task specs stub
+  `RailsMultisite::ConnectionManagement.each_connection` to the current site.
+
+---
+
+## 1. Batch Moderator Role + Cohort-Scoped Admin Users List
+
+*(originally: `feat : batch moderation`; substantially redesigned since —
+see "v2 redesign" below. The `/g`-page-based grant/revoke workflow and the
+`/u` cohort filters described in the original commit still exist as UI
+surfaces, but are no longer how Batch Moderator status is granted/managed —
+that moved to the admin Users list, described here.)*
+
+### Requirement
+
+Admins on nitians.in, iitians.in and navodians.com wanted to delegate a narrow
+moderation power — suspend, silence, or report a user — to trusted members of
+that user's own cohort, **without** making them full site moderators. The
+cohort key itself needed to account for a Student/Staff distinction discovered
+in production data (nitians_forum's `"I am"` UserField:
+`"Alumni/Student"` vs `"Dean/Professor/Staff"`) — a staff member's cohort is
+their institution alone, not institution+Batch+Branch. Management moved off
+the general `/g` groups directory (which the auto-generated `bm-*` cohort
+groups were cluttering) onto a purpose-built view: Batch Moderators can browse
+their own cohort — with a restricted, directory-like field set — on the admin
+Users list (`/admin/users/list/active`), and admins see everyone there
+(including Batch Moderators, flagged by icon) with full cohort filtering
+(College/Batch/Branch or Vidyalaya/Batch dropdowns, a "Staff Only" toggle,
+ported from `/u`) plus Grant/Revoke Batch Moderator buttons on the admin user
+detail page, mirroring the existing Grant/Revoke Moderation UI. Granting/
+revoking is admin-only. A cohort or status change needed to notify admins,
+site moderators, and the cohort's current Batch Moderators every time.
+
+### Implementation
+
+**Cohort → Group auto-provisioning** (`lib/batch_moderation/group_sync.rb`):
+- `GroupSync.sync(user, notify: true)` runs on `user_created`/`user_updated`
+  (`config/initializers/301-batch-moderation.rb`). The cohort key always
+  requires an **institution** value (College or Vidyalaya — first `UserField`
+  found among `SiteSetting.batch_moderation_institution_field_names`, pipe-
+  delimited, default `"College|Vidyalaya"`, same graceful-degradation pattern
+  as before: each site is a separate database, so which field exists varies
+  per site).
+- Whether Batch/Branch also join the key depends on a **Student vs Staff**
+  distinction: `staff_type?(user)` checks the site's member-type field
+  (`SiteSetting.batch_moderation_member_type_field_name`, default `"I am"`)
+  against `SiteSetting.batch_moderation_staff_type_values` (list, default
+  `"Dean/Professor/Staff"`). Student-type members' keys also include Batch
+  (`SiteSetting.batch_moderation_batch_field_name`, default `"Batch"`, still
+  required) plus any of `SiteSetting.batch_moderation_secondary_field_names`
+  (list, default `"Branch"` — narrowed from the original single-field
+  `"Branch|Vidyalaya"` now that Vidyalaya lives in the institution setting;
+  unlike the institution/type fields, *all* configured secondary fields that
+  exist apply at once, not just the first found). Staff-type members' keys
+  drop Batch/Branch entirely — one group per institution, not per
+  institution+department. A site with no member-type field configured (still
+  `iitians_forum`/`navodians_forum` as of this writing) treats everyone as
+  Student, unchanged from the original behavior.
+- Finds-or-creates a deterministically-named `Group` for that key
+  (`bm-<sha1 prefix of the ordered component values>`), flagged via
+  `group.custom_fields["batch_moderation_group"] = true`; `full_name` is a
+  human-readable `" · "`-joined string (e.g. `"NIT Trichy · 2024 · CSE"`,
+  or `"NIT Trichy · Staff"` for a staff cohort — the explicit suffix keeps the
+  two group "shapes" visually distinguishable in any listing). Adds the user,
+  removes them from any stale batch group if their fields changed — an owner
+  who changes Batch/Branch/College loses Batch Moderator status for the old
+  cohort immediately and is evaluated fresh against the new one, satisfying
+  "changing cohort resets Batch Moderator status" with no separate logic.
+- New groups: `automatic: false`, `logged_on_users` visibility, non-
+  mentionable/non-messageable.
+- `auto_promote_if_understaffed`: if a group has fewer owners than
+  `SiteSetting.batch_moderation_auto_promote_count` (default **10**), the
+  newly synced member is auto-promoted to owner. Owners of a batch group ARE
+  the batch moderators for that cohort.
+- `batch_moderator_user_ids(user_ids)` / `batch_group_for(user)` /
+  `owned_batch_groups(user)`: batched/singular lookups shared by the directory
+  serializer, the admin users list, the grant/revoke actions, and
+  `StaffOrBatchModeratorConstraint`. `owned_batch_groups` is the single point
+  of truth for the `enable_batch_moderation` kill switch — it (and therefore
+  everything built on it) returns empty the instant the setting is off.
+
+**Permission checks** (`lib/batch_moderation/moderator.rb`, unchanged):
+- `can_moderate?(actor, target)` — true iff `actor != target`, they share an
+  owned batch group, `target` isn't itself an owner of that group (peer owners
+  can't moderate each other), and target isn't `staff?`.
+- `can_report?(actor, target)` — same sharing check but *without* the
+  peer-owner exclusion (you can still report a co-owner to real staff).
+
+**Wiring into core Guardian, without touching core files directly**
+(`lib/batch_moderation/guardian_extension.rb`, prepended onto `Guardian` in the
+initializer):
+```ruby
+def can_suspend?(user)      = super || Moderator.can_moderate?(self.user, user)
+def can_deactivate?(user)   = can_suspend?(user)
+def can_silence_user?(user) = super || Moderator.can_moderate?(self.user, user)
+def can_edit_group?(group)  = GroupSync.batch_group?(group) ? false : super
+def can_grant_batch_moderator?(user) = can_administer?(user) &&
+  GroupSync.batch_group_for(user).present? && !GroupSync.owned_batch_groups(user).exists?
+def can_revoke_batch_moderator?(user) = can_administer?(user) &&
+  GroupSync.owned_batch_groups(user).exists?
+```
+`can_edit_group?` now **unconditionally** denies membership edits on batch
+groups, for anyone — admins included, not just non-staff. This is a
+deliberate v2 tightening (see below): the original version allowed
+`can_admin_group?`-holders (admins, and moderators when
+`moderators_manage_groups` is on) through, which left the stock `/g` group
+page's own Manage → Membership owner-toggle as a second, unnotified,
+non-admin-restricted way to grant/revoke Batch Moderator status. Restricting
+it fully means `Admin::UsersController#grant_batch_moderator`/
+`#revoke_batch_moderator` (below) are the *sole* path by which a batch group's
+ownership — and therefore Batch Moderator status — can change; `GroupSync.sync`
+remains the sole path by which plain *membership* of these groups changes.
+`can_grant_batch_moderator?`/`can_revoke_batch_moderator?` are deliberately
+gated on `can_administer?`, not `can_edit_group?`/`can_admin_group?` — granting
+Site Moderator is admin-only in core, and this mirrors that (a moderator with
+`moderators_manage_groups` on does not get to grant Batch Moderator).
+
+**`/g` groups directory — full exclusion, not just de-cluttering**
+(`app/controllers/groups_controller.rb`, `app/serializers/group_show_serializer.rb`):
+- `GroupsController#index` excludes every `batch_moderation_group`-flagged
+  group from the `/g` listing entirely, for everyone including staff (gated by
+  `SiteSetting.enable_batch_moderation`) — the original motivation for this
+  whole redesign (`bm-*` groups cluttering the page admins use for real
+  groups).
+- Direct navigation to `/g/:name` for a batch group still loads — useful for
+  audit/debug — but is now genuinely **read-only for everyone**, staff and the
+  cohort's own owners included. `can_edit_group?` above blocks every mutation
+  endpoint server-side (`add_members`, `add_owners`, `remove_member`, and
+  `Admin::GroupsController#remove_owner`, all gated by
+  `ensure_can_edit!`/`ensure_can_edit_group!`), but the frontend's own
+  "Manage" tab, "Add Users" button, and the member-row owner-toggle dropdown
+  are keyed off a *separate* pair of fields — `can_admin_group`/
+  `is_group_owner` — that `can_edit_group?` alone doesn't touch, and would
+  otherwise still render as clickable (and just 403 when clicked) for an
+  admin, or for the cohort's own owner viewing their own group. `GroupShowSerializer`
+  forces both `can_admin_group` and `is_group_owner` to `false` for batch
+  groups specifically, which is what actually hides the Manage tab
+  (`canManageGroup` in `frontend/discourse/app/controllers/group.js`), the
+  "Add Users"/bulk-select controls (`group/index.gjs`), and the wrench
+  dropdown's makeOwner/removeOwner items (`group-member-dropdown.js`) — all
+  three key off those two fields, not `can_edit_group`. The group's Delete
+  button (admin-only, unrelated to `can_admin_group`) gets its own explicit
+  `is_batch_moderation_group` guard in `frontend/discourse/app/templates/group.gjs`.
+  `is_group_owner_display` (a separate, purely informational "you're an
+  owner" badge field, not a permission gate) is left showing real ownership.
+
+**Admin Users list — reachable by a non-staff Batch Moderator**
+(`app/controllers/admin/users_controller.rb`, `config/routes.rb`,
+`lib/staff_or_batch_moderator_constraint.rb`):
+- `/admin/users/list` and `/admin/users/list/:query` are declared as
+  standalone routes *outside* the `StaffConstraint`-gated `/admin` namespace,
+  pointing at the same `admin/users#index` action, gated instead by
+  `StaffOrBatchModeratorConstraint` (delegates to `StaffConstraint` first, so
+  a plugin's `custom_staff_check` extensibility point still applies to staff
+  on this route same as every other `/admin` route; falls back to "owns at
+  least one batch group" for non-staff). `Admin::UsersController` itself
+  `skip_before_action :ensure_staff, only: :index` +
+  `before_action :ensure_staff_or_batch_moderator, only: :index` — every
+  other admin action stays exactly as staff-only as before.
+- For staff, `index_for_staff` is unchanged from core plus two additions:
+  cohort filters (`filters`/`staff_only` params, ported from `/u` via a new
+  shared `lib/cohort_filter.rb` module that both `AdminUserIndexQuery` and
+  `DirectoryItemsQuery` now delegate to — `DirectoryItemsQuery`'s own filter
+  methods are a pure refactor onto the same module, no behavior change), and
+  a read-only Batch Moderator icon (`is_batch_moderator` on
+  `AdminUserListSerializer`, batched via `GroupSync.batch_moderator_user_ids`)
+  next to the existing admin/moderator icons — same as "similar to site
+  Moderators," not a new connector.
+- For a Batch Moderator, `index_for_batch_moderator` **force-scopes** the
+  query server-side to `GroupSync.owned_batch_groups(current_user)`'s member
+  ids, ignoring any `filters`/`query` the client sends (can't widen their own
+  view), and renders through a new `BatchModeratorUserListSerializer`
+  (`< BasicUserSerializer`, not `AdminUserListSerializer` even via conditional
+  gating — a separate class means no staff-only field, e.g. email/IP/
+  suspend-silence reasons, can leak through via a missed branch). Exposes only
+  `username, avatar_template, trust_level, created_at, last_seen_at,
+  is_batch_moderator`. No cohort filter dropdowns are shown to this viewer —
+  nothing to filter across, they only ever see their one cohort.
+
+**Loading the admin frontend for a non-staff Batch Moderator**
+(`app/helpers/application_helper.rb`, `app/views/layouts/application.html.erb`,
+`frontend/discourse/discourse.js`): the admin Ember engine and its assets were
+only shipped to staff (`data-is-staff`), so a Batch Moderator opening
+`/admin/users/list/:filter` got no route. `ApplicationHelper#batch_moderator?`
+(owns a batch group, memoised per request) feeds a new `can_load_admin_engine`
+flag (`staff? || batch_moderator?`) that the layout uses for the admin asset
+includes and preloads, and `discourse.js` reads `data-can-load-admin-engine`
+instead of `data-is-staff`. It is deliberately a separate flag rather than a
+widened `staff?`, which core reads for unrelated staff-only behaviour.
+
+**Grant/Revoke Batch Moderator — admin-only, on the user detail page**
+(`app/controllers/admin/users_controller.rb#grant_batch_moderator`/
+`#revoke_batch_moderator`, routed inside the admin namespace under
+`AdminConstraint`): calls `guardian.ensure_can_grant_batch_moderator!`/
+`ensure_can_revoke_batch_moderator!`, 404s if the target has no cohort group
+(their cohort could have been resynced in between the check and the action),
+logs via `StaffActionLogger#log_custom`, and fires
+`Notifier.notify_moderator_status_change`. Frontend: a "Batch Moderator: Yes/No"
+row with a Grant/Revoke button on the admin user detail page
+(`admin/templates/admin-user/index.gjs`), alongside the existing Grant/Revoke
+Moderation and Grant/Revoke Admin rows, same pattern.
+
+**Reachability for the suspend/silence/report path** (unchanged from the
+original commit): a new, non-admin controller
+(`app/controllers/batch_moderation_controller.rb`, `requires_login`) exposes
+`PUT /batch-moderation/users/:id/suspend`, `/silence`, and
+`POST /batch-moderation/users/:id/report` — reusing the exact same
+`User::Suspend`/`User::Silence` service objects `Admin::UsersController` uses,
+whose own policies call the (now extended) `guardian.can_suspend?`/
+`can_silence_user?`.
+
+**Report path**: `report` creates a `ReviewableBatchModerationReport` via
+`.report!`, landing in the normal staff review queue with Agree/Disagree
+actions. A user has one reviewable (unique on type + target), so a later report
+of an already-reported user finds the existing row; `record_report!` therefore
+appends every report (`reporter_id`, `reporter_username`, `reason`,
+`reported_at`) to `payload["reports"]`, keeps `payload["reason"]` as the newest
+reason, and the review item lists all of them.
+
+**Serializer surface**: `UserCardSerializer` carries `can_batch_moderate`,
+`can_batch_report` and `is_batch_moderator`; `WebHookUserSerializer` (which
+inherits it through `UserSerializer`) excludes all three, since they are
+viewer-relative UI flags and webhook payloads go to external endpoints. Any new
+batch-moderation attribute added to the card serializer needs the same
+exclusion, or `spec/serializers/web_hook_user_serializer_spec.rb` fails.
+
+**Frontend, user-card surfaces** (unchanged): `user-card-contents.gjs`'s
+Suspend/Silence/Report buttons gated on `user.can_batch_moderate`/
+`can_batch_report`; `modal/batch-moderation-penalty.gjs`/
+`modal/batch-moderation-report.gjs`; the shield badge connectors near
+usernames (`after-user-name`, `user-card-after-username`) and the admin list
+icon are gated on `showsBatchModeratorBadge` (`lib/batch-moderator-badge.js`):
+the badge shows only when the member is a Batch Moderator and neither an admin
+nor a site moderator, so a profile displays its highest role. The
+`is_batch_moderator` flag itself stays true for them, because the admin user
+page's Grant/Revoke row and the permission checks still read it. Icons: `shield` is added to the SVG sprite
+(`lib/svg_sprite.rb`), `user-tie` is registered in
+`config/initializers/301-batch-moderation.rb`, and the three notification types
+get icons via `register-batch-moderation-notification-icons.js`.
+
+**Notifications** (`lib/batch_moderation/notifier.rb`) — extended beyond the
+original suspend/silence/report notifications with two more entry points,
+both notifying **admins + site moderators + the affected cohort's current
+Batch Moderators**, every time (not scoped down to just that cohort's own
+peers), via the same `Notification::Action::BulkCreate` + background email
+job pattern (`Jobs::BatchModerationNotifyCohortChangeEmail`/
+`NotifyStatusChangeEmail`, new `BatchModerationMailer` templates
+`cohort_change`/`status_change` alongside the original `action_taken`):
+- `notify_cohort_change(user:, group:, joined:)` — hooked into `GroupSync.sync`
+  itself, firing only on an actual membership change (never a no-op sync).
+- `notify_moderator_status_change(actor:, user:, group:, granted:)` — fired
+  from the admin grant/revoke actions (`actor` present), from
+  `auto_promote_if_understaffed` (`actor: nil`), and from `GroupSync.sync`
+  when a cohort change implicitly strips an existing owner's status
+  (`actor: nil`) — so a Batch Moderator losing their role via a profile change,
+  not just an explicit admin revoke, still notifies everyone.
+
+**Users directory cohort filters** (`app/controllers/directory_items_controller.rb`,
+`lib/directory_items_query.rb` → `lib/cohort_filter.rb`,
+`frontend/discourse/app/{controllers,routes,templates}/users.js|gjs` →
+`frontend/discourse/app/lib/cohort-filter-fields.js`): unchanged in behavior
+from the original commit (College/Batch/Branch or Vidyalaya/Batch dropdowns, a
+`staff_only` toggle, `is_batch_moderator` on `DirectoryItemSerializer`) — the
+query-building logic was extracted into the shared `CohortFilter` module above
+so the admin users list could reuse it verbatim, and the frontend field-config
+computation was extracted into `cohort-filter-fields.js` so both `/u` and the
+admin list controller import one implementation instead of duplicating it.
+Two upstream ui-kit components were extended in place for this UI:
+`DToggleSwitch` gained `@insideLabel` / `@translatedInsideLabel` (a label drawn
+inside the track, used by the "Staff only" toggle, with the track widened to fit
+the translated text) and `DUserInfo` gained `@nameOrUsernameOnly` (one label,
+name if present else username, used by directory rows). Both are opt-in; other
+callers render as before.
+
+**One-time backfill** (`lib/tasks/batch_moderation.rake`,
+`batch_moderation:resync_cohorts`): the cohort-key redesign (institution
+always required, Student/Staff split) doesn't retroactively re-key existing
+users — that only happens on their next profile save. This manual,
+post-deploy rake task iterates every user on every site
+(`RailsMultisite::ConnectionManagement.each_connection`) calling
+`GroupSync.sync(user, notify: false)` (suppressed — re-keying every user on
+the site would otherwise fire a leave+join, and possibly a status-change,
+notification to every staff member and cohort owner, for every single user),
+then destroys now-orphaned zero-member batch groups. Not run automatically.
+
+**Existing-user migration off the old blanket Site Moderator system** (same file,
+two more one-time, idempotent, dry-run-by-default rake tasks — `DRY_RUN=0` to
+write, otherwise they only print what they'd do): `batch_moderation:backfill_member_type`
+finds-or-creates `SiteSetting.batch_moderation_member_type_field_name` (dropdown,
+required, shown on profile/signup/card) and its two option values on each site,
+then sets it to `"Alumni/Student"` or the site's configured staff label
+(`SiteSetting.batch_moderation_staff_type_values`) for every user whose value is
+currently blank — skipping (not overwriting) anyone who already has one set. A
+user is classified as Student iff they have both `Batch` and every configured
+Student-only field present (`GroupSync.find_student_only_fields`, which resolves
+to `[Branch]` on a college site and `[]` on a site without one — the same site-agnostic
+mechanism the cohort-key algorithm itself uses, so no site name is hardcoded
+anywhere in the task). `batch_moderation:revoke_site_moderators` then strips
+Discourse's core `moderator` flag from every non-admin user, via the same
+`user.revoke_moderation!` the admin "Revoke Moderation" button already calls —
+retiring the old blanket-grant system now that Batch Moderator is the narrower
+replacement. Run order matters: `backfill_member_type` must run *before*
+`resync_cohorts` (the cohort-key algorithm's Student/Staff branch reads the field
+it backfills), moderator revocation has no dependency on either and is best run
+last. See `spec/tasks/batch_moderation_spec.rb` for the full behavior matrix.
+
+**Site settings** (`config/site_settings.yml`, area `group_permissions`):
+`enable_batch_moderation` (default off), `batch_moderation_auto_promote_count`
+(default 10), `batch_moderation_batch_field_name` (default `"Batch"`),
+`batch_moderation_secondary_field_names` (list, default `"Branch"` — changed
+from `"Branch|Vidyalaya"`), `batch_moderation_institution_field_names` (list,
+default `"College|Vidyalaya"`, new), `batch_moderation_member_type_field_name`
+(default `"I am"`, new), `batch_moderation_staff_type_values` (list, default
+`"Dean/Professor/Staff"`, new).
+
+### Edge cases
+
+- **Peer-owner exclusion**: two owners of the same batch group cannot moderate
+  each other (`Moderator.can_moderate?`), preventing a moderation arms race
+  within a cohort — but either can still `report` the other to real staff.
+- **Staff targets are always exempt**: `can_moderate?`/`can_report?` both
+  return false if `target.staff?`, regardless of group membership.
+- **Auto-promote count is generous by default (10)**: on a small/fresh cohort
+  group, nearly every member gets auto-promoted to owner until the group
+  reaches 10 owners — intentional for bootstrapping, but means "batch
+  moderator" isn't necessarily hand-picked on a young group; worth tuning down
+  per-site if that's a concern (also why some specs override this to `0`).
+- **Known, accepted risk — self-service promotion**: the cohort key comes from
+  profile fields the member can edit, so anyone with a valid college email can
+  set them to match a cohort that has fewer than
+  `batch_moderation_auto_promote_count` owners, be auto-promoted, and then
+  suspend/silence/report its members. Mitigations: the `allowed_email_domains`
+  allowlist gates who can sign up at all, and the count can be lowered (or set
+  to `0` to make promotion admin-only). Reviewed and deliberately left as is.
+- **Sync is serialised**: `GroupSync.sync` runs under a per-user
+  `DistributedMutex`, and the owner-cap check + `add_owner` under a per-group
+  one, so overlapping `user_created`/`user_updated` jobs send one join
+  notification and simultaneous joiners can't overshoot the cap.
+- **Staff-type visibility follows the field**: `is_staff_type` and the
+  directory's `staff_only` filter are only honoured for a viewer who could read
+  the member-type UserField (staff always; others only if it is shown on
+  profiles or user cards) — `GroupSync.member_type_field_visible_to?`. The admin
+  users list is unchanged (staff and Batch Moderators).
+- **Notification type ids are 1001-1003**: `batch_moderation_action` /
+  `_cohort_change` / `_status_change` were 46-48, ids upstream hands out
+  sequentially. They were moved (migration
+  `RenumberBatchModerationNotificationTypes`) so a future upstream type can't
+  share one. The earlier username backfill migration deliberately still targets
+  46-48, since it runs first.
+- **Staff-type cohorts are institution-wide**: a Staff-type member's key drops
+  Batch/Branch entirely, so *all* Staff-type members at the same institution
+  share one cohort group regardless of department — by design (see
+  Requirement), but worth knowing before assuming every cohort group maps to
+  a Batch/Branch pair.
+- **Cohort-key upgrades need the backfill task**: turning on the member-type
+  field, or changing which fields count as "institution"/"secondary," doesn't
+  retroactively re-key anyone already assigned to a group under the old key —
+  run `batch_moderation:resync_cohorts` after such a change, or wait for each
+  user's next profile save.
+- **Cohort completeness**: a user is only synced into a group once the
+  institution value (and, for Student-type members, the Batch value) is
+  present; a half-filled profile is not assigned to any batch group.
+- **Email-code signup defers the first sync**: a brand-new account still has a
+  placeholder username until the member's last signup screen, so the
+  `user_created` / `user_updated` hooks skip the cohort sync while the redeem
+  runs and `PUT /session/login-code/finalize` performs it once the username is
+  settled (§11). Other signup paths sync as before.
+- **Disabling the feature is non-destructive**: turning `enable_batch_moderation`
+  off makes every Guardian grant and the admin-list reachability check inert
+  immediately (`owned_batch_groups` returns empty), but existing batch groups
+  and their membership are left alone (no cleanup job) — re-enabling picks
+  back up where it left off.
+- **The old `/g`-page grant/revoke workflow is fully retired, not merely
+  hidden**: this was the original commit's design (toggle owner status via
+  `/g/:name` → Manage → Membership) and its own documented follow-up bug (a
+  batch moderator could see that Manage UI and get a 403 using it) — both are
+  now moot, since nobody, staff included, sees editable Manage UI on a batch
+  group at all (see the `/g` exclusion section above).
+
+---
+
+## 2. Calendar Event Scope: Batch / College / Forum Event
+
+*(originally: `feat : Calendar College Filter`; redesigned 2026-09-12 from a
+boolean "Forum event" toggle into a 3-way scope with real enforcement — see
+"v2 redesign" below.)*
+
+### Requirement
+
+The `discourse-events` plugin's calendar needed three visibility tiers for an
+event, chosen by its creator via a dropdown next to the "All day" toggle,
+defaulting to the narrowest:
+- **Batch Event** (default): visible only to users sharing the creator's
+  institution (College/Vidyalaya) **and** batch **and** branch.
+- **College Event**: visible only to users of that institution.
+- **Forum Event**: visible to everyone (in practice, all NITians/IITians
+  colleges — Navodians is out of scope for this feature the same way it's out
+  of scope for `enable_batch_moderation`'s "Batch"/"Branch" fields).
+
+Unlike the original boolean, this needed to be **real enforcement** (a viewer
+in the wrong cohort genuinely cannot see the event), not just an opt-in
+narrowing filter on the calendar's own display.
+
+### Implementation
+
+- `plugins/discourse-events/lib/discourse_events/calendar_event_scope.rb` —
+  new module, the single source of truth for scope semantics:
+  - `SCOPE_CUSTOM_FIELD_KEY` (`_calendar_event_scope`, values `"batch"` /
+    `"college"` / `"forum"`) and `COHORT_DIGEST_CUSTOM_FIELD_KEY`
+    (`_calendar_batch_cohort_digest`) — two new reserved, system-managed
+    custom-field keys alongside the pre-existing `_calendar_separation_value`.
+  - `cohort_digest_for(user)` — a 12-char SHA1 digest of the user's full
+    institution+batch+branch cohort, computed directly from
+    `BatchModeration::GroupSync.cohort_key_for(user)` using the exact same
+    digest scheme `GroupSync.deterministic_name` uses for batch-group naming
+    — deliberately **independent of `SiteSetting.enable_batch_moderation`**
+    (which only gates Group auto-provisioning, not cohort-key computation) and
+    of Group membership existing at all. Returns `nil` for a `nil` user, a
+    user with an incomplete cohort (e.g. no Batch value), **or a staff-type
+    user** — a staff cohort key is institution-only (see
+    `GroupSync.cohort_key_for`), which carries no batch/branch distinction at
+    all, so it's never treated as a valid "batch cohort" (indistinguishable
+    from every other staff member's key at that institution otherwise).
+  - `scope_for(custom_fields)` — infers scope for events saved before
+    `_calendar_event_scope` existed: absent scope key + absent separation
+    value → `"forum"` (the old boolean's "everyone" state); absent scope key +
+    present separation value → `"college"` (the old boolean's "college-scoped"
+    state). No data migration needed for pre-existing events.
+  - `visible_to?(event, user)` — the actual per-viewer predicate, mirrored
+    (not literally shared, for performance) by the Finder SQL below.
+- `Event::SyncFromPost#upsert_event` stamps all three reserved keys from a new
+  raw attribute `event-scope` (replacing `forum-event`), defaulting to
+  `"batch"` when absent/unrecognized:
+  - `forum` → deletes both the separation value and the cohort digest.
+  - `batch` → resolves/stamps the separation value (sticky: keeps the
+    existing value across re-edits rather than re-deriving it, same as
+    before) and the cohort digest (same sticky rule, new). If the creator's
+    digest can't be resolved (incomplete cohort, or staff-type), **collapses
+    to `college` scope** instead — an event nobody but its author could ever
+    find is a worse failure mode than one slightly too broad.
+  - `college` → resolves/stamps the separation value only, sticky, no digest.
+- `plugins/discourse-events/lib/discourse_events/calendar_separation.rb`'s
+  `configured_field` now delegates to `BatchModeration::GroupSync.find_institution_field`
+  (respects `SiteSetting.batch_moderation_institution_field_names`, so it
+  resolves "Vidyalaya" too) instead of a hardcoded `"College"` constant.
+- `plugins/discourse-events/lib/discourse_events/events/finder.rb` adds
+  `filter_by_calendar_event_scope(events, user)`, applied **unconditionally**
+  (not opt-in) in `Finder.search`'s chain — real access control, matching each
+  scope against the viewer's own institution value / cohort digest via a
+  single OR'd SQL clause; a legacy row with a separation value but no scope
+  key is matched as `college`, per `scope_for`'s inference. The old
+  `filter_by_calendar_separation_value` (param-driven) survives as a
+  **voluntary further-narrowing** filter layered on top — it now only ever
+  restricts further, never re-opens access the mandatory filter excluded.
+- The Event visibility control is a **mandatory** 3-option `eventScope`
+  select (replacing the optional "Forum event" checkbox; `@validation="required"`
+  on the FormKit field means FormKit never adds its usual blank/"None" option
+  here — see `frontend/discourse/app/form-kit/components/fk/control/select.gjs`'s
+  `includeNone` logic), always defaulting to Batch Event. It's rendered on
+  **two independent surfaces**, both driven by the shared
+  `lib/calendar-event-scope.js` (`showEventScope`/`showBatchEventOption`
+  helpers, so the two never drift on when the control shows or which options
+  it offers):
+  - `post-event-builder.gjs`'s Advanced settings modal — a FormKit
+    `form.Row`/`row.Col` (size 6/6, collapsing to 12 when the select itself
+    is hidden) puts it beside "All day".
+  - `compact-event-editor.gjs` — the **inline** editor shown directly under
+    the composer right after inserting an event (before ever opening
+    Advanced settings). This one isn't FormKit-based; it's a `DNativeSelect`
+    (`@includeNone={{false}}`) in a new `.composer-event__all-day-row` flex
+    wrapper alongside the existing `DToggleSwitch`, wired through the same
+    `#emitChange()` pattern every other field in that component uses.
+  Both surfaces read/write the same `eventScope` value end-to-end through
+  `discourse-post-event-event.js`, `raw-event-helper.js`, `event-node-view.gjs`,
+  and the rich-editor's node schema — the same plumbing `forumEvent` used to
+  thread through, generalized to a string enum.
+  `plugin.rb` adds `calendar_event_scope_fields` to the `:site` serializer
+  (`{ institution:, institution_field_name:, batch: }`) so neither frontend
+  surface duplicates the (server-only, `client: false`) batch-moderation
+  field-name site settings — `calendar-separation-filter.gjs`'s
+  institution-field lookup was similarly generalized off its old hardcoded
+  `"College"` constant.
+- `basic_event_serializer.rb` exposes `event_scope` (string enum, replacing
+  the `forum_event` boolean; mirrored in the API schema fixtures).
+- New indexes on `(custom_fields ->> '_calendar_event_scope')` and
+  `(custom_fields ->> '_calendar_batch_cohort_digest')` — required, not just
+  nice-to-have, since the Finder filter now runs on every list/feed query.
+
+### Edge cases
+
+- **`upsert_event` must use the raising `update_with_params!`, not the
+  non-raising `update_with_params`**: `Event#apply_params_for_status` (a
+  shared upstream method) returns `self` on both success *and* a rejected save
+  — it relies on the non-bang branch having populated `.errors` for callers to
+  notice. A save rejected by something that does *not* add to `.errors` (e.g.
+  a halted `before_save` callback) would then look like a valid, saved event.
+  The fix: use `update_with_params!` and rescue `ActiveRecord::RecordInvalid`,
+  returning `e.record` (same object, same populated `.errors` as before for
+  ordinary validation failures) — but anything that fails *without* populating
+  errors now raises loudly instead of silently no-op'ing.
+- **Legacy events with no separation value**: the *editor*, not the original
+  author, determines the value the first time the reserved fields get set —
+  intentional (the person actually setting it should be the one whose cohort
+  it reflects), but means re-saving an old post can retroactively cohort-scope
+  it to whoever happens to edit it next. The batch cohort digest follows the
+  same sticky-first-value rule once set, for the same reason.
+- **A site with no configured institution field** (neither College nor
+  Vidyalaya present) sees no scope dropdown and no calendar filter at all —
+  the whole feature is a no-op rather than showing a broken/empty control. A
+  site with an institution field but no Batch field still gets the dropdown,
+  just without the "Batch Event" option.
+- **A staff-type creator or viewer never participates in batch scope**: their
+  cohort key is institution-only, so `cohort_digest_for` is always `nil` for
+  them — a staff creator's default "Batch Event" collapses to College scope
+  at save time, and a staff viewer can never see anyone else's batch-scoped
+  event (even at their own institution), since there's no batch value to
+  match against either direction.
+- **Direct topic links bypass scope** (pre-existing gap, not introduced by
+  this change): `EventsController#show` and the in-topic event card only
+  check ordinary topic/category permissions, not `CalendarEventScope`. Closing
+  this (via `CalendarEventScope.visible_to?` in the guardian/serializer
+  inclusion condition) was deliberately left as a fast-follow, not part of
+  this ship, since the literal ask was calendar-list visibility.
+- **A no-op edit must never narrow an existing event's scope**: `upsert_event`
+  only defaults the raw `event-scope` attribute to `"batch"` for a brand-new
+  event (`event.new_record?`); for an existing event it falls back to that
+  event's own currently-persisted (or legacy-inferred) scope instead. This
+  matters because two of the three editing surfaces —
+  `pre-initializers/rich-editor-extension.js`'s node schema and
+  `raw-event-helper.js`'s `parseEventAttrs` — default a *missing* attribute to
+  `null`, not `"batch"` (unlike `defaultEventState()`, which still defaults a
+  genuinely-new event's initial state to `"batch"`), and `buildParams` only
+  writes the `eventScope` param when it's actually set (mirroring every other
+  optional param in that file) rather than unconditionally forcing `"batch"`
+  the way the old boolean's comment used to justify. Without both halves of
+  this fix, editing a legacy event through the rich editor or the raw
+  composer — even a change unrelated to the event, with the Event visibility
+  control never touched — would silently write an explicit `event-scope="batch"`
+  attribute into the raw markdown and narrow that event's audience.
+  `post-event-builder.gjs`'s own Advanced-settings path was never affected by
+  this (it always sources `eventScope` from the server-computed
+  `event_scope`, never from raw-text re-parsing), but a narrower version of
+  the same risk remains where `compact-event-editor.gjs`'s `openAdvanced()`
+  hands a raw-text-derived (possibly-unknown) scope to a fresh
+  `DiscoursePostEventEvent` for the modal — that model's own hydration has no
+  way to distinguish "brand new" from "existing but client doesn't know yet",
+  so it still defaults to `"batch"` for display. This narrower gap requires a
+  user to explicitly open Advanced settings on a legacy event and save without
+  correcting the pre-selected value; deliberately left unaddressed as
+  disproportionate to fix given the architecture.
+- **Raw attribute naming**: the raw `[event ...]` BBCode-ish attribute is
+  written as `eventScope` (camelCase, matching the JS model property) — it
+  does *not* get dasherized until the markdown-it cook step
+  (`discourse-markdown/discourse-post-event-block.js`'s `dasherize()`, called
+  from its `wrap()` token rule), which is what actually produces the
+  `data-event-scope` HTML attribute `Parser::VALID_OPTIONS`'s `:"event-scope"`
+  entry matches against. Skimming only the raw markdown source (e.g. in the
+  composer's split view) will show `eventScope=...`, not `event-scope=...`;
+  that's expected, not a bug.
+
+---
+
+## 3. Enhanced Onboarding (Registration, Invitation & Login)
+
+*(originally: `feat : Enhaced onboarding(registeration, invitation and login) process`)*
+
+Bundles several distinct login/signup UX and infra pieces:
+
+### 3a. Bulk-invite CSV `allow_any_email` column
+
+**Requirement**: let an admin bulk-invite a CSV row that isn't bound to one
+exact email address — e.g. inviting "whoever holds this role" rather than a
+specific mailbox — while still tracking who it was actually sent to and rate
+limiting it like any other invite.
+
+**Implementation** (`app/jobs/regular/bulk_invite.rb`,
+`app/jobs/regular/invite_email.rb`, `app/mailers/invite_mailer.rb`):
+- New optional CSV column `allow_any_email`; parsed defensively —
+  `ActiveModel::Type::Boolean#cast` fails *open* (anything not in its narrow
+  `FALSE_VALUES` list casts to `true`), which is wrong for a security-relevant
+  flag filled in free-text by an admin, so only an explicit truthy spelling
+  (`true/t/1/yes/y`, case-insensitive) is treated as true.
+- When true, the generated `Invite` is created **unbound**: `email: nil`,
+  `description: <the CSV row's email>` (keeps it visible on the admin
+  Pending/Redeemed list even though it's no longer bound). An unbound invite
+  is an "invite link" per `Invite#is_invite_link?` — redeemable by *any* email
+  address (see `InvitesController#perform_accept_invitation`,
+  `InviteRedeemer#can_redeem_invite?`).
+- Delivery is handled explicitly via `to_override` on `Jobs::InviteEmail`,
+  since `Invite.generate` only auto-sends when `email` is present.
+  `InviteEmail#execute` resolves the actual recipient as
+  `args[:to_override] || (invite.email.blank? ? invite.description.presence : nil)`,
+  validating it's a real email address before sending rather than mailing
+  garbage or crashing on nil.
+- `emailed_status` is explicitly set to `:sending` via `update_column` (not
+  the model's own auto-enqueue path, to avoid a double-send), so
+  `resend_all_invites` doesn't treat an unbound invite as "never emailed" and
+  skip it forever.
+- Rate limiting: `Invite.generate`'s own per-day reinvite limiter only runs
+  when `email` is present, which `allow_any_email` rows never satisfy by
+  design — so the job replicates the exact same limiter key
+  (`reinvites-per-day-<sha256 of downcased email>`) so bound and unbound
+  invites to the same address share one daily budget instead of the flag
+  bypassing rate limiting entirely.
+
+**Edge cases**:
+- User fields / locale prefilled on the CSV row are **not supported** together
+  with `allow_any_email` (a pre-created staged user would only ever be found
+  and unstaged when the redeemer's email matches the invite's — which never
+  happens for an unbound invite — leaving a dangling staged user and silently
+  discarding the prefill). The job detects this combination and logs a warning
+  instead of silently dropping the data.
+- A `bulk_pending` invite's delivery is deliberately *not* double-triggered
+  here — `Jobs::ProcessBulkInviteEmails` already re-enqueues those on its own
+  throttle, and `Jobs::InviteEmail` already has the `description` fallback.
+- The Bulk Invite modal's help text
+  (`config/locales/client.en.yml`, `user.invited.bulk_invite.instructions`)
+  documents every CSV column the backend accepts. It had drifted behind the
+  columns added later (`locale`, `name`, `keywords`, `skip_personalization` —
+  see the Extensions under §10) until this was noticed and the text was
+  extended to cover all of them, with a combined example row. **Gotcha**: this
+  key also had a `TranslationOverride` row (Admin > Customize > Text) already
+  set on every site from an earlier hand-edit, and a `TranslationOverride`
+  always wins over the YAML default — editing `client.en.yml` alone had no
+  visible effect until the override was brought back in sync. Like the
+  Cursor-look script (§14), the running app process caches the compiled
+  locale bundle in memory (`ExtraLocalesController.js_digests`), so a
+  `pkill -USR2 -f 'ruby bin/pitchfork'` restart is needed locally before the
+  new text shows up even after the override is synced.
+  - **Second gotcha, found later**: on production, this key's override had
+    since been *deleted* entirely (not just stale), which routes it through
+    `ExtraLocalesController::MAIN_BUNDLE` — a bundle shared verbatim across
+    every multisite site (`SHARED_BUNDLES`, unlike `OVERRIDES_BUNDLE`, which
+    is in `SITE_SPECIFIC_BUNDLES` and gets a `?__ws=<hostname>` query param
+    on its CDN URL). A production CDN (`cdn.navodians.com`) kept serving a
+    stale cached copy of that shared bundle even after a full deploy,
+    fresh `assets:precompile`, and fresh Pitchfork workers all confirmed
+    correct content server-side — the exact mechanism wasn't fully pinned
+    down (worth a follow-up with CDN console access), but setting an
+    explicit per-site override sidesteps it entirely, since overrides
+    always get a fresh, site-distinct CDN cache key.
+  - `script/nvs-features/sync-site-text-overrides.rb` (renamed and
+    generalized from `sync-bulk-invite-instructions-override.rb`, which
+    only handled this one key) fixes both gotchas for any `js.*` key: dry-run
+    by default, `APPLY=1`/`SITES=`/`KEYS=` (comma-separated; defaults to just
+    this key for backward compatibility). Re-run it — with `KEYS=` covering
+    whichever key(s) changed — after any future edit to a `client.en.yml`
+    `js.*` string that needs to reliably show up on production, since
+    neither gotcha is a one-time fix: a key can always lose its override
+    again, and the shared-bundle/CDN interaction isn't specific to this key.
+
+### 3b. Invite acceptance page redesign
+
+`frontend/discourse/app/templates/invites/show.gjs` restructured into a
+two-column `login-body`/`has-alt-auth` layout: existing form on the left
+(`login-left-side`), a right-hand social-login panel (`login-right-side`,
+`LoginButtons`) shown whenever `showSocialLoginButtons` is true — social login
+offered alongside the form whenever a provider is configured, not only when
+it's the *sole* option, mirroring `signup.js`'s `showRightSide`.
+DiscourseConnect is excluded (it forces its own SSO redirect, for which social
+buttons would be a confusing non-functional alternative).
+
+### 3c. OTP confirmation page (mobile app handoff)
+
+`app/views/session/one_time_password.html.erb` redesigned from a bare
+form+button into a 3-stage UI: a spinner (auto-submit expected within ~1s,
+driven by JS the mobile app injects into the page), a fallback manual "Confirm"
+button revealed only if nothing has auto-submitted after a few seconds, and a
+"still stuck?" reload prompt as a last resort. `window.__otpAutoSubmit()` is
+the single guarded submit path — the injected auto-submit call and a manual
+tap are both funneled through it with a `submitted` flag, so a race between
+them can't double-POST the same one-time token (a second POST after the first
+already succeeded would otherwise report the token as invalid, producing a
+false error for the user). The page renders in the `no_ember` layout with
+`hide_header: true` (a new local in `no_ember.html.erb`), so the site header
+doesn't compete with the 3-stage UI.
+
+### 3d. Device-auth `platform` threading
+
+The QR-code-based device-linking flow (`UserApiKey::DeviceAuth::{CreateRequest,
+Grant,RequestValidator,KeyCreator}`) gained the same `platform` attribute the
+direct API-key flow uses (see §4), validated against
+`UserApiKey::ALLOWED_PUSH_PLATFORMS` and threaded through to the created key's
+`push_url` column — so push registration works whether the mobile app links
+by same-device redirect or by scanning a QR code shown on desktop.
+
+### 3e. Email-code signup and login: domain rule, layout, cross-links
+
+*(originally: `feat : Domain restriction and OTP Signup flow update` and
+`feat : Fix for the code login`; the username side is §11)*
+
+**Requirement**: with `enable_local_logins_via_code` on, a college email that
+can never sign up should be told so up front instead of waiting for a code that
+never arrives, and the signup and login screens should link to each other.
+
+- **Domain rule** (`app/services/email_login_code/request.rb`,
+  `SessionController#create_login_code`): a new `email_domain_allowed` policy
+  runs before delivery. An address that already belongs to an account always
+  passes (an allowlist change must not lock out an existing member), as does
+  any address when `allowed_email_domains` is blank or the address is a
+  developer's. Otherwise a domain outside the allowlist gets the
+  `user.email.not_allowed` error ("domain is not in the list of allowed college
+  domains. Please reach out to support to get your domain added."; the core
+  string was reworded) on both the signup and the login screen, and no code is
+  created. It reveals nothing `/u/check_email` doesn't already reveal to any
+  signup attempt. `blocked_email_domains` is deliberately not part of it: a
+  blocklist match stays silent like every other non-delivery reason
+  (`deliverable?`). A site with no allowlist is unaffected; iitians configures
+  one.
+- **Layout** (`frontend/discourse/app/components/code-login-form.gjs`,
+  `templates/{login,signup}.gjs`, `common/login/code-login-form.scss`): the
+  terms disclaimer moved into the form (`@disclaimerHtml`) and sits on the same
+  row as **Continue** from the `md` breakpoint up, wrapping on mobile. The form
+  renders its own cross-link, "Already have an account? Log In" on signup and
+  "Don't have an account? Sign Up" on login (`@onGoToLogin` /
+  `@onCreateAccount`), reusing the classic form's `signup-page-cta` /
+  `login-page-cta` markup so it inherits that styling. The login form also
+  offers "Log in with your password instead".
+- **Required user fields honour the §6 hook**: `EmailLoginCode::Redeem` runs
+  each required field through the same `user_field_required_for_signup`
+  modifier `UsersController#create` uses, so a field another field's custom
+  validation hides (e.g. Batch/Branch behind "I am") is exempted server-side
+  here too, not only on the client.
+- **Unknown emails on login**: the login code doubles as signup, so an address
+  with no account still gets a code where signup would be possible for it. Where
+  it wouldn't (registrations closed, invite-only, blocklisted), nothing is sent
+  but the form still advances to the code step, so the screen doesn't reveal
+  which addresses exist. Only the allowlist mismatch above is reported.
+
+### Edge cases
+
+- The OTP page's manual fallback button only appears if nothing has submitted
+  yet — if a submit is genuinely just slow (not stuck), the timeout check
+  early-returns so the user can't race a slow in-flight request with a second
+  manual one.
+
+### Extension: `allow_any_email` Bypasses the Site's Domain Allowlist
+
+**Requirement**: an `allow_any_email` invite (3a) is redeemable with any email
+address, but the site's `SiteSetting.allowed_email_domains` allowlist (this
+fork's custom college-domain restriction) still rejected the new account at
+creation time, contradicting the "any email" promise.
+
+**Root cause**: `allow_any_email` only ever controlled invite-side matching
+(`Invite#email`/`#is_invite_link?`); it wasn't a persisted attribute, so nothing
+carried it through to `InviteRedeemer.create_user_from_invite`'s `user.save!`,
+where `UserEmail`'s `email: true` validator (`lib/validators/email_validator.rb`)
+runs the domain check unconditionally for every non-staged user, regardless of
+how the invite matched.
+
+**Implementation**:
+- `allow_any_email` is now a real persisted column on `invites`
+  (`AddAllowAnyEmailToInvites`, `default: false, not null`), added to
+  `Invite.generate`'s `opts.slice(...)` allowlist and to
+  `Jobs::BulkInvite#send_invite`'s `invite_opts` — same pattern as
+  `recipient_name`/`recipient_keywords`/`skip_personalization`.
+- A new, narrower bypass than the existing `User#skip_email_validation` (which
+  skips format/blocklist checks too): `User#skip_email_domain_validation` /
+  `UserEmail#skip_email_domain_validation`, propagated from `User` to its
+  `primary_email` by a `before_validation` callback
+  (`set_skip_email_domain_validation`) mirroring how
+  `set_skip_validate_email` already propagates its own flag. `EmailValidator
+  #validate_each` checks `record.try(:skip_email_domain_validation)` before
+  running the domain check only — format and `ScreenedEmail` blocklist checks
+  are untouched.
+- `InviteRedeemer.create_user_from_invite` sets
+  `user.skip_email_domain_validation = true if invite.allow_any_email?` right
+  before `user.save!`.
+
+**Edge cases**:
+- Only the invite-redemption path is affected — plain signup
+  (`UsersController#create`) has no `Invite` in scope, so it's never bypassed
+  by this flag; the site's domain allowlist still applies to organic signups.
+- Format validation and `ScreenedEmail` blocking still apply to an
+  `allow_any_email` redemption — only the domain-allowlist check is skipped.
+
+---
+
+## 4. Mobile Notification Integration
+
+*(originally: `feat : Mobile Notification Integration`)*
+
+### Requirement
+
+Replace the previous generic "web push relay" pusher (`HubPushNotificationPusher`,
+removed) with direct native push delivery to iOS (APNs) and Android (FCM), so
+the mobile app receives push notifications without a third-party relay
+service in the loop.
+
+### Implementation
+
+- **Repurposed column, not a new one**: `UserApiKey#push_url` used to store a
+  relay webhook URL; it's repurposed to store the platform string (`"ios"` or
+  `"android"`) instead — `push_url IN ('ios', 'android')` is now how
+  `UserApiKey.push_clients_for(user)` finds active push-capable keys, replacing
+  the old `allowed_user_api_push_urls` substring-match allowlist entirely.
+- New `platform` request param (`user_api_keys_controller.rb`,
+  `user-api-key-new.js` controller/route) is what actually gets stored into
+  `push_url`; validated against `UserApiKey::ALLOWED_PUSH_PLATFORMS = %w[ios android]`.
+- `app/services/apns_push_notification_pusher.rb`: builds an `Apnotic`
+  connection from `SiteSetting.apple_pem`/`apple_key_id`/`apple_team_id`
+  (defined by the Apple auth plugin — APNs reuses that Sign in with Apple key;
+  `ApnsPushNotificationPusher.configured?` skips APNs when they aren't defined),
+  pushes to every iOS client for the user. If APNs responds `BadDeviceToken`
+  (common for debug/TestFlight builds registered against the sandbox rather
+  than production APNs), retries once against the sandbox endpoint before
+  giving up, reusing one connection per push cycle (opened lazily, closed in
+  an `ensure`).
+- `app/services/fcm_push_notification_pusher.rb`: builds an OAuth2 JWT-bearer
+  assertion from `SiteSetting.fcm_service_account_json` (a Firebase service
+  account key), exchanges it for an access token cached for ~55 minutes
+  (Google's tokens are valid 1 hour — refreshed a bit early), and POSTs to the
+  FCM v1 HTTP API per Android client.
+- `Jobs::DeliverPushNotification` now calls both
+  `FcmPushNotificationPusher.push`/`ApnsPushNotificationPusher.push`
+  unconditionally alongside the existing web-push path, rather than the single
+  `HubPushNotificationPusher.push` it used to call.
+- New site settings (`user_api` category): `fcm_service_account_json`
+  (`textarea: true, secret: true`), `apns_bundle_id`, `mobile_stable_version`
+  (`client: true`).
+- Bonus fix bundled in this commit: `redirect_uri_for` in
+  `user_api_keys_controller.rb` now returns a friendly
+  `"the mobile app"` label (`user_api_key.redirect_target_mobile_app`)
+  for any `auth_redirect` whose URI scheme isn't `http`/`https` — a raw custom
+  scheme like `myapp://callback` used to be shown to the user verbatim, which
+  isn't a meaningful "you'll be redirected to X" message for a native app deep
+  link.
+
+### Edge cases
+
+- Both pushers **no-op silently** (not an error) if their respective site
+  setting is blank — a site that hasn't configured FCM/APNs credentials yet
+  just doesn't push, rather than failing.
+- Both pushers catch and log (never raise) their own delivery exceptions per
+  client — one bad/expired device token doesn't stop delivery to the user's
+  other registered devices in the same push cycle.
+- The Apple key settings come from the Apple auth plugin, which core spec runs
+  don't load. `ApnsPushNotificationPusher.configured?` is what keeps a site
+  without it from failing every push job. The pusher's own spec skips itself
+  when the settings are absent (it runs with `LOAD_PLUGINS=1`), and
+  `apns_push_notification_pusher_without_plugin_spec.rb` covers the
+  plugin-absent path that core runs do exercise.
+- FCM's access token is memoized both in-process (`@service_account` hash
+  keyed by the raw JSON, avoiding re-parsing) and in `Discourse.cache`
+  (shared across processes) — a config change to the service account JSON
+  invalidates the in-process memo automatically since it's keyed by the JSON
+  string itself, but the *cached* token from the old credentials remains valid
+  under the old cache key until its ~55-minute TTL expires.
+
+---
+
+## 5. Allow Moderators to Bulk-Invite via CSV
+
+*(originally: `Allow moderators to bulk invite users via CSV`)*
+
+### Requirement
+
+Bulk invite-from-file was hard-coded to admins only, both server- and
+client-side, even though `invite_allowed_groups` already lets moderators send
+individual invites — an inconsistent permission boundary.
+
+### Implementation
+
+- `lib/guardian/invite_guardian.rb#can_bulk_invite_to_forum?`: `is_admin?` →
+  `is_staff?`.
+- `CurrentUserSerializer` exposes the permission to the client:
+  `can_bulk_invite_to_forum` (always `true` when included) gated by
+  `include_can_bulk_invite_to_forum? { scope.can_bulk_invite_to_forum? }` —
+  the standard Discourse serializer pattern for a boolean that should be
+  entirely absent from the JSON (not just `false`) when the user lacks the
+  permission.
+- `user-invited/show.js#canBulkInvite` switched its dependent key and check
+  from `currentUser.admin` to `currentUser.can_bulk_invite_to_forum`.
+
+### Edge cases
+
+- None specific to this change beyond the permission boundary itself — this
+  is a pure widen-the-gate change reusing an already-existing capability
+  (`invite_allowed_groups`) rather than introducing new logic.
+
+### Extension: Batch Moderator bulk invite via Review Queue
+
+The above widened bulk invite to site moderators (`is_staff?`). Batch
+Moderators (section 1) are deliberately weaker — non-staff — so they don't
+get the same immediate-processing path. Instead:
+
+- `BatchModeration::GuardianExtension#can_bulk_invite_to_forum?`
+  (`lib/batch_moderation/guardian_extension.rb`) grants a Batch Moderator
+  access to the same "Create Bulk Invites" UI as staff, but
+  `InvitesController#upload_csv` branches on `guardian.is_staff?`: staff are
+  unchanged (immediate `Jobs.enqueue(:bulk_invite, ...)`), a Batch
+  Moderator's upload instead creates a `ReviewableBulkInvite` and is held
+  for admin/moderator approval in the standard Review Queue (`/review`) —
+  the review step *is* the access control, no separate toggle needed.
+- The reviewable stores **both** the parsed `invites` array **and** the raw
+  uploaded CSV bytes (`raw_csv`). This is deliberate: Discourse's stock CSV
+  parser silently drops any column that's blank on every row (e.g. an empty
+  `groups` column), so reconstructing "what was uploaded" from the parsed
+  array alone loses data — the review UI
+  (`frontend/discourse/app/components/reviewable/bulk-invite.gjs`) renders
+  and downloads `raw_csv` verbatim instead. `upload_csv` also caps the raw
+  file at `MAX_BULK_INVITE_CSV_BYTES` (5MB) before persisting it, since
+  unlike the parsed array it isn't otherwise bounded by `max_bulk_invites`.
+- On approve, the existing `Jobs::BulkInvite` flow runs as normal (including
+  its own pre-existing `bulk_invite_succeeded`/`bulk_invite_failed` PM to
+  the submitter). On reject, a new `reviewable_bulk_invite_rejected` system
+  PM notifies the submitter — previously rejection sent no notification at
+  all.
+- `Jobs::BulkInvite#get_topic` gained a `@guardian.can_invite_to?(topic)`
+  check (it previously had none), consistent with how `get_groups` already
+  silently drops unauthorized groups rather than trusting a CSV column
+  unconditionally. Matters more now that a lower-trust role's invites can
+  reach this job post-approval.
+- A Batch Moderator does **not** need to have connected a LinkedIn account
+  to bulk-invite — `can_bulk_invite_to_forum?` only checks batch-group
+  ownership. An earlier version of this feature added an optional,
+  site-setting-gated LinkedIn-connection requirement on top of this; it was
+  removed as unwanted. LinkedIn login (`linkedin_oidc`, section 9) is
+  unrelated and unaffected by that removal.
+
+### Edge cases (Batch Moderator extension)
+
+- Spec coverage: `spec/models/reviewable_bulk_invite_spec.rb` (submit, approve
+  and reject), `spec/lib/batch_moderation/guardian_extension_spec.rb` and
+  `spec/lib/guardian/invite_guardian_spec.rb` (the permission), and
+  `spec/requests/invites_controller_spec.rb` (staff vs Batch Moderator upload).
+  The review-queue UI (`reviewable/bulk-invite.gjs`) is verified manually only.
+
+---
+
+## 6. Auth Custom Field Validation — Plugin Modifier Hooks
+
+*(originally: `feat : auth custom field validation fix`)*
+
+### Requirement
+
+Give a plugin (the sibling `nvs-authentication-validations` plugin) a clean
+extension point to conditionally exempt a specific signup `UserField` from
+being "required", without hacking `UsersController`'s core validation
+directly — needed for cases like a particular email domain not needing to
+fill in a Batch/College field at signup.
+
+### Implementation
+
+`app/controllers/users_controller.rb` wraps both places a required-field
+check happens with `DiscoursePluginRegistry.apply_modifier`:
+- **Signup** (`create`): `apply_modifier(:user_field_required_for_signup,
+  f.required?, f, params[:user_fields])` — a registered modifier receives the
+  field's own `required?` value plus the field object and the raw submitted
+  params, and returns whether it should actually be enforced.
+- **Profile update** (`update`): same pattern via
+  `:user_field_required_for_update`, additionally passed the `user` being
+  updated.
+
+With **no modifier registered**, `apply_modifier` returns the original value
+unchanged — signup/update validation behaves exactly as before this change
+(verified by dedicated specs asserting the field is still blocked). A plugin
+opts in by calling `DiscoursePluginRegistry.register_modifier(plugin, :user_field_required_for_signup) { |required, field, submitted_fields| ... }`.
+
+### Edge cases
+
+- This is a pure extension point — it cannot, on its own, ever *relax*
+  validation; it only does so once a plugin explicitly registers a modifier
+  that returns `false` for a specific field. No behavior change ships with
+  this commit alone.
+- The update-path modifier receives the target `user`, but the signup-path
+  modifier does not (the user doesn't exist yet at that point) — a modifier
+  shared between both hooks needs to handle a possibly-absent `user` argument.
+
+---
+
+## 7. Local Multisite Configuration & Dev Workflow
+
+*(originally: `feat : Trigger production deployment and local changes`)*
+
+Adds `config/multisite.local.yml` (three local Postgres databases —
+`nitians_forum`, `iitians_forum`, `navodians_forum` — mapped to
+`*.local` hostnames for genuine multisite local development, mirroring
+production's per-site database split) and `docs/LOCAL.md`, documenting that
+local dev requires **two** processes running together: the Rails/Puma server
+(`DISCOURSE_MULTISITE_CONFIG_PATH=config/multisite.local.yml
+DISCOURSE_REDIS_HOST=localhost RAILS_ENV=development bin/rails server -p 3000`)
+and the frontend bundler (`pnpm --dir frontend/discourse start`) — the site
+renders a "Frontend build error" page if the bundler isn't running, and
+`bin/rake multisite:migrate` (not plain `bin/rake db:migrate`, which only
+targets the "default" connection) is required to apply migrations across all
+three site databases.
+
+A gitignored `config/discourse.conf` containing
+`multisite_config_path = config/multisite.local.yml` makes every local Rails
+process (server, console, runner, Sidekiq) use the local config without setting
+the environment variable each time. It is the supported override point:
+`config/multisite.yml` is the tracked file the production deploy reads and must
+never be edited for local convenience. The test environment ignores this file
+(see the rebase guide above).
+
+Also adds `workflow_dispatch` to `.github/workflows/deploy.yml` (manual deploy
+trigger) and the `redirect_target_mobile_app` friendly-label behavior
+described in §4 (this is where that logic actually originates, ahead of the
+Mobile Notification Integration commit).
+
+---
+
+## 8. Production Deployment Infrastructure
+
+*(originally: `Phantix Deployment`)*
+
+Adds `.github/workflows/deploy.yml` (CI deploy pipeline on push to `master`),
+`DEPLOYMENT.md` (full runbook — AWS Lightsail + RDS Postgres + S3 + CloudFront
++ SES infra for navodians.com, SSH access, first-time server bootstrap,
+`containers/app.yml` credential placeholders, Let's Encrypt cert renewal/
+troubleshooting), `NOTES.md`, and `config/multisite.yml` (the production
+multisite config, pointing at real RDS hosts — distinct from the
+`multisite.local.yml` added later in commit 7 for local dev). See
+`DEPLOYMENT.md` directly for the full operational runbook rather than
+duplicating it here.
+
+The workflow fails visibly rather than hanging: the "wait for nginx" and "verify
+all sites are up" steps retry a bounded number of times (60 x 5s, `curl
+--max-time 10`), then fail and print the container log tail; the job has
+`timeout-minutes: 45`. The secrets-bearing `app.yml` is written to an
+`mktemp` (0600) file that a `trap` removes even if the copy fails.
+
+**Deploy behaviour worth knowing**
+
+- The workflow runs on every push to `master` and on manual dispatch. The
+  `tests.yml` and `migration-tests.yml` workflows run only for pull requests and
+  `main` / `beta` / `stable`, so nothing gates a `master` push: run the specs
+  locally first.
+- Migrations run during the build, not at the swap: `containers/app.yml` runs
+  `rake multisite:migrate` in `after_db_migrate` while the old container is
+  still serving. The old code therefore briefly runs against the migrated
+  schema, which matters for any migration that changes data the old code reads
+  (e.g. the notification renumber in §1). The swap itself is about 30 seconds of
+  downtime.
+- Take a `pg_dump -Fc` of the three physical databases (`default` shares
+  `navodians`' database) immediately before deploying, and confirm each dump
+  lists with `pg_restore --list`. Rolling back means restoring those dumps and
+  redeploying the previous `master`.
+- After a deploy, check all three sites return 200, that `production_errors.log`
+  and `sidekiq.log` are empty, that `schema_migrations` is at the new head on
+  each database, and that Sidekiq's retry and dead sets are empty.
+
+### Edge case worth flagging
+
+`config/multisite.yml`'s production DB hosts are unreachable from a local
+dev machine — running any Rails command locally *without* explicitly
+overriding `DISCOURSE_MULTISITE_CONFIG_PATH` (or using `config/discourse.conf`,
+§7) will hang trying to connect to production RDS at boot (site-settings
+refresh iterates every configured site's DB unconditionally once multisite mode
+is active). For the test suite, point it at a path that doesn't exist so
+Discourse boots single-site (rebase guide above).
+
+---
+
+## 9. LinkedIn OIDC Login Fix — `client_secret` Missing
+
+### Requirement
+
+LinkedIn login (`linkedin_oidc`, used for user sign-in; an earlier
+LinkedIn requirement on Batch Moderator bulk invite, section 5, has since been
+removed) was failing on production with `OAuth2::Error, invalid_request: A required parameter
+"client_secret" is missing` during the token-exchange callback step.
+
+### Root cause
+
+Not a config issue — the `oauth2` Ruby gem (pinned at 2.0.25 in
+`Gemfile.lock`) changed its default `auth_scheme` from `:request_body` to
+`:basic_auth` in its 2.0 release. LinkedIn's token endpoint
+(`/oauth/v2/accessToken`) only accepts `client_secret` in the POST body, not
+an `Authorization: Basic` header, so it never received the secret at all.
+Confirmed this is an unpatched gap in upstream Discourse core too (not
+something this fork fell behind on).
+
+### Implementation
+
+- `lib/auth/linkedin_oidc_authenticator.rb`: added `auth_scheme:
+  :request_body` to the `LinkedInOidc` strategy's `client_options`, pinning
+  back the pre-2.0 behavior. Scoped only to this authenticator's own
+  `client_options` — mirrors the identical, pre-existing pattern already
+  used for GitHub and Facebook in this codebase; does not touch the shared
+  `oauth2` gem config or any other authenticator.
+
+### Edge cases
+
+- A separate, earlier production issue on the same login flow
+  (`invalid_scope_error`) was a LinkedIn Developer Portal config gap, not
+  code — the app needed the "Sign In with LinkedIn using OpenID Connect"
+  product added under its Products tab. Worth remembering these are two
+  independent failure modes that can both block the same login attempt.
+
+## 10. AI-Personalized, Paced Bulk Invite Emails
+
+### Requirement
+
+Bulk-invite CSV uploads of thousands of college student emails (`.ac.in`
+domains) were being flagged as spam — every invite email came from the same
+fixed locale-template text, and large batches were fired in bursts of up to
+200 at once (see section 3's throttle, `Jobs::ProcessBulkInviteEmails`).
+Needed: (1) each recipient's email body text made textually distinct via an
+AI language model, following a strict anti-spam style, and (2) every send
+spaced out by a random, admin-configurable delay (default 5-15s) regardless
+of total CSV size, instead of bursting.
+
+### Implementation (`lib/bulk_invite_personalization/`,
+`app/jobs/regular/process_bulk_invite_emails.rb`,
+`app/jobs/regular/bulk_invite.rb`)
+
+- New `BulkInvitePersonalization::Generator.personalize(invite)`
+  (`lib/bulk_invite_personalization/generator.rb`): builds a
+  `DiscourseAi::Completions::Prompt` embedding the anti-spam rules (plain
+  text only, under 75 words, no links/markdown/attachments in the generated
+  portion, peer-to-peer tone, no jargon/`!`/ALL CAPS/`$`, ends with a
+  low-friction question, vary phrasing per call, reference the recipient's
+  college only via their email domain — never invent a name) plus the
+  admin's `bulk_invite_ai_personalization_template` site setting and the
+  recipient's email domain, and calls the site's configured
+  `SiteSetting.ai_default_llm_model` (falling back to `LlmModel.last`).
+  Fails safe (returns `nil`) at every prerequisite check — plugin/feature
+  disabled, blank template, no LLM configured — and rescues any LLM error,
+  so a failed generation never blocks the invite from sending via the plain
+  template.
+- `BulkInvitePersonalization::ResponseValidator.clean(text)`
+  (`lib/bulk_invite_personalization/response_validator.rb`): defense-in-depth
+  post-processing — strips HTML, hard-rejects (not strip-and-continue) any
+  URL/domain, markdown, `!`/`$`/ALL-CAPS content, and enforces the 75-word
+  cap by truncating to the last sentence boundary or rejecting outright if
+  no clean boundary exists under the limit.
+- Generation happens in `Jobs::ProcessBulkInviteEmails`, one invite at a
+  time, immediately before send — never in `Jobs::BulkInvite`, which can
+  process an entire 10K-row CSV in a single job run; calling the LLM there
+  would mean thousands of blocking calls with no pacing. Writing the result
+  into `Invite#custom_message` routes through the pre-existing
+  `custom_invite_forum_mailer` template (`InviteMailer#send_invite` already
+  branches on `custom_message.present?`) with **zero changes** to the
+  mailer, `Jobs::InviteEmail`, or any locale template — the join link
+  (`%{invite_link}`) is untouched and still always sent.
+- `Jobs::ProcessBulkInviteEmails#execute` was rewritten from a
+  200-per-minute batch throttle (pull up to `Invite::BULK_INVITE_EMAIL_LIMIT`
+  pending invites, fire all their `Jobs::InviteEmail` enqueues at once,
+  reschedule after a fixed 1 minute) into a one-at-a-time loop: pick a
+  single `bulk_pending` invite via `FOR UPDATE SKIP LOCKED` (safe under
+  concurrent executions — a Sidekiq retry, or two overlapping
+  `Jobs::BulkInvite` runs — without a separate lock), personalize it, send
+  it, then reschedule itself after
+  `rand(bulk_invite_email_delay_min_seconds..bulk_invite_email_delay_max_seconds).seconds`
+  (both new site settings, default 5/15, cross-validated min ≤ max via
+  `BulkInviteEmailDelayMinSecondsValidator`/`...MaxSecondsValidator`).
+- `Jobs::BulkInvite#send_invite`: bound invites now always get
+  `emailed_status: :bulk_pending` (previously only when the CSV had more
+  than `Invite::BULK_INVITE_EMAIL_LIMIT` rows), so pacing and personalization
+  apply uniformly regardless of batch size. `allow_any_email` unbound rows
+  keep their original `> BULK_INVITE_EMAIL_LIMIT`-gated behavior and
+  `to_override` immediate-delivery path untouched — out of scope for this
+  feature. `Jobs::BulkInvite#execute` now always enqueues
+  `Jobs::ProcessBulkInviteEmails` after processing (a no-op when nothing
+  ended up `bulk_pending`).
+- `Invite::BULK_INVITE_EMAIL_LIMIT` narrows in scope: it's no longer a batch
+  size (replaced by `.limit(1)` in the rewritten job) and no longer governs
+  bound-invite throttling at all — it now only gates the `allow_any_email`
+  immediate-vs-throttled threshold.
+- New site settings (`config/site_settings.yml`, `users` area):
+  `bulk_invite_ai_personalization_enabled` (bool, default off — zero
+  behavior change for existing sites until an admin opts in and has an LLM
+  configured), `bulk_invite_ai_personalization_template` (textarea, hidden
+  until personalization is enabled), `bulk_invite_email_delay_min_seconds`
+  / `bulk_invite_email_delay_max_seconds` (integers, default 5/15, apply to
+  every bulk invite independent of personalization).
+
+### Edge cases
+
+- No LLM configured (empty `LlmModel` table, or the `discourse-ai` plugin
+  disabled) is an expected, permanently-supported state, not an error —
+  personalization silently no-ops and invites send through the pre-existing
+  plain template.
+- `allow_any_email` invites are explicitly out of scope: neither
+  personalized nor re-paced beyond their pre-existing
+  `> BULK_INVITE_EMAIL_LIMIT`-row `bulk_pending` threshold.
+- The pacing chain is a singleton per site. Starters (`Jobs::BulkInvite`,
+  resend-all) call `Jobs::ProcessBulkInviteEmails.ensure_chain!`, which takes a
+  Redis key (`set nx`, TTL = 3 x the max delay + 60s so a dead chain is
+  replaced); each tick refreshes it, and a chain that finds nothing pending
+  deletes it and re-checks once for an upload that landed in between. Two
+  uploads, or an upload plus resend-all, therefore share one chain and the
+  min/max delay really does cap the send rate. `FOR UPDATE SKIP LOCKED` still
+  guards each claim.
+- A failure while handling one invite (personalization/enqueue raising) is
+  rescued: the invite moves to `:pending` (unsent and resendable — not back to
+  `:bulk_pending`, where an always-failing invite would be re-claimed first
+  forever) and the chain reschedules as normal. If a worker dies outright
+  between the claim and the enqueue, the invite sits in `:sending`; each tick
+  returns invites that have been `:sending` for over an hour to
+  `:bulk_pending`.
+- `Jobs.enqueue_in` retains Sidekiq's default retry behavior for this job
+  (deliberately not disabled, unlike `Jobs::BulkInvite`'s
+  `sidekiq_options retry: false`) — safe because `FOR UPDATE SKIP LOCKED`
+  means a retry can't double-claim an already-`:sending`/`:sent` row.
+- **Gemini `gemini_interactions` provider quirks**, found and fixed while
+  validating the first real LLM configured for this feature (production,
+  `gemini-3.8-flash`):
+  - A Google AI Studio Free Tier key caps this model at 20 requests/day —
+    an apparent "hang" (a real DiscourseAi retry-with-backoff loop, ~130s,
+    surfacing a `429` only after retrying) was actually quota exhaustion,
+    not a code or provider bug. Needs a billed tier for any real use.
+  - This provider spends part of `max_tokens` on an internal reasoning step
+    before emitting visible text; the original `MAX_TOKENS = 220` let
+    reasoning consume the whole budget, truncating replies mid-sentence.
+    Raised to `1200`, empirically the smallest value that reliably left
+    room for a complete, rule-compliant reply in testing.
+  - When reasoning is on, `llm.generate` returns an `Array` mixing response
+    text with `DiscourseAi::Completions::Thinking` objects instead of a
+    plain `String`. `ResponseValidator.clean` assumed a `String`; on an
+    `Array` it silently sanitized the array's own `#inspect` output (HTML
+    entity stripping ate the `<...>` part of a `Thinking` object's default
+    inspect, leaving literal `["real text", #]` garbage as the "cleaned"
+    result — this would have been sent to real invite recipients).
+    `Generator.call_llm` now extracts only the `String` parts of the
+    response before handing it to the validator.
+
+### Extension: Paced Resend All Invites
+
+**Requirement**: `InvitesController#resend_all_invites` (the admin "Resend
+All Invites" button) predates this feature and calls `Invite#resend_invite`
+— an immediate, undelayed `Jobs.enqueue(:invite_email, ...)` — for every
+matching invite in a plain loop. That completely bypasses the throttle
+above: triggering it mid-campaign re-sends every already-sent invite as a
+duplicate *and* blasts out every still-`bulk_pending` invite all at once,
+reproducing the exact burst-send pattern this whole feature exists to
+prevent — reachable by a single click.
+
+**Implementation** (`app/models/invite.rb`,
+`app/controllers/invites_controller.rb`):
+
+- New `Invite#requeue_for_paced_resend`: the same expiry/invalidation reset
+  as `resend_invite`, but sets `emailed_status: :bulk_pending` instead of
+  enqueuing `Jobs::InviteEmail` directly. `resend_invite` itself is
+  untouched and still used as-is for the single-invite resend action (no
+  burst risk there — one admin-triggered email is fine to send immediately).
+- `InvitesController#resend_all_invites_paced` (private): iterates the same
+  invite scope `resend_all_invites` already used, skips any invite whose
+  `emailed_status` is already `bulk_pending`/`sending` (already queued —
+  requeuing it would be redundant and risks reordering or duplicating an
+  in-flight send), calls `requeue_for_paced_resend` on the rest, and
+  enqueues `Jobs::ProcessBulkInviteEmails` once at the end — reusing the
+  exact same one-at-a-time, randomly-paced throttle (and AI personalization,
+  if enabled) a fresh CSV upload goes through, rather than adding a second
+  throttle implementation.
+- Gated behind new site setting `bulk_invite_paced_resend_enabled` (default
+  **off**, matching `bulk_invite_ai_personalization_enabled`'s
+  safe-default-for-existing-sites precedent): `resend_all_invites` branches
+  on it, calling `resend_all_invites_paced` when on or falling back to the
+  original immediate-send loop when off. A site that never opts in sees
+  zero behavior change.
+
+**Edge cases**:
+
+- Re-queuing rewrites `custom_message` the next time
+  `Jobs::ProcessBulkInviteEmails` processes the invite, but only when
+  personalization actually returns text: if AI personalization is enabled, a
+  resent invite gets a freshly-generated (differently worded) note rather than
+  reusing its original one — desirable, since identical wording on a resend
+  burst would be exactly the fingerprint risk this feature avoids. If
+  personalization is disabled or unavailable, the existing `custom_message`
+  (for example one the inviter wrote) is left untouched. Known residual: with AI
+  on, a generated note still replaces an inviter-written one, as the two can't
+  be told apart without a schema marker.
+- Invites deliberately marked `:not_required` via `skip_email` still match
+  `resend_all_invites`'s existing scope (`email IS NOT NULL` alone satisfies
+  it for a bound invite) and still get requeued/resent when paced resend is
+  on — this is unchanged, pre-existing scope behavior from before this
+  extension, not something introduced here.
+- The pre-existing `bulk-reinvite-per-day` rate limiter (1/day) still
+  applies unchanged and limits how often "Resend All Invites" can be
+  triggered at all; it does not limit how many invites a single trigger
+  requeues.
+
+### Extension: Sent-Email Preview
+
+**Requirement**: with personalization on, `Invite#custom_message` is rewritten
+on every pass and every resend, so once an invite is resent nobody can see what
+was actually sent to a recipient. An admin or moderator needs to see the last
+email an invite produced.
+
+**Implementation**:
+
+- `Email::MessageBuilder` adds an `X-Discourse-Invite-Id` header when the
+  message has an `invite_id` option, and `Email::Sender` copies it onto
+  `email_logs.invite_id` (new column and partial index, §12). The sender also
+  stores the full body of every invite email, as it already does for group-SMTP
+  mail, since the log row is the only record once `custom_message` changes.
+- `Invite#latest_sent_email_log` returns the newest `email_type: "invite"` log
+  row for the invite. `GET /admin/email-logs/invite_sent/:invite_id`
+  (`Admin::EmailLogsController#invite_sent`, admin only, 404 if nothing was
+  sent) returns it through `EmailLogDetailsSerializer`.
+- Frontend: `Invite.findLatestSentEmail`, a "Preview sent email" item on the
+  invited-users list for invites that have been emailed
+  (`templates/user-invited/show.gjs`, `previewSentEmail` in the controller), and
+  the `modal/sent-invite-email.gjs` modal showing subject, body and headers.
+
+**Edge cases**:
+
+- Log rows written before `email_logs.invite_id` existed have none, so those
+  invites have nothing to preview (the endpoint 404s). Purging `email_logs`
+  removes the preview with it.
+- Known gap: the endpoint is admin-only, but the "Preview sent email" item is
+  shown to anyone who can open the invite's menu (`invite.can_delete_invite`
+  and `invite.emailed`), so a moderator or an inviter viewing their own invites
+  gets a permission error when they click it. Gating the item on
+  `currentUser.admin` would close it.
+
+### Extension: Per-Row Recipient Context + Configurable Personalization Rules
+
+**Requirement**: the AI prompt only ever had the recipient's email domain to work
+with, producing generic notes, and the formatting/anti-spam rule set was a hardcoded
+Ruby heredoc, so tuning it needed a code deploy.
+
+**Implementation**:
+
+- **`invites`** gains two nullable columns, `recipient_name` (`string`, 100) and
+  `recipient_keywords` (`string`, 255) (`AddRecipientContextToInvites`), with
+  matching length validations in `app/models/invite.rb` and added to
+  `Invite.generate`'s `opts.slice(...)` allowlist -- without that allowlist entry
+  they'd be silently dropped even though `invite_opts` carries them.
+- **`InvitesController::ALLOWED_BULK_INVITE_COLUMNS`** gains `name`/`keywords`, so a
+  bulk-invite CSV header can include them like any other supported column
+  (`email,groups,topic_id,locale,allow_any_email,name,keywords`, any subset, any
+  order).
+- **`Jobs::BulkInvite#send_invite`** reads `invite[:name]`/`invite[:keywords]` into
+  `recipient_name`/`recipient_keywords` on `invite_opts`, and excludes both from the
+  hash handed to `get_user_fields` -- otherwise they'd be misread as custom User
+  Field keys and log spurious `"Invalid User Field 'name'"` warnings on every row.
+- **`BulkInvitePersonalization::Generator#user_message`** appends a `Recipient
+  name: ...` / `Additional context: ...` line per field only when present -- a CSV
+  without these columns behaves exactly as before.
+- **`BulkInvitePersonalization::Generator#system_message`** now interpolates
+  `SiteSetting.bulk_invite_ai_personalization_rules` instead of a hardcoded rules
+  block; the new setting's default is that same rules text verbatim (plus two new
+  bullets covering how to use the name/keywords fields), so no site's output changes
+  until an admin edits the setting. Declared in core `config/site_settings.yml`
+  alongside its four `bulk_invite_ai_personalization_*` siblings (`area: "users"`,
+  same `depends_on` gating) -- deliberately not inside the vendored `discourse-ai`
+  plugin's own `settings.yml`, so a future plugin update can't silently drop the
+  customization.
+
+**Edge cases**:
+
+- A site with a custom User Field literally named `name` or `keywords` would have
+  that field's CSV column shadowed by these new reserved columns -- same category of
+  tradeoff the existing reserved names (`email`/`groups`/`topic_id`/`locale`/
+  `allow_any_email`) already carry.
+- `recipient_name`/`recipient_keywords` are admin-uploaded free text fed into the LLM
+  prompt -- a theoretical prompt-injection vector, but not a new gap:
+  `ResponseValidator.clean`'s hardcoded URL/Markdown/shouting checks
+  (`lib/bulk_invite_personalization/response_validator.rb`, untouched by this
+  change) still run on whatever the LLM produces, so an injected instruction can at
+  most cause that one row to fail validation and fall back to the plain template --
+  it can't make the pipeline actually emit a link or markdown.
+- Same safety property applies to `bulk_invite_ai_personalization_rules` itself: an
+  admin loosening or blanking it changes what the model is *asked* to do, not what
+  `ResponseValidator` *enforces* -- the fixed validation is independent code, not
+  sourced from this setting.
+- CSV-upload only for v1: neither field is exposed in `InvitesController#update`,
+  `InviteSerializer`, or the invited-users list -- set once at upload time, not
+  hand-editable afterward.
+
+### Extension: Per-Row Skip-Personalization Flag + Domain Filter/Resend
+
+**Requirement**: two more gaps found after the above shipped -- no way to opt a
+specific CSV row out of AI personalization when the site-wide setting is on (e.g. a
+faculty row where the plain template reads better), and no way to view or act on
+invites grouped by the recipient's email domain for a 10K+, multi-institution
+campaign.
+
+**Implementation**:
+
+- **`skip_personalization`**: a `skip_personalization` boolean column
+  (`AddSkipPersonalizationToInvites`, `default: false, not null`), added to
+  `ALLOWED_BULK_INVITE_COLUMNS`, parsed in `Jobs::BulkInvite#send_invite` with the
+  same defensive truthy-string check as `allow_any_email`, threaded through
+  `invite_opts` → `Invite.generate`'s `opts.slice` allowlist exactly like
+  `recipient_name`/`recipient_keywords`. `BulkInvitePersonalization::Generator
+  .personalize` checks it first, ahead of the site-wide `enabled?` check -- falls
+  back to the plain template exactly like every other "not applicable" case.
+- **`email_domain`**: a new stored, indexed column on `invites`
+  (`AddEmailDomainToInvites` + `AddIndexToInvitesEmailDomain`, concurrent partial
+  index on `(invited_by_id, email_domain)`, + `BackfillInvitesEmailDomain` for
+  existing rows), kept in sync by a `before_save` callback whenever `email` changes
+  -- covers every invite-creation path (manual, CSV, resend) uniformly, no special
+  casing needed in `Jobs::BulkInvite`. Stored rather than derived at query time
+  because the domain filter also drives three `COUNT` queries per request (tab
+  counts, scoped to the selected domain) on top of the list query, at the scale this
+  project already deals with.
+- **`Invite.pending`/`.expired`/`.redeemed_users`** each take an optional `domain:`
+  keyword. `redeemed_users` reaches `invites.email_domain` through the join it
+  already has for the existing `search` filter.
+- **`UsersController#invited`**: `params[:domain]` is validated against
+  `Invite::DOMAIN_REGEX` before use (client-supplied, and it also feeds a
+  rate-limiter key in `resend_all_invites` -- reject anything not domain-shaped
+  rather than pass it through). Threaded into all three scope calls; tab counts are
+  recomputed *with* the domain filter applied (deliberately different from `search`,
+  which leaves counts alone); a new `available_domains` field (all of the inviter's
+  distinct domains, computed *without* the filter, so the dropdown's own option list
+  stays stable while filtering) rides along in the same response `InvitedSerializer`
+  already builds.
+- **`InvitesController#resend_all_invites`** ("Resend Invites", renamed from "Resend
+  All Invites"): same `domain` validation; the daily rate limit is keyed per domain
+  (`"bulk-reinvite-per-day-#{domain}"` vs. the existing `"bulk-reinvite-per-day"`),
+  so resending nit.ac.in and iitb.ac.in the same day are independent, while
+  resending nit.ac.in twice the same day still isn't. One button, no new UI element
+  -- it always acts on whichever domain is currently selected in the dropdown (or
+  everyone, if none is).
+- Frontend: a searchable `ComboBox` (select-kit, same pattern as the cohort-filter
+  dropdowns elsewhere in this codebase, not their code) between "Bulk Invite" and
+  "Resend Invites", on all three tabs, gated on `showDomainFilter` -- deliberately
+  *not* gated on the current invite list being non-empty like `showBulkActionButtons`
+  is, since a domain filter that narrows the list to zero results must stay visible
+  or there's no way to clear it. `selectedDomain` resets on tab switch, matching how
+  `searchTerm` already behaves.
+
+**Edge cases**:
+
+- Unbound invites (`email: nil` -- domain-restricted invite links, or an
+  `allow_any_email` row before its intended recipient is known) get
+  `email_domain: nil` and never match any domain filter or count toward any domain's
+  count -- only visible in the unfiltered view, same exclusion `allow_any_email`
+  already has from the *unrelated* existing `domain` invite-link column.
+- That existing `Invite#domain` column (invite-link redemption restriction, mutually
+  exclusive with `email` via `email_xor_domain`) is untouched -- this feature only
+  reads/writes the new `email_domain` column.
+
+### Extension: Skip on Personalization Failure + Delivery Status Filter
+
+**Requirement**: the Gemini key hit its monthly spend cap mid-campaign. Every
+call returned a 429, the generator swallowed it, and each invite quietly went
+out with the plain template, with nothing visible to the admin. When the AI
+call itself fails, the invite should be held back, marked, and easy to find
+and resend once the provider is working again. Admins also need to filter the
+invite list by the delivery status they already see as a pill.
+
+**Implementation**:
+
+- **New `emailed_status` value `skipped: 5`**. It's a plain integer column with
+  no check constraint, so no migration.
+- **`Generator.personalize`** still returns `nil` for every "doesn't apply"
+  case (row opted out, feature off, blank template, no LLM, validator rejected
+  the output). Only an exception from the LLM call now raises
+  `Generator::GenerationFailed` (after the existing warn log). A 429 can't be
+  told apart from other failures cleanly: discourse-ai's `CompletionFailed`
+  only carries the raw response body. So any failed call counts.
+- **`ProcessBulkInviteEmails#deliver`** rescues `GenerationFailed` itself,
+  logs `[ProcessBulkInviteEmails] invite <id> skipped -- <error>` and sets
+  `:skipped` without enqueueing `:invite_email`. It has to be caught there:
+  `#execute`'s generic rescue sets `:pending`, which drops the invite out of
+  the `:bulk_pending` queue. Leaving `:sending` right away also stops
+  `recover_stale_sending_invites` from retrying it against a provider that's
+  still failing.
+- **`Invite#delivery_status`** returns `"skipped"` for it, ahead of the
+  catch-all branch that would otherwise report it as sent.
+- **`Invite::DELIVERY_STATUSES`** lists every value `#delivery_status` can
+  return. **`Invite.with_delivery_status(relation, status)`** is the SQL
+  version of the same mapping. The four pipeline statuses are plain column
+  filters. `sent`/`delivered`/`bounced`/`complained` join the invite's latest
+  `invite`-type `EmailLog` with a `LEFT JOIN LATERAL`, covered by the existing
+  `index_email_logs_on_invite_id`. A parity spec checks the two
+  implementations agree for every status.
+- `emailed_status` and `email_logs` stay separate on purpose (see the comment
+  above `Invite#delivery_status`): they're written by different code at
+  different times (the mailer vs. SES webhooks, possibly days apart), and an
+  invite can have several logs from resends. The filter joins them at read
+  time instead.
+- **`UsersController#invited`**: `params[:status]` is validated against
+  `DELIVERY_STATUSES` and passed to `Invite.pending`/`.expired` and their tab
+  counts. The Redeemed tab has no delivery status, so it ignores it.
+  `available_statuses` is the fixed list, not a query.
+- **`InvitesController#resend_all_invites`** takes the same `status`, so
+  "Resend invites" with "Skipped" selected resends only those. Status is part
+  of the daily rate-limit key (`bulk-reinvite-per-day[-domain][-status]`).
+  Retrying skipped invites after an outage isn't blocked by an ordinary resend
+  earlier that day. Existing keys are unchanged.
+- Frontend: a second `ComboBox` ("All statuses") next to the domain filter on
+  the Pending and Expired tabs, wired like the domain one through
+  `findInvitedBy`, `loadMore`, `reinviteAll` and the confirm dialog. The pill
+  helper now also renders "Sent" and "Skipped".
+
+**Edge cases**:
+
+- A skipped invite stays skipped until someone resends it; nothing retries it
+  automatically. A resend with paced resend off sends it immediately, without
+  personalization. With `bulk_invite_paced_resend_enabled` on, it goes back
+  through the queue and is personalized again.
+- A failure to reach the LLM at all (e.g. `LlmModel` lookup raising) also
+  counts as a failed call, since it happens inside the same rescue.
+
+## 11. Name-Based Usernames at Email-Code Signup + Locked Full-Name Requirement
+
+### Requirement
+
+Batch-moderator promotion notifications (and the cohort-change / action
+notifications) link to `/u/<username>`. Email-code signup used to create the
+account with a random placeholder (`QuietFalcon34`, or `userN` with random
+names off) that the new member then renamed on the "account ready" screen, so
+links built from the placeholder went dead. Usernames now start from the
+member's own name so there's usually nothing to rename, and links survive a
+rename when there is.
+
+### Implementation
+
+- `User::Action::CreateFromVerifiedEmail` derives the username from the name
+  first (`username_from_name`, which calls `UserNameSuggester.suggest` on the
+  name typed at signup and is gated on `use_name_for_username_suggestions`,
+  default on): "Rahul Sharma" becomes `Rahul_Sharma`, `Rahul_Sharma1` on
+  collision. Only if that yields nothing (no name, or one that sanitizes to
+  nothing) does it fall through to the old chain: email-based suggestion
+  (without its generic fallback), random generator, then the generic `userN`.
+  The "account ready" screen prefills this username, and the member can still
+  change it.
+- The cohort sync for a new email-code account is deferred until that screen is
+  finished: `EmailLoginCode::Redeem.call` sets
+  `BatchModeration::GroupSync::DEFER_SYNC_ON_SIGNUP_THREAD_KEY` for the call
+  (the `user_created` / `user_updated` hooks in
+  `config/initializers/301-batch-moderation.rb` honour it), and
+  `PUT /session/login-code/finalize` (`SessionController#finalize_login_code_signup`)
+  runs the sync once the username is settled. Without it the first
+  cohort-change and promotion notifications would carry the placeholder name.
+- `Jobs::UpdateUsername#update_batch_moderation_notifications` rewrites
+  `user_username` / `actor_username` / `target_username` in the three
+  `batch_moderation_*` notification types on every rename (core's
+  `update_notifications` only knows its own keys). Runs in the existing
+  low-priority job; one scan of `notifications` (no index on those keys or on
+  `notification_type` alone).
+- Migration `BackfillBatchModerationNotificationUsernames` repoints already
+  stale notifications by `user_id` / `target_user_id`. Notifications whose user
+  no longer exists can't be repaired. Actor names have no id stored, so they
+  are only fixed going forward.
+- Full name is permanently required: `full_name_requirement` defaults to
+  `required_at_signup`, is `hidden`, and `FullNameRequirementValidator`
+  rejects any other value (UI, API and `SiteSetting.x =` alike). Migration
+  `ResetFullNameAndRandomUsernameSettings` deletes any override of it.
+  Specs covering the other modes use `stub_full_name_requirement`
+  (`spec/support/full_name_requirement_helper.rb`). `spec/support/test_setup.rb`
+  also writes `hidden_at_signup` straight into the in-memory settings before
+  each example, bypassing the validator, so records built in `fab!` (before the
+  per-example stub applies) see it too. A spec that needs a hidden setting
+  visible (the MCP `UpdateSiteSetting` examples use `enable_random_usernames`)
+  stubs `SiteSetting.hidden_settings`.
+- `enable_random_usernames`, `random_username_adjectives` and
+  `random_username_nouns` are hidden from the admin UI. Random names remain the
+  fallback for names that can't become a username. The migration also deletes
+  any `enable_random_usernames` override so it stays on; customised word lists
+  are left in place.
+
+### Edge cases
+
+- Hidden is not locked for the random settings: they can still be changed by
+  console or API, unlike `full_name_requirement`.
+- `enable_names` is hidden and its override is reset (it must stay on for the
+  required name to be collected), but it has no validator: many core and
+  plugin specs assign it `false`, so a validator would need dozens of upstream
+  spec edits. Like the random settings, console or API can still change it.
+- Classic (non-code) signup is unchanged: the member picks their own username
+  there.
+
+## 12. Code-Review Follow-Ups (Invites, Sentry, `email_logs`)
+
+- **Resending an unbound bulk invite**: `InvitesController#update` with
+  `send_email` used to refuse any invite with no email. An unbound bulk invite
+  (`email` nil, recipient kept in `description`, `emailed_status` not
+  `:not_required`) is now resent to that address when the description is a valid
+  email. A plain invite link stays at `:not_required`, so editing its description
+  still can't turn it into a way to send mail.
+- **`email_logs.invite_id` index**: `AddInviteIdToEmailLogs` only adds the
+  column; `AddIndexToEmailLogsInviteId` builds the partial index concurrently
+  (`disable_ddl_transaction!`), since a plain build blocks writes to a large,
+  busy table. It drops any existing index first, so sites that already ran the
+  older blocking version get it rebuilt.
+- **Sentry performance messages**: `performance-monitoring.js` sends
+  `route_transition` / `discourse_init_to_paint` messages, sampled at 5%
+  (`MESSAGE_SAMPLE_RATE`; `tracesSampleRate` doesn't cover `captureMessage`) and
+  tagged with the site hostname so the three domains can be told apart. The DSN
+  stays in source; a Sentry DSN only permits sending events. The
+  `@sentry/browser` dependency is in `frontend/discourse/package.json`, and
+  `pnpm-workspace.yaml` sets `strictDepBuilds: false` (upstream: `true`).
+
+## 13. Invite Email Delivery Status (SES Bounce/Delivery/Complaint)
+
+### Requirement
+
+For a 10K+ cold-outreach invite campaign, `Invite#emailed_status` only tracks
+whether we handed an email to the mailer (`pending`/`bulk_pending`/`sending`/
+`sent`) — it has no idea what happened downstream: accepted, bounced, or
+marked as spam. Admins need that, sourced from AWS SES.
+
+### Root cause fixed along the way
+
+Discourse core already ships a real SES/SNS bounce webhook
+(`POST /webhooks/aws` → `Jobs::ProcessSnsNotification`), but it was silently
+broken on this site: `EmailLog#message_id` is the locally-generated RFC822
+`Message-ID` header, while SES's own SNS notifications carry a completely
+different, SES-assigned ID in `mail.messageId`. The job matched on the wrong
+column, so no bounce would ever have been recorded even once AWS-side wiring
+was added. `Jobs::ProcessSnsNotification` also only handled `"Bounce"`
+notifications; `"Delivery"` and `"Complaint"` were silently ignored.
+
+### Implementation
+
+- **`email_logs`** gets three new nullable columns:
+  `AddSesFieldsToEmailLogs` (`ses_message_id`, `delivered_at`,
+  `complained_at`), `AddIndexToEmailLogsSesMessageId` (partial index, built
+  concurrently, same pattern as the `invite_id` index in §12), and
+  `BackfillSesMessageIdOnEmailLogs` (batched backfill of `ses_message_id` from
+  the already-captured `smtp_transaction_response`, so historical sends become
+  reconcilable too, not just future ones).
+- **`lib/email/sender.rb`**: `SES_MESSAGE_ID_PATTERN` parses SES's own ID out
+  of the SMTP response right after it's captured (`"250 Ok <ses-id>"` →
+  `<ses-id>`); no-op for any non-SES SMTP response (e.g. local dev).
+- **`app/jobs/regular/process_sns_notification.rb`**: rewritten to look up by
+  `ses_message_id` instead of `message_id`, and to dispatch on
+  `notificationType` (`Bounce`/`Delivery`/`Complaint`) instead of only
+  handling bounces. All three handlers skip an `EmailLog` that already has a
+  *different* one of the three terminal outcomes recorded — SES notifications
+  can arrive out of order, and the first one to land is the more useful
+  signal than a later, contradictory one (a post-review fix: the initial cut
+  only guarded Delivery/Complaint against each other and against an existing
+  Bounce, but not the reverse). No invite-specific branching needed here:
+  once a notification is matched to the right `EmailLog` row, that row's
+  `invite_id` (set at send time, §10 extension) carries the update through
+  for free.
+- **`Invite#delivery_status`**: derived, not a new `emailed_status` value —
+  that enum intentionally only tracks mailer hand-off. Maps
+  `pending`/`bulk_pending` → `"scheduled"`, `sending` → `"pending"`, and once
+  `sent`, reads the linked `EmailLog` for `"delivered"`/`"bounced"`/
+  `"complained"`/`"sent"` (no signal yet). Takes an optional preloaded
+  `EmailLog` (defaults to `latest_sent_email_log`, §10 extension) so a caller
+  rendering a page of invites can batch-load it once.
+- **`UsersController#invited`**: preloads the latest `EmailLog` per invite for
+  the current page only (pending/expired filters, where `InviteSerializer` is
+  used) via one grouped query, threaded through `InvitedSerializer` →
+  `InviteSerializer` the same way `show_emails` already is.
+- **`InviteSerializer`**: new `delivery_status` attribute, gated the same way
+  `emailed` already is (`can_see_invite_details?`). Only calls
+  `Invite#delivery_status` with an explicit argument when a preload hash was
+  actually passed in `options` -- passing `nil` unconditionally would defeat
+  that method's own default-argument fallback to `latest_sent_email_log`.
+- `spec/requests/webhooks_controller_spec.rb`'s existing `#aws` bounce specs
+  fabricated their `EmailLog` with `message_id:` set to the SNS payload's
+  `mail.messageId` -- that's the exact bug being fixed here, so those specs
+  now fabricate with `ses_message_id:` instead. The other provider blocks in
+  that file (mailgun, etc.) are untouched; they genuinely match on
+  `message_id`.
+- Frontend: new "Delivery" column on the pending/expired invited-users table
+  (`templates/user-invited/show.gjs`), a small dedicated pill helper
+  (`helpers/invite-delivery-status.js`, modeled on the reviewable-queue's
+  `reviewable-status.js` pattern rather than editing that file), and a
+  `.delivery-status-pill` style block in `user.scss` reusing the
+  `review-item__status` pill's visual language. New flat i18n keys under
+  `user.invited.delivery_status*`.
+
+### Edge cases
+
+- Until the AWS-side SNS/SES wiring below is done for a site,
+  `delivery_status` for a sent invite stays `"sent"`. The pill helper
+  originally rendered nothing for that state, but a blank column looked the
+  same as "nothing happened", so it now shows a neutral "Sent" pill (§10
+  extension: Skip on Personalization Failure).
+- The allowlist/authenticity checks run twice (once in
+  `WebhooksController#aws` before enqueueing, again inside the job) —
+  intentional defense-in-depth, left as-is.
+- AWS-side wiring (per distinct site database — `default`/`navodians` share
+  one, so really ~3 configs, not 4): create an SNS topic, subscribe it via
+  HTTPS to `/webhooks/aws`, configure the SES identity to publish Bounce,
+  Delivery and Complaint events to it, and set `aws_sns_topic_arn_allowlist`
+  *before* confirming the subscription (`Jobs::ConfirmSnsSubscription` only
+  proceeds for allowlisted topics). Verify with SES's simulator addresses
+  (`bounce@`/`complaint@`/`success@simulator.amazonses.com`).
+- Status as of 2026-09-23 (checked with `aws ses
+  get-identity-notification-attributes`): all three identities (`nitians.in`,
+  `iitians.in`, `navodians.com`) publish Bounce and Complaint to their
+  `*-ses-bounces` topic, the HTTPS subscriptions are confirmed, and the topics
+  are allowlisted. **Delivery is not configured** (no `DeliveryTopic`, no
+  configuration sets), so `delivered_at` is never set and no invite has ever
+  shown "Delivered". Fix, per identity, reusing the same topic:
+  `aws ses set-identity-notification-topic --identity nitians.in
+  --notification-type Delivery --sns-topic <that site's *-ses-bounces ARN>`.
+  Only emails sent after the change are affected.
+
+## 14. Cursor-Forum Look: Header Search, Cursor's Colours and Type (Foundation)
+
+### Requirement
+
+Make the web app resemble forum.cursor.com with as little change as possible: the search box
+in the top bar instead of behind an icon, Cursor's colours (warm page, darker sidebar, dark
+text), Cursor's type sizes, and a similar sans-serif font, on every screen size including the
+mobile app. It can be limited to 768px and up (`DESKTOP_ONLY=1`), which leaves phones on the
+site's old colour scheme. No repository code changes: everything is per-site configuration (theme data lives in
+each site's database).
+
+### Why Foundation, not Horizon
+
+The bundled Horizon theme also puts search in the header and derives a warm palette, but it draws
+a white rounded content panel with card-style topic rows, which does not look like the Cursor
+forum. Foundation (the theme the sites already use) keeps the flat topic rows and sidebar layout
+the reference has, so the look is built on Foundation and no theme is switched.
+
+### What is configured, per site
+
+1. **Header search**: Foundation's theme setting `search_experience = search_field`
+   (themeable, stored in `theme_site_settings`), which renders
+   `frontend/discourse/app/components/header/header-search.gjs`.
+2. **Welcome banner off** for Foundation (`enable_welcome_banner = false`). The banner has its
+   own search box, and the header field is hidden while that banner is on screen. The setting is
+   site-wide, so phones lose the banner too.
+3. **Theme component `nvs-cursor-look`**, attached to Foundation, whose common SCSS is one block
+   scoped to `@media (prefers-color-scheme: light)`; with `DESKTOP_ONLY=1` it is
+   `(min-width: 48rem) and (prefers-color-scheme: light)` (Discourse's `md` breakpoint) and
+   phones keep the default palette. **No palette is assigned to Foundation**: a palette is one
+   stylesheet for every device and cannot vary by screen size, which is why the colours are CSS
+   variables in the component. The block holds:
+   - Cursor's palette as custom properties: its ten base colours (`primary` `#26251e`,
+     `secondary` `#f7f7f4`, dark `tertiary` `#3b3a33`, `quaternary` `#e45735`, `header_background`
+     `#f7f7f4`, `header_primary` `#7a7974`, `highlight`, `danger` `#eb5600`, `success`, `love`)
+     compiled by this Discourse into the ~84 derived properties that differ from the default
+     palette. It is a static, generated copy: regenerate it if the colours change (create a
+     temporary scheme from the ten colours, fetch its compiled `color_definitions_*.css` and the
+     default's, keep the properties that differ, drop the `csstools` polyfill artefacts, delete
+     the scheme);
+   - Cursor's theme tokens, measured from forum.cursor.com's public CSS: `--base-font-size:
+     93.75%`, sidebar `#f0efea` with muted `#7a7974` icons and headers, active sidebar item and
+     active nav in orange `#eb5600` with no fill, 2px nav underline, weight 500 for sidebar
+     headers and active items, transparent default buttons with a `primary-300` border and
+     dark (`var(--primary)`) primary buttons, and tightened `h1`-`h3` letter-spacing and
+     line-height;
+   - the outlined header pills (Sign Up / Log In).
+   The custom properties are set on `:root, body`: the "modernize Foundation theme" upcoming
+   change sets the same variables at zero specificity on the element that carries its class,
+   which beats a plain `:root` value.
+4. **Font family**: Inter, unchanged (`base_font` and `heading_font` default to it). Cursor's own
+   font, "Cursor Gothic", is their proprietary brand font and is deliberately not used or
+   hotlinked; size, weight and colour are matched instead.
+
+`script/nvs-features/apply-cursor-look.rb` (defaults to iitians only; `SITES=`
+overrides; applies on all screen sizes unless `DESKTOP_ONLY=1`) applies all of this idempotently. It is read-only by default and prints each site's
+state first (palette, components, theme settings, fonts, users with a personal theme).
+`APPLY=1` writes, and also unassigns and deletes the older "Cursor Flat" palette so a site that
+had it returns to the default palette on phones; `ROLLBACK=1` removes the component link and the
+two theme settings, returning the site to an untouched state.
+
+### Edge cases
+
+- **Anonymous visitors get no search.** The sites set `allow_anonymous_search = false`, so
+  `Guardian#can_search?` is false for logged-out visitors and no search UI renders for them,
+  whether icon or field. Logged-in members get the field. Enabling it is a policy decision, not
+  part of this change.
+- The header field is desktop only. Phones and narrow desktop windows keep the icon
+  (`header/contents.gjs`), and it is hidden while a topic title is shown in the header. It sits
+  centred in the header, where Cursor's is left-aligned next to the logo.
+- With the default (all screens) the look also applies on phones and in the mobile app; the site
+  was switched from desktop-only to all screens to try it in the app. With `DESKTOP_ONLY=1` the
+  limit follows **screen width, not device**: a desktop browser narrower than 768px shows the old
+  scheme and tablets at 768px or wider get Cursor's. Re-running with `DESKTOP_ONLY=1 APPLY=1`
+  switches back.
+- `theme-color` (a mobile browser's toolbar tint) is taken from the active palette's header
+  colour, which is now the default palette's white, so a browser's toolbar does not follow
+  `#f7f7f4`. The mobile app does not use it: the app (nvs-mobile `js/headerColor.js`) reads the
+  header's real background colour from the page and paints the strip above the header with it,
+  so the app follows `#f7f7f4` and any later colour change. The same app also hides the site's
+  own bottom navigation bar (nvs-mobile `js/hideSiteFooterNav.js`), which the site shows
+  whenever a page can reach `window.ReactNativeWebView`.
+- On phones the header keeps the search icon (the field is desktop only) and the welcome banner
+  stays off, since the setting is site-wide.
+- Dark mode is not touched (the block is light-mode only); it has not been visually exercised.
+- Checked as an anonymous visitor at 390 and 1440px (local copy and live iitians.in): page and
+  header `#f7f7f4` on both, `#f0efea` sidebar, `#26251e` text and `#eb5600` active items on
+  desktop. With `DESKTOP_ONLY=1`, 390 and 767px stay white and 768px switches, as tested earlier. Logged-in screens (directory and cohort filters, user card,
+  invited list, admin lists, calendar) were not screenshotted and need a look.
+- **navodians.com is served by the `default` multisite connection**, which shares navodians'
+  database but keeps its own caches, and its web workers only hear about a change through a
+  message on the connection it was made on. A change made through the `navodians` connection is
+  stored correctly, but the live site keeps showing the old theme **and the old theme settings**
+  until the `default` connection is told too. Clearing only the theme cache fixes the colours
+  and leaves the settings stale: after the first apply the colours were right but the welcome
+  banner was still on and the search field was still in the banner, not the header. The apply
+  script therefore, for every connection that shares the site's database
+  (`SHARED_DATABASE_CONNECTIONS`), clears the theme and theme-setting caches, reloads the site
+  settings and notifies that connection's workers, after apply and after rollback. If a site
+  looks unchanged (or half-changed) right after a change the database reports as applied, this is
+  the first thing to check.
+- Users with a personal theme choice would ignore these settings; there were none on any site
+  when checked.
+- Theme rows are per database, so a site that is skipped stays as it was, which is harmless.
+- **Regression found and fixed: plain links were invisible until hovered.** Discourse styles
+  every link purely by colour (`--d-link-color`, defaulting to `var(--tertiary)`;
+  `text-decoration` is `none` by default) — no other differentiation. This palette's `--primary`
+  (body text) and `--tertiary` are both near-black, near-identical neutrals (~1.35:1 contrast),
+  so a link (in a post, or plain help text like the Bulk Invite modal's "CSV file" link) read as
+  indistinguishable body text until the cursor changed on hover. Fixed by overriding
+  `--d-link-color` directly (not `--tertiary` itself, which other rules in this same block
+  intentionally reuse for buttons/icons) to the palette's orange accent (`#eb5600`, already used
+  above for active sidebar/nav state) — this is the only place `--d-link-color` is consumed
+  (`app/assets/stylesheets/common/foundation/base.scss`), so the one variable override fixes
+  every link site-wide, not just inside posts. Light mode only, same as the rest of this block.
+
+## 15. Chat and Channels Hidden From the Left Sidebar (Configurable)
+
+### Requirement
+
+Chat and its channel list should not live in the left sidebar. The header's own chat icon already
+opens chat, so nothing is lost by removing it from the sidebar. No repository code changes: this
+is more configuration in the same `nvs-cursor-look` theme component described in section 14,
+applied by the same script.
+
+An earlier version of this moved chat into a custom right-hand rail instead of just hiding it
+(reusing Discourse's own sidebar-section components so it would inherit the sidebar's styling
+rather than needing separate CSS). It was built, fixed through two real bugs (a `<template>` tag
+needing a `.gjs` field name to compile; an unscoped hide-rule hiding its own rendered copy), and
+worked — rail visible, styled to match, chat drawer functional, verified locally — but the
+resulting user experience wasn't good enough to ship, so it was dropped in favour of this
+simpler, hide-only version.
+
+### What is configured
+
+Chat's left-sidebar sections (channels, DMs, starred, threads, search) are registered through the
+sidebar plugin API in `plugins/chat/.../initializers/chat-sidebar.js`. A single CSS rule, added to
+`nvs-cursor-look`'s `scss` field, independent of the light/dark, `DESKTOP_ONLY` block described in
+section 14 (this is visibility, not colour scheme):
+
+```scss
+.sidebar-section[data-section-name^="chat-"] {
+  display: none !important;
+}
+```
+
+Unconditional on screen size — applies at every width, including the phone slide-out sidebar and
+the mobile app.
+
+**Behind a real theme-component setting**, `hide_channels_and_chat_from_sidebar` (boolean,
+`target: :settings`, visible and toggleable at Admin > Customize > Themes > nvs-cursor-look >
+Settings — defaulted to on by the script, but an admin can flip it off afterwards without
+re-running anything, which fully restores stock behaviour). The CSS rule above is wrapped in
+`@if $hide_channels_and_chat_from_sidebar == "true" { ... }` in the component's SCSS. A component
+boolean setting compiles to an *unquoted string* SCSS variable (`Theme#to_scss_variable`), not a
+real boolean, hence the `== "true"` comparison rather than a bare `@if`.
+
+### Edge cases
+
+- **A running dev server does not pick up a theme change made by a separate one-off `bin/rails
+  runner` process on its own.** `Theme#save!`'s `after_save` callback does call
+  `notify_theme_change` (clears `Stylesheet::Manager`'s cache and publishes a refresh message),
+  but already-running pitchfork workers can keep serving the old compiled stylesheet by its old,
+  unchanged-looking digest until they are restarted (`pkill -USR2 -f 'ruby bin/pitchfork'`). A
+  hard browser reload alone is not enough. If a theme change applies cleanly (the database and
+  `theme_field.value` show the new content) but a running local site still looks unchanged,
+  restart the dev server before assuming the apply failed.
+- The abandoned right-rail version left behind an `extra_js` theme field
+  (`discourse/api-initializers/nvs-chat-rail.gjs`) on already-applied sites. The script now
+  destroys that field by name on every apply, since nothing sets it any more and it would
+  otherwise linger (Discourse doesn't remove fields a script stops writing to on its own).
+- Same delivery mechanism as section 14: `APPLY=1`/`ROLLBACK=1` on the same component, same
+  script, same per-connection cache-expiry handling for `default`/`navodians`. Rolling back
+  section 14's look also rolls back this setting (the component unlinks entirely), and vice
+  versa — they are not independently toggleable via `ROLLBACK=1`, only via the theme setting
+  itself once applied.
+
+## 16. Staff-Sent Invites Skip the Email-Domain Allowlist Entirely
+
+### Requirement
+
+Found via a production incident (iitians.in, "Bulk user invite processed with errors"): a
+bulk-invite CSV of 2402 rows, none marked `allow_any_email` (section 3a), failed 2255 of them —
+2250 from the exact same cause, `"Email domain is not in the list of allowed college domains"`,
+on ordinary personal addresses (gmail.com, yahoo.co.in, rediffmail.com, ...) that an admin had
+every intention of inviting. Unlike section 3a's `allow_any_email` (a per-CSV-row opt-in, and only
+ever reachable via the bulk-invite CSV, never a single invite), the ask here is unconditional:
+**any invite sent by an admin, moderator, or this fork's "Batch Moderator" cohort (see section 5's
+`BatchModeration`) should never be blocked by the domain allowlist at all**, with no flag to
+remember to set. A regular trust-level member's own "invite a friend" single invite keeps today's
+domain-restricted behavior unchanged — confirmed deliberately scoped this way, not a blanket
+everyone-bypasses-it change.
+
+### Root cause
+
+Domain validation blocks an invite-based signup at **two** separate points, and `allow_any_email`
+(section 3a) only ever addressed the second one:
+
+1. **`Invite` creation itself** — `Invite` has its own `validates :email, email: true` (same
+   `EmailValidator` as `User`), which is what actually produced the 2255 production failures: the
+   CSV rows never even became `Invite` rows, so there was nothing to resend once the upload
+   finished.
+2. **`User` creation at redemption** — `InviteRedeemer#create_user_from_invite`, already bypassed
+   for `allow_any_email` invites per section 3a's extension.
+
+### What is configured
+
+Mirrors the exact `attr_accessor` + `before_validation` propagation pattern section 3a's extension
+already established for `User`/`UserEmail`, reused for `Invite` too (not a DB column):
+
+- `InviteGuardian#can_skip_email_domain_validation?` (`lib/guardian/invite_guardian.rb`) — a
+  thin delegation to the existing `can_bulk_invite_to_forum?` (admin, moderator, or Batch
+  Moderator), named separately rather than called directly at each site so a single-invite
+  creation path checking "can bulk invite" doesn't read like a copy-paste mistake.
+- `Invite#set_skip_email_domain_validation` (`before_validation`, `app/models/invite.rb`) sets
+  `skip_email_domain_validation` from `Guardian.new(invited_by).can_skip_email_domain_validation?`
+  — `invited_by` is always an in-memory `User` object by the time this runs (every caller passes
+  the full object), so this adds no extra query for the common admin/moderator case (`is_staff?`
+  short-circuits before the Batch Moderator `exists?` check ever runs).
+- `InviteRedeemer#create_user_from_invite`'s existing `allow_any_email?` bypass condition gained
+  an `|| Guardian.new(invite.invited_by).can_skip_email_domain_validation?` clause.
+- `lib/validators/email_validator.rb` needed no functional change at all — its
+  `record.try(:skip_email_domain_validation)` check already generically supports any record type;
+  only its comment (which claimed `Invite` doesn't define this accessor) needed updating.
+
+### Edge cases
+
+- **Batch Moderator nuance**: a Batch Moderator's bulk-invite CSV is routed through
+  `ReviewableBulkInvite` for admin approval rather than processed directly (section 5), but
+  `ReviewableBulkInvite#perform_approve_bulk_invite` enqueues the job with
+  `current_user_id: created_by_id` — **the original Batch Moderator stays `invited_by` even after
+  admin approval, never reassigned to the approving admin**. A plain `invited_by.staff?` check
+  would have missed these rows entirely; `can_skip_email_domain_validation?` deliberately reuses
+  `can_bulk_invite_to_forum?`'s wider trust boundary instead, for exactly this reason.
+- Format (`EmailAddressValidator`) and blocklist (`ScreenedEmail`) checks are unaffected either
+  way — only the domain-allowlist check is skipped, same as `allow_any_email` already behaved.
+- No migration, no data backfill: the 2255 failed rows from the production incident were never
+  persisted (they failed inside `Invite.create!` before any row was written). Re-uploading the
+  same CSV after this ships succeeds for those rows.

@@ -105,11 +105,13 @@ RSpec.describe UserApiKeysController do
         expect(response.parsed_body["redirect_uri"]).to eq("over.the")
       end
 
-      it "shows redirect URI without trailing colon for custom scheme URLs" do
+      it "shows a friendly redirect target for non-http(s) custom scheme URLs" do
         SiteSetting.allowed_user_api_auth_redirects = "myapp://callback"
 
         get "/user-api-key/new.json", params: args.merge(auth_redirect: "myapp://callback")
-        expect(response.parsed_body["redirect_uri"]).to eq("callback")
+        expect(response.parsed_body["redirect_uri"]).to eq(
+          I18n.t("user_api_key.redirect_target_mobile_app"),
+        )
       end
 
       it "rejects auth_redirect to a disallowed domain" do
@@ -197,14 +199,13 @@ RSpec.describe UserApiKeysController do
       expect(response.status).to eq(403)
     end
 
-    it "does not return push access if push URL not configured" do
+    it "does not return push access if platform not provided" do
       SiteSetting.user_api_key_allowed_groups = Group::AUTO_GROUPS[:trust_level_0]
       SiteSetting.allowed_user_api_auth_redirects = args[:auth_redirect]
       user = Fabricate(:user, trust_level: TrustLevel[0])
       sign_in(user)
 
-      post "/user-api-key.json",
-           params: args.merge(scopes: "push,read", push_url: "https://push.it/here")
+      post "/user-api-key.json", params: args.merge(scopes: "push,read")
       expect(response.status).to eq(200)
 
       parsed = JSON.parse(decrypt_payload(extract_payload_from_redirect(response)))
@@ -215,7 +216,6 @@ RSpec.describe UserApiKeysController do
     it "redirects with valid encrypted token" do
       SiteSetting.user_api_key_allowed_groups = Group::AUTO_GROUPS[:trust_level_0]
       SiteSetting.allowed_user_api_auth_redirects = args[:auth_redirect]
-      SiteSetting.allowed_user_api_push_urls = "https://push.it/here"
       user = Fabricate(:user, trust_level: TrustLevel[0])
       sign_in(user)
 
@@ -223,7 +223,7 @@ RSpec.describe UserApiKeysController do
            params:
              args.merge(
                scopes: "push,notifications,message_bus,session_info,one_time_password",
-               push_url: "https://push.it/here",
+               platform: "ios",
              )
       expect(response.status).to eq(200)
 
@@ -327,6 +327,28 @@ RSpec.describe UserApiKeysController do
 
       post "/user-api-key.json", params: args.except(:auth_redirect).merge(padding: "invalid")
       expect(response.status).to eq(400)
+    end
+
+    it "rejects invalid platform parameter" do
+      SiteSetting.user_api_key_allowed_groups = Group::AUTO_GROUPS[:trust_level_0]
+      sign_in(Fabricate(:user, trust_level: TrustLevel[0]))
+
+      post "/user-api-key.json", params: args.except(:auth_redirect).merge(platform: "invalid")
+      expect(response.status).to eq(400)
+    end
+
+    it "creates a key with a working push_url when a valid platform is given" do
+      SiteSetting.user_api_key_allowed_groups = Group::AUTO_GROUPS[:trust_level_0]
+      user = Fabricate(:user, trust_level: TrustLevel[0])
+      sign_in(user)
+
+      post "/user-api-key.json", params: args.except(:auth_redirect).merge(platform: "android")
+      expect(response.status).to eq(200)
+
+      encrypted = Base64.decode64(response.parsed_body["payload"])
+      parsed = JSON.parse(decrypt_payload(encrypted))
+      key = UserApiKey.with_key(parsed["key"]).first
+      expect(key.push_url).to eq("android")
     end
 
     it "allows redirect to wildcard urls" do

@@ -6194,7 +6194,11 @@ CREATE TABLE public.email_logs (
     topic_id integer,
     bounce_error_code character varying,
     smtp_transaction_response character varying(500),
-    bcc_addresses text
+    bcc_addresses text,
+    invite_id integer,
+    ses_message_id character varying,
+    delivered_at timestamp(6) without time zone,
+    complained_at timestamp(6) without time zone
 );
 
 
@@ -7450,7 +7454,13 @@ CREATE TABLE public.invites (
     email_token character varying,
     domain character varying,
     description character varying(100),
-    admin boolean DEFAULT false NOT NULL
+    admin boolean DEFAULT false NOT NULL,
+    recipient_name character varying(100),
+    recipient_keywords text,
+    skip_personalization boolean DEFAULT false NOT NULL,
+    email_domain character varying,
+    allow_any_email boolean DEFAULT false NOT NULL,
+    schedule_send boolean DEFAULT true NOT NULL
 );
 
 
@@ -19925,6 +19935,27 @@ CREATE UNIQUE INDEX idx_discourse_calendar_post_event_dates_event_id_starts_at_u
 
 
 --
+-- Name: idx_discourse_post_event_events_calendar_batch_cohort_digest; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_discourse_post_event_events_calendar_batch_cohort_digest ON public.discourse_post_event_events USING btree (((custom_fields ->> '_calendar_batch_cohort_digest'::text))) WHERE ((custom_fields ->> '_calendar_batch_cohort_digest'::text) IS NOT NULL);
+
+
+--
+-- Name: idx_discourse_post_event_events_calendar_event_scope; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_discourse_post_event_events_calendar_event_scope ON public.discourse_post_event_events USING btree (((custom_fields ->> '_calendar_event_scope'::text)));
+
+
+--
+-- Name: idx_discourse_post_event_events_calendar_separation_value; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_discourse_post_event_events_calendar_separation_value ON public.discourse_post_event_events USING btree (((custom_fields ->> '_calendar_separation_value'::text))) WHERE ((custom_fields ->> '_calendar_separation_value'::text) IS NOT NULL);
+
+
+--
 -- Name: idx_dwf_ai_sessions_on_status_updated_at; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -22263,6 +22294,13 @@ CREATE INDEX index_email_logs_on_created_at ON public.email_logs USING btree (cr
 
 
 --
+-- Name: index_email_logs_on_invite_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_email_logs_on_invite_id ON public.email_logs USING btree (invite_id) WHERE (invite_id IS NOT NULL);
+
+
+--
 -- Name: index_email_logs_on_message_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -22274,6 +22312,13 @@ CREATE INDEX index_email_logs_on_message_id ON public.email_logs USING btree (me
 --
 
 CREATE INDEX index_email_logs_on_post_id ON public.email_logs USING btree (post_id);
+
+
+--
+-- Name: index_email_logs_on_ses_message_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_email_logs_on_ses_message_id ON public.email_logs USING btree (ses_message_id) WHERE (ses_message_id IS NOT NULL);
 
 
 --
@@ -22799,6 +22844,13 @@ CREATE UNIQUE INDEX index_invites_on_invite_key ON public.invites USING btree (i
 --
 
 CREATE INDEX index_invites_on_invited_by_id ON public.invites USING btree (invited_by_id);
+
+
+--
+-- Name: index_invites_on_invited_by_id_and_email_domain; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_invites_on_invited_by_id_and_email_domain ON public.invites USING btree (invited_by_id, email_domain) WHERE (email_domain IS NOT NULL);
 
 
 --
@@ -26106,7 +26158,9 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20261009113440'),
 ('20261008005940'),
 ('20261007082151'),
+('20261006115238'),
 ('20261006113418'),
+('20261006083655'),
 ('20261005091527'),
 ('20261005091447'),
 ('20261001073226'),
@@ -26120,16 +26174,30 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20260923080642'),
 ('20260922233925'),
 ('20260922233816'),
+('20260922102211'),
+('20260921130452'),
+('20260921130439'),
+('20260921130433'),
+('20260921130408'),
 ('20260921120000'),
+('20260921112625'),
 ('20260921081150'),
 ('20260921074918'),
 ('20260921015711'),
+('20260919195234'),
+('20260919195223'),
+('20260919195208'),
+('20260919101500'),
+('20260919101433'),
+('20260919072524'),
+('20260919061443'),
 ('20260918062827'),
 ('20260918062145'),
 ('20260918061735'),
 ('20260917145657'),
 ('20260916113851'),
 ('20260916113806'),
+('20260916051233'),
 ('20260915204557'),
 ('20260915191328'),
 ('20260914213908'),
@@ -26138,6 +26206,7 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20260914140746'),
 ('20260914032737'),
 ('20260913105655'),
+('20260912113721'),
 ('20260910110851'),
 ('20260910033302'),
 ('20260910030427'),
@@ -26148,6 +26217,7 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20260908160656'),
 ('20260908153158'),
 ('20260908112615'),
+('20260905074814'),
 ('20260904171256'),
 ('20260904065041'),
 ('20260904063128'),

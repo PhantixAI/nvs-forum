@@ -233,10 +233,14 @@ class UsersController < ApplicationController
         value = value[0...UserField.max_length] if value
 
         if value.blank? &&
-             (
+             DiscoursePluginRegistry.apply_modifier(
+               :user_field_required_for_update,
                field.for_all_users? ||
                  field.on_signup? &&
-                   user.custom_fields["#{User::USER_FIELD_PREFIX}#{field_id}"].present?
+                   user.custom_fields["#{User::USER_FIELD_PREFIX}#{field_id}"].present?,
+               field,
+               params[:user_fields],
+               user,
              )
           return render_json_error(I18n.t("login.missing_user_field"))
         end
@@ -553,14 +557,22 @@ class UsersController < ApplicationController
           include_inactive: current_user.staff? || SiteSetting.show_inactive_accounts,
         )
       can_see_invite_details = guardian.can_see_invite_details?(inviter)
+      # params[:domain] is client-supplied -- only accept it if it's actually
+      # shaped like a domain, so a crafted value can't do anything beyond
+      # "no invites match" (and can't reach the rate-limiter key in
+      # InvitesController#resend_all_invites via a bogus, ever-growing value).
+      domain = params[:domain].presence if params[:domain].to_s.match?(Invite::DOMAIN_REGEX)
+      # Redeemed invites don't show a delivery status, so there's nothing to
+      # filter on for that tab.
+      status = params[:status].presence if Invite::DELIVERY_STATUSES.include?(params[:status])
 
       invites =
         if filter == "pending" && can_see_invite_details
-          Invite.includes(:topics, :groups).pending(inviter)
+          Invite.includes(:topics, :groups).pending(inviter, domain:, status:)
         elsif filter == "expired" && can_see_invite_details
-          Invite.includes(:topics, :groups).expired(inviter)
+          Invite.includes(:topics, :groups).expired(inviter, domain:, status:)
         elsif filter == "redeemed"
-          Invite.redeemed_users(inviter)
+          Invite.redeemed_users(inviter, domain:)
         else
           Invite.none
         end
@@ -568,25 +580,85 @@ class UsersController < ApplicationController
       invites = invites.offset(params[:offset].to_i || 0).limit(SiteSetting.invites_per_page)
 
       show_emails = guardian.can_see_invite_emails?(inviter)
-      if params[:search].present? && invites.present?
-        filter_sql = "(LOWER(users.username) LIKE :filter)"
-        filter_sql =
-          "(LOWER(invites.email) LIKE :filter) or (LOWER(users.username) LIKE :filter)" if show_emails
-        invites = invites.where(filter_sql, filter: "%#{params[:search].downcase}%")
+      if invites.present?
+        invites = Invite.search_filter(invites, params[:search], show_emails: show_emails)
       end
 
-      pending_count = can_see_invite_details ? Invite.pending(inviter).reorder(nil).count.to_i : 0
-      expired_count = can_see_invite_details ? Invite.expired(inviter).reorder(nil).count.to_i : 0
-      redeemed_count = Invite.redeemed_users(inviter).reorder(nil).count.to_i
+      # The domain and status filters (unlike search) also narrow the tab
+      # counts, so an admin filtering by domain sees how many pending/expired/
+      # redeemed invites exist *for that domain*, not the inviter's totals.
+      pending_count =
+        (
+          if can_see_invite_details
+            Invite.pending(inviter, domain:, status:).reorder(nil).count.to_i
+          else
+            0
+          end
+        )
+      expired_count =
+        (
+          if can_see_invite_details
+            Invite.expired(inviter, domain:, status:).reorder(nil).count.to_i
+          else
+            0
+          end
+        )
+      redeemed_count = Invite.redeemed_users(inviter, domain:).reorder(nil).count.to_i
+      # Same gate as pending_count/expired_count above -- without it, a viewer who can't
+      # see this inviter's invite details (e.g. a TL2 user viewing someone else's invited
+      # page) could still learn every domain the inviter has invited to, via a field that
+      # isn't visibility-checked itself.
+      available_domains =
+        if can_see_invite_details
+          domains =
+            Invite
+              .where(invited_by_id: inviter.id)
+              .where.not(email_domain: nil)
+              .distinct
+              .order(:email_domain)
+              .pluck(:email_domain)
+          # "ac.in" is an umbrella option (see Invite.domain_filter_condition)
+          # that never appears verbatim as its own email_domain row -- only
+          # offer it when the inviter actually has a matching *.ac.in invite.
+          if domains.any? { |d|
+               d == Invite::AC_IN_UMBRELLA_DOMAIN ||
+                 d.end_with?(".#{Invite::AC_IN_UMBRELLA_DOMAIN}")
+             }
+            domains = [Invite::AC_IN_UMBRELLA_DOMAIN] + domains
+          end
+          domains
+        else
+          []
+        end
+
+      invite_list = invites.to_a
+      # Only pending/expired invites are rendered through InviteSerializer
+      # (redeemed invites use InvitedUserSerializer instead), so this is the
+      # only branch that ever reads delivery_status -- skip the extra query
+      # otherwise. A page is capped at SiteSetting.invites_per_page, so this
+      # is never an unbounded scan.
+      email_logs_by_invite_id =
+        if (filter == "pending" || filter == "expired") && invite_list.present?
+          EmailLog
+            .where(invite_id: invite_list.map(&:id), email_type: "invite")
+            .order(created_at: :desc)
+            .group_by(&:invite_id)
+            .transform_values(&:first)
+        else
+          {}
+        end
 
       render json:
                MultiJson.dump(
                  InvitedSerializer.new(
                    OpenStruct.new(
-                     invite_list: invites.to_a,
+                     invite_list: invite_list,
                      show_emails: show_emails,
+                     email_logs_by_invite_id: email_logs_by_invite_id,
                      inviter: inviter,
                      type: filter,
+                     available_domains: available_domains,
+                     available_statuses: can_see_invite_details ? Invite::DELIVERY_STATUSES : [],
                      counts: {
                        pending: pending_count,
                        expired: expired_count,
@@ -783,7 +855,10 @@ class UsersController < ApplicationController
       ReviewableUser.set_approved_fields!(user, current_user)
     end
 
-    if error = UserCreator.assign_signup_fields(user) { |field| clean_custom_field_values(field) }
+    if error =
+         UserCreator.assign_signup_fields(user, params[:user_fields]) { |field|
+           clean_custom_field_values(field)
+         }
       return fail_with(error)
     end
 

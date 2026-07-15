@@ -1,11 +1,13 @@
 /* eslint-disable ember/no-observers */
 import { tracked } from "@glimmer/tracking";
-import Controller from "@ember/controller";
+import Controller, { inject as controller } from "@ember/controller";
 import { action, computed } from "@ember/object";
 import { dependentKeyCompat } from "@ember/object/compat";
 import { service } from "@ember/service";
 import { observes } from "@ember-decorators/object";
 import CreateInviteBulk from "discourse/components/modal/create-invite-bulk";
+import ResendInviteModal from "discourse/components/modal/resend-invite";
+import SentInviteEmail from "discourse/components/modal/sent-invite-email";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import { removeValueFromArray } from "discourse/lib/array-tools";
 import { debounce } from "discourse/lib/decorators";
@@ -20,6 +22,7 @@ export default class UserInvitedShowController extends Controller {
   @service toasts;
   @service currentUser;
   @service siteSettings;
+  @controller("user-invited") userInvitedController;
 
   @tracked canLoadMore = true;
   @tracked hasLoadedInitialInvites = false;
@@ -27,6 +30,8 @@ export default class UserInvitedShowController extends Controller {
 
   /** @type {string | null} */
   @tracked filter = null;
+  @tracked selectedDomain = null;
+  @tracked selectedStatus = null;
 
   /** @type {import("discourse/models/user").default | null} */
   user = null;
@@ -80,13 +85,13 @@ export default class UserInvitedShowController extends Controller {
   }
 
   @computed(
-    "currentUser.admin",
+    "currentUser.can_bulk_invite_to_forum",
     "siteSettings.allow_bulk_invite",
     "viewingSelf"
   )
   get canBulkInvite() {
     return (
-      this.currentUser?.admin &&
+      this.currentUser?.can_bulk_invite_to_forum &&
       this.siteSettings?.allow_bulk_invite &&
       this.viewingSelf
     );
@@ -94,8 +99,12 @@ export default class UserInvitedShowController extends Controller {
 
   @computed("model")
   get hasEmailInvites() {
+    // An allow_any_email invite has no bound email, but is still resendable via its
+    // stashed description recipient -- see InvitesController#resend_all_invites, which
+    // already includes these. Match that here so the button doesn't disappear just
+    // because the visible page happens to be dominated by unbound invites.
     return this.model.invites.some((invite) => {
-      return invite.email;
+      return invite.email || invite.description;
     });
   }
 
@@ -104,14 +113,57 @@ export default class UserInvitedShowController extends Controller {
     return this.model.invites.length > 0 && this.currentUser.staff;
   }
 
-  @computed("invitesCount", "filter")
+  @computed("invitesCount", "filter", "selectedDomain", "selectedStatus")
   get showSearch() {
-    return this.invitesCount[this.filter] > 5;
+    // Keep visible once a filter is selected even if it narrows the count to
+    // <=5 (or 0) -- otherwise .user-invite-search's margin-right: auto (the
+    // flex anchor that right-aligns .user-invite-buttons) disappears along
+    // with it, and the whole button row snaps to the left.
+    return (
+      this.invitesCount[this.filter] > 5 ||
+      Boolean(this.selectedDomain) ||
+      Boolean(this.selectedStatus)
+    );
+  }
+
+  @computed("model.available_domains")
+  get domainOptions() {
+    return (this.model?.available_domains || []).map((domain) => ({
+      id: domain,
+      name: domain,
+    }));
+  }
+
+  @computed("domainOptions", "currentUser.staff")
+  get showDomainFilter() {
+    // Intentionally not gated on model.invites like showBulkActionButtons --
+    // a domain filter that narrows the current tab to zero results must stay
+    // visible, or there would be no way to clear it again.
+    return this.currentUser?.staff && this.domainOptions.length > 0;
+  }
+
+  @computed("model.available_statuses")
+  get statusOptions() {
+    return (this.model?.available_statuses || []).map((status) => ({
+      id: status,
+      name: i18n(`user.invited.delivery_status_${status}`),
+    }));
+  }
+
+  @computed("statusOptions", "currentUser.staff", "filter")
+  get showStatusFilter() {
+    // Redeemed invites don't show a delivery status, so there's nothing to
+    // filter by on that tab.
+    return (
+      this.currentUser?.staff &&
+      this.filter !== "redeemed" &&
+      this.statusOptions.length > 0
+    );
   }
 
   @observes("searchTerm")
   searchTermChanged() {
-    this._searchTermChanged();
+    this._refetch();
   }
 
   @action
@@ -157,21 +209,94 @@ export default class UserInvitedShowController extends Controller {
   }
 
   @action
-  reinvite(invite) {
-    invite.reinvite();
-    return false;
+  async previewSentEmail(invite) {
+    try {
+      const model = await Invite.findLatestSentEmail(invite.id);
+      this.modal.show(SentInviteEmail, { model });
+    } catch (error) {
+      popupAjaxError(error);
+    }
+  }
+
+  @action
+  async sendNow(invite) {
+    try {
+      await invite.sendNow();
+      this.toasts.success({
+        data: { message: i18n("user.invited.invite.send_now_success") },
+      });
+    } catch (error) {
+      popupAjaxError(error);
+    }
+  }
+
+  @action
+  openResendInvite(invite) {
+    this.modal.show(ResendInviteModal, {
+      model: {
+        bulk: false,
+        onResend: ({ keywords, aiPersonalization }) =>
+          invite.reinvite({ keywords, aiPersonalization }),
+      },
+    });
   }
 
   @action
   reinviteAll() {
-    this.dialog.yesNoConfirm({
-      message: i18n("user.invited.reinvite_all_confirm"),
+    const domain = this.selectedDomain;
+    const status = this.selectedStatus;
+    const search = this.searchTerm;
+    this.modal.show(ResendInviteModal, {
+      model: {
+        bulk: true,
+        confirmMessage: this.#reinviteAllConfirmMessage(domain, status),
+        onResend: async ({ keywords, aiPersonalization, scheduleSend }) => {
+          await Invite.reinviteAll(domain, status, search, {
+            keywords,
+            aiPersonalization,
+            scheduleSend,
+          });
+          this.set("reinvitedAll", true);
+        },
+      },
+    });
+  }
+
+  @action
+  deleteAllInvites() {
+    const domain = this.selectedDomain;
+    const status = this.selectedStatus;
+    const search = this.searchTerm;
+
+    this.dialog.deleteConfirm({
+      message: this.#deleteAllInvitesConfirmMessage(domain, status),
       didConfirm: () => {
-        return Invite.reinviteAll()
-          .then(() => this.set("reinvitedAll", true))
+        return Invite.destroyAllInvites(domain, status, search)
+          .then(() => {
+            this.toasts.success({
+              data: { message: i18n("user.invited.deleted_all") },
+            });
+            this.send("triggerRefresh");
+          })
           .catch(popupAjaxError);
       },
     });
+  }
+
+  // A resend is rate-limited per domain and status, so a new filter gets its
+  // own "Resend invites" button back.
+  @action
+  domainChanged(domain) {
+    this.selectedDomain = domain;
+    this.set("reinvitedAll", false);
+    this._refetch();
+  }
+
+  @action
+  statusChanged(status) {
+    this.selectedStatus = status;
+    this.set("reinvitedAll", false);
+    this._refetch();
   }
 
   @action
@@ -186,7 +311,9 @@ export default class UserInvitedShowController extends Controller {
           this.user,
           this.filter,
           this.searchTerm,
-          model.invites.length
+          model.invites.length,
+          this.selectedDomain,
+          this.selectedStatus
         );
         const inviteList = result.invites;
 
@@ -205,10 +332,66 @@ export default class UserInvitedShowController extends Controller {
     }
   }
 
+  #reinviteAllConfirmMessage(domain, status) {
+    const statusLabel =
+      status && i18n(`user.invited.delivery_status_${status}`);
+
+    if (domain && status) {
+      return i18n("user.invited.reinvite_all_confirm_domain_status", {
+        domain,
+        status: statusLabel,
+      });
+    } else if (status) {
+      return i18n("user.invited.reinvite_all_confirm_status", {
+        status: statusLabel,
+      });
+    } else if (domain) {
+      return i18n("user.invited.reinvite_all_confirm_domain", { domain });
+    }
+    return i18n("user.invited.reinvite_all_confirm");
+  }
+
+  #deleteAllInvitesConfirmMessage(domain, status) {
+    const statusLabel =
+      status && i18n(`user.invited.delivery_status_${status}`);
+
+    if (domain && status) {
+      return i18n("user.invited.delete_all_confirm_domain_status", {
+        domain,
+        status: statusLabel,
+      });
+    } else if (status) {
+      return i18n("user.invited.delete_all_confirm_status", {
+        status: statusLabel,
+      });
+    } else if (domain) {
+      return i18n("user.invited.delete_all_confirm_domain", { domain });
+    }
+    return i18n("user.invited.delete_all_confirm");
+  }
+
   @debounce(INPUT_DELAY)
-  _searchTermChanged() {
-    Invite.findInvitedBy(this.user, this.filter, this.searchTerm).then(
-      (invites) => this.set("model", invites)
-    );
+  _refetch() {
+    Invite.findInvitedBy(
+      this.user,
+      this.filter,
+      this.searchTerm,
+      null,
+      this.selectedDomain,
+      this.selectedStatus
+    ).then((invites) => {
+      this.set("model", invites);
+      // Unlike searchTerm, the domain and status filters also narrow the tab
+      // counts (see UsersController#invited). The visible "Pending (n)" tab
+      // labels are rendered by the parent user-invited controller's own
+      // invitesCount (set once by the route on initial load), not this
+      // controller's -- both need updating, this one for showSearch.
+      this.set("invitesCount", invites.counts);
+      this.userInvitedController.set("invitesCount", invites.counts);
+      this.userInvitedController.set(
+        "domainFilterActive",
+        Boolean(this.selectedDomain || this.selectedStatus)
+      );
+    });
   }
 }

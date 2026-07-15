@@ -13,10 +13,22 @@ class Invite < ActiveRecord::Base
   include RateLimiter::OnCreateRecord
   include Trashable
 
+  # Only governs the immediate-vs-throttled threshold for unbound
+  # (allow_any_email) bulk-invite rows -- see Jobs::BulkInvite#send_invite.
+  # Bound bulk invites always throttle through :bulk_pending regardless of
+  # CSV size (Jobs::ProcessBulkInviteEmails paces them one at a time).
   BULK_INVITE_EMAIL_LIMIT = 200
   DOMAIN_REGEX =
     /\A(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)+([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])\z/
+  # Selecting this in the domain filter is an umbrella match (see
+  # domain_filter_condition) covering every *.ac.in institute domain in one
+  # view, not just a literal "ac.in" address.
+  AC_IN_UMBRELLA_DOMAIN = "ac.in"
+  # Every value Invite#delivery_status can return, in pipeline order.
+  DELIVERY_STATUSES = %w[scheduled pending skipped sent delivered bounced complained].freeze
   DESCRIPTION_MAX_LENGTH = 100
+  RECIPIENT_NAME_MAX_LENGTH = 100
+  RECIPIENT_KEYWORDS_MAX_LENGTH = 100_000
 
   rate_limit :limit_invites_per_day
 
@@ -32,8 +44,11 @@ class Invite < ActiveRecord::Base
   validates :invited_by_id, presence: true
   validates :email, email: true, allow_blank: true
   validates :custom_message, length: { maximum: 1000 }
+  validates :custom_subject, length: { maximum: 255 }
   validates :domain, length: { maximum: 500 }
   validates :description, length: { maximum: DESCRIPTION_MAX_LENGTH }
+  validates :recipient_name, length: { maximum: RECIPIENT_NAME_MAX_LENGTH }
+  validates :recipient_keywords, length: { maximum: RECIPIENT_KEYWORDS_MAX_LENGTH }
   validate :ensure_max_redemptions_allowed
   validate :valid_redemption_count
   validate :valid_domain, if: :will_save_change_to_domain?
@@ -49,9 +64,28 @@ class Invite < ActiveRecord::Base
 
   before_save do
     self.email_token = email.present? ? SecureRandom.hex : nil if will_save_change_to_email?
+
+    if will_save_change_to_email? || will_save_change_to_description?
+      # allow_any_email rows (and legacy rows predating that column) leave
+      # email nil and stash the real intended address in description
+      # instead -- fall back to it so the domain filter/resend feature can
+      # still find these invites. Only when description actually looks like
+      # an email address, so a generic invite-link's free-text description
+      # doesn't get misread as a domain.
+      domain_source =
+        email.presence ||
+          (description if description.present? && EmailAddressValidator.valid_value?(description))
+      self.email_domain = domain_source&.split("@")&.last&.downcase
+    end
   end
 
   before_validation { self.email = Email.downcase(email) unless email.nil? }
+  before_validation :set_skip_email_domain_validation
+
+  # Not a DB column -- mirrors User#skip_email_domain_validation (see
+  # set_skip_email_domain_validation below and lib/validators/email_validator.rb, which reads
+  # this generically via record.try(:skip_email_domain_validation) for any record type).
+  attr_accessor :skip_email_domain_validation
 
   attribute :email_already_exists
 
@@ -63,7 +97,19 @@ class Invite < ActiveRecord::Base
 
   def self.emailed_status_types
     @emailed_status_types ||=
-      Enum.new(not_required: 0, pending: 1, bulk_pending: 2, sending: 3, sent: 4)
+      Enum.new(not_required: 0, pending: 1, bulk_pending: 2, sending: 3, sent: 4, skipped: 5)
+  end
+
+  # Staff-sent invites (admin, moderator, or Batch Moderator -- see
+  # InviteGuardian#can_skip_email_domain_validation?) skip the site's email-domain allowlist
+  # entirely, not just format/blocklist checks -- this is what let 2255 ordinary personal-domain
+  # CSV rows get rejected at Invite.create! time in production despite being sent by an admin.
+  # invited_by is always a loaded User object by the time this runs (every caller passes the
+  # full object, not just an id), so this adds no extra query for the common admin/moderator
+  # case -- Guardian#is_staff? short-circuits before the Batch Moderator check ever runs.
+  def set_skip_email_domain_validation
+    self.skip_email_domain_validation =
+      invited_by.present? && Guardian.new(invited_by).can_skip_email_domain_validation?
   end
 
   def user_doesnt_already_exist
@@ -178,6 +224,12 @@ class Invite < ActiveRecord::Base
 
     if invite
       was_admin = invite.admin?
+      # A re-upload (or resend) of an existing invite must be able to change
+      # the per-row personalization context. Only keys actually passed are
+      # touched, so callers that don't know about them leave them alone.
+      context =
+        opts.slice(:recipient_name, :recipient_keywords, :skip_personalization, :schedule_send)
+      invite.update!(context) if context.present?
       invite.update_columns(
         created_at: Time.zone.now,
         updated_at: Time.zone.now,
@@ -199,6 +251,11 @@ class Invite < ActiveRecord::Base
           :admin,
           :custom_message,
           :max_redemptions_allowed,
+          :recipient_name,
+          :recipient_keywords,
+          :skip_personalization,
+          :schedule_send,
+          :allow_any_email,
         )
       create_args[:invited_by] = invited_by
       create_args[:email] = email
@@ -275,38 +332,83 @@ class Invite < ActiveRecord::Base
     User.with_email(Email.downcase(email)).where(staged: false).first
   end
 
-  def self.pending(inviter)
-    Invite
-      .distinct
-      .joins("LEFT JOIN invited_users ON invites.id = invited_users.invite_id")
-      .joins("LEFT JOIN users ON invited_users.user_id = users.id")
-      .where(invited_by_id: inviter.id)
-      .where("redemption_count < max_redemptions_allowed")
-      .where("expires_at > ?", Time.zone.now)
-      .order("invites.updated_at DESC")
+  def self.pending(inviter, domain: nil, status: nil)
+    invites =
+      Invite
+        .distinct
+        .joins("LEFT JOIN invited_users ON invites.id = invited_users.invite_id")
+        .joins("LEFT JOIN users ON invited_users.user_id = users.id")
+        .where(invited_by_id: inviter.id)
+        .where("redemption_count < max_redemptions_allowed")
+        .where("expires_at > ?", Time.zone.now)
+        .order("invites.updated_at DESC")
+    invites = invites.where(*domain_filter_condition(domain)) if domain.present?
+    invites = with_delivery_status(invites, status) if status.present?
+    invites
   end
 
-  def self.expired(inviter)
-    Invite
-      .distinct
-      .joins("LEFT JOIN invited_users ON invites.id = invited_users.invite_id")
-      .joins("LEFT JOIN users ON invited_users.user_id = users.id")
-      .where(invited_by_id: inviter.id)
-      .where("redemption_count < max_redemptions_allowed")
-      .where("expires_at < ?", Time.zone.now)
-      .order("invites.expires_at ASC")
+  def self.expired(inviter, domain: nil, status: nil)
+    invites =
+      Invite
+        .distinct
+        .joins("LEFT JOIN invited_users ON invites.id = invited_users.invite_id")
+        .joins("LEFT JOIN users ON invited_users.user_id = users.id")
+        .where(invited_by_id: inviter.id)
+        .where("redemption_count < max_redemptions_allowed")
+        .where("expires_at < ?", Time.zone.now)
+        .order("invites.expires_at ASC")
+    invites = invites.where(*domain_filter_condition(domain)) if domain.present?
+    invites = with_delivery_status(invites, status) if status.present?
+    invites
   end
 
-  def self.redeemed_users(inviter)
-    InvitedUser
-      .joins("LEFT JOIN invites ON invites.id = invited_users.invite_id")
-      .includes(user: :user_stat)
-      .where.not(user_id: nil)
-      .where("invites.invited_by_id = ?", inviter.id)
-      .order("invited_users.redeemed_at DESC")
-      .references("invite")
-      .references("user")
-      .references("user_stat")
+  def self.redeemed_users(inviter, domain: nil)
+    invited_users =
+      InvitedUser
+        .joins("LEFT JOIN invites ON invites.id = invited_users.invite_id")
+        .includes(user: :user_stat)
+        .where.not(user_id: nil)
+        .where("invites.invited_by_id = ?", inviter.id)
+        .order("invited_users.redeemed_at DESC")
+        .references("invite")
+        .references("user")
+        .references("user_stat")
+    invited_users = invited_users.where(*domain_filter_condition(domain)) if domain.present?
+    invited_users
+  end
+
+  # Shared by pending/expired/redeemed_users so the "ac.in" umbrella special
+  # case lives in exactly one place. The LIKE branch has a leading wildcard,
+  # so it can't use a standard btree index on email_domain -- a sequential
+  # scan per inviter is acceptable at current scale (thousands, not millions,
+  # of invites), but worth knowing if that scale changes.
+  def self.domain_filter_condition(domain)
+    if domain == AC_IN_UMBRELLA_DOMAIN
+      [
+        "invites.email_domain = :domain OR invites.email_domain LIKE :suffix",
+        { domain: domain, suffix: "%.#{domain}" },
+      ]
+    else
+      ["invites.email_domain = :domain", { domain: domain }]
+    end
+  end
+  private_class_method :domain_filter_condition
+
+  # Shared by UsersController#invited (the listing) and
+  # InvitesController#resend_all_invites, so bulk resend always matches
+  # exactly the rows the admin can currently see under the same search term.
+  # allow_any_email invites have no bound invites.email -- their intended
+  # recipient lives in invites.description instead (see Jobs::BulkInvite),
+  # so search has to check both or those invites are invisible to search
+  # despite being real and findable by scrolling the unfiltered list.
+  def self.search_filter(invites, search, show_emails:)
+    return invites if search.blank?
+
+    filter_sql = "(LOWER(users.username) LIKE :filter)"
+    filter_sql =
+      "(LOWER(invites.email) LIKE :filter) or (LOWER(invites.description) LIKE :filter) or (LOWER(users.username) LIKE :filter)" if show_emails
+
+    invites.where(filter_sql, filter: "%#{search.downcase}%")
   end
 
   def self.invalidate_for_email(email)
@@ -327,8 +429,124 @@ class Invite < ActiveRecord::Base
     Jobs.enqueue(:invite_email, invite_id: id)
   end
 
+  # Used by InvitesController#resend_all_invites instead of resend_invite,
+  # when SiteSetting.bulk_invite_paced_resend_enabled is on: resend_invite
+  # sends immediately (fine for a single admin-triggered resend), but firing
+  # it in a loop for every pending invite is exactly the kind of undelayed
+  # burst send Jobs::ProcessBulkInviteEmails exists to avoid. This instead
+  # re-queues the invite the same way a fresh bulk CSV row does, so the
+  # existing one-at-a-time, randomly-paced throttle (and AI personalization,
+  # if enabled) picks it up rather than mailing it out immediately.
+  def requeue_for_paced_resend
+    update_columns(
+      updated_at: Time.zone.now,
+      invalidated_at: nil,
+      expires_at: SiteSetting.invite_expiry_days.days.from_now,
+      emailed_status: Invite.emailed_status_types[:bulk_pending],
+    )
+  end
+
+  # Used by InvitesController#send_now_invite ("Send Now") to pull one invite
+  # out of the paced queue immediately. The WHERE clause on the UPDATE itself
+  # is what makes this race-safe against Jobs::ProcessBulkInviteEmails'
+  # concurrent claim_next_pending_invite -- it only succeeds if the row was
+  # still bulk_pending/pending the instant the UPDATE ran, so the two can
+  # never both claim (and double-send) the same invite.
+  def self.claim_for_immediate_send(id)
+    claimable_statuses = emailed_status_types.values_at(:pending, :bulk_pending)
+    claimed_count =
+      where(id: id, emailed_status: claimable_statuses).update_all(
+        emailed_status: emailed_status_types[:sending],
+        updated_at: Time.zone.now,
+      )
+    claimed_count == 1 ? find_by(id: id) : nil
+  end
+
   def limit_invites_per_day
     RateLimiter.new(invited_by, "invites-per-day", SiteSetting.max_invites_per_day, 1.day.to_i)
+  end
+
+  # The EmailLog row for the most recent invite email actually sent for this
+  # invite (if any) -- distinct from custom_message, which only holds the
+  # note as currently written and gets overwritten on every AI-personalization
+  # pass (see BulkInvitePersonalization::Generator) or resend, losing any
+  # record of what a prior send actually contained.
+  def latest_sent_email_log
+    EmailLog.where(invite_id: id, email_type: "invite").order(created_at: :desc).first
+  end
+
+  # Downstream delivery outcome (sourced from SES via the linked EmailLog),
+  # distinct from emailed_status above -- that enum only tracks whether we
+  # handed the email to the mailer, not what happened after. Not folded into
+  # emailed_status itself since that would conflate "did we try to send" with
+  # "what happened once we did", which have different lifecycles (a bounce
+  # can arrive seconds or days after emailed_status already reads "sent").
+  # Accepts an optional preloaded EmailLog so callers rendering a page of
+  # invites (see UsersController#invited) can batch-load it once and avoid an
+  # EmailLog query per invite.
+  def delivery_status(email_log = latest_sent_email_log)
+    case emailed_status
+    when Invite.emailed_status_types[:not_required]
+      nil
+    when Invite.emailed_status_types[:pending], Invite.emailed_status_types[:bulk_pending]
+      "scheduled"
+    when Invite.emailed_status_types[:sending]
+      "pending"
+    when Invite.emailed_status_types[:skipped]
+      "skipped"
+    else
+      return "sent" if email_log.nil?
+      return "complained" if email_log.complained_at
+      return "bounced" if email_log.bounced?
+      return "delivered" if email_log.delivered_at
+      "sent"
+    end
+  end
+
+  # SQL counterpart of #delivery_status for filtering a relation of invites.
+  # The two must stay in step -- spec/models/invite_spec.rb checks every
+  # status against both.
+  def self.with_delivery_status(relation, status)
+    types = emailed_status_types
+
+    case status.to_s
+    when "scheduled"
+      relation.where(emailed_status: [types[:pending], types[:bulk_pending]])
+    when "pending"
+      relation.where(emailed_status: types[:sending])
+    when "skipped"
+      relation.where(emailed_status: types[:skipped])
+    when "sent", "delivered", "bounced", "complained"
+      outcome =
+        case status.to_s
+        when "complained"
+          "latest_log.complained_at IS NOT NULL"
+        when "bounced"
+          "latest_log.complained_at IS NULL AND latest_log.bounced"
+        when "delivered"
+          "latest_log.complained_at IS NULL AND NOT latest_log.bounced AND latest_log.delivered_at IS NOT NULL"
+        when "sent"
+          "latest_log.id IS NULL OR (latest_log.complained_at IS NULL AND NOT latest_log.bounced AND latest_log.delivered_at IS NULL)"
+        end
+
+      relation
+        .joins(<<~SQL)
+          LEFT JOIN LATERAL (
+            SELECT email_logs.id, email_logs.complained_at, email_logs.bounced, email_logs.delivered_at
+            FROM email_logs
+            WHERE email_logs.invite_id = invites.id AND email_logs.email_type = 'invite'
+            ORDER BY email_logs.created_at DESC
+            LIMIT 1
+          ) latest_log ON TRUE
+        SQL
+        .where(
+          "invites.emailed_status IS NULL OR invites.emailed_status NOT IN (?)",
+          types.values_at(:not_required, :pending, :bulk_pending, :sending, :skipped),
+        )
+        .where(outcome)
+    else
+      relation.none
+    end
   end
 
   def self.base_directory
@@ -420,11 +638,14 @@ end
 #
 #  id                      :integer          not null, primary key
 #  admin                   :boolean          default(FALSE), not null
+#  allow_any_email         :boolean          default(FALSE), not null
 #  custom_message          :text
+#  custom_subject          :string
 #  deleted_at              :datetime
 #  description             :string(100)
 #  domain                  :string
 #  email                   :string
+#  email_domain            :string
 #  email_token             :string
 #  emailed_status          :integer
 #  expires_at              :datetime         not null
@@ -432,7 +653,11 @@ end
 #  invite_key              :string(32)       not null
 #  max_redemptions_allowed :integer          default(1), not null
 #  moderator               :boolean          default(FALSE), not null
+#  recipient_keywords      :text
+#  recipient_name          :string(100)
 #  redemption_count        :integer          default(0), not null
+#  schedule_send           :boolean          default(TRUE), not null
+#  skip_personalization    :boolean          default(FALSE), not null
 #  created_at              :datetime         not null
 #  updated_at              :datetime         not null
 #  deleted_by_id           :integer
@@ -440,8 +665,9 @@ end
 #
 # Indexes
 #
-#  index_invites_on_email_and_invited_by_id  (email,invited_by_id)
-#  index_invites_on_emailed_status           (emailed_status)
-#  index_invites_on_invite_key               (invite_key) UNIQUE
-#  index_invites_on_invited_by_id            (invited_by_id)
+#  index_invites_on_email_and_invited_by_id         (email,invited_by_id)
+#  index_invites_on_emailed_status                  (emailed_status)
+#  index_invites_on_invite_key                      (invite_key) UNIQUE
+#  index_invites_on_invited_by_id                   (invited_by_id)
+#  index_invites_on_invited_by_id_and_email_domain  (invited_by_id,email_domain) WHERE (email_domain IS NOT NULL)
 #

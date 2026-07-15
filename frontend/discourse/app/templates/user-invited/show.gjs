@@ -1,12 +1,16 @@
-import { concat, fn } from "@ember/helper";
+import { concat, fn, hash } from "@ember/helper";
 import { LinkTo } from "@ember/routing";
 import { trustHTML } from "@ember/template";
 import SvgEnvelopeZero from "discourse/components/svg/envelope-zero";
 import DMenu from "discourse/float-kit/components/d-menu";
 import bodyClass from "discourse/helpers/body-class";
+import inviteDeliveryStatus from "discourse/helpers/invite-delivery-status";
 import rawDate from "discourse/helpers/raw-date";
 import { groupPath } from "discourse/lib/url";
+import ComboBox from "discourse/select-kit/components/combo-box";
+import { eq, not } from "discourse/truth-helpers";
 import DButton from "discourse/ui-kit/d-button";
+import DComboButton from "discourse/ui-kit/d-combo-button";
 import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
 import DCopyButton from "discourse/ui-kit/d-copy-button";
 import DDropdownMenu from "discourse/ui-kit/d-dropdown-menu";
@@ -16,7 +20,6 @@ import DTextField from "discourse/ui-kit/d-text-field";
 import dAvatar from "discourse/ui-kit/helpers/d-avatar";
 import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
 import dFormatDate from "discourse/ui-kit/helpers/d-format-date";
-import dFormatDuration from "discourse/ui-kit/helpers/d-format-duration";
 import dIcon from "discourse/ui-kit/helpers/d-icon";
 import dNumber from "discourse/ui-kit/helpers/d-number";
 import { i18n } from "discourse-i18n";
@@ -66,6 +69,24 @@ export default <template>
               {{/if}}
             {{/if}}
           {{/if}}
+          {{#if @controller.showDomainFilter}}
+            <ComboBox
+              class="invite-domain-filter"
+              @content={{@controller.domainOptions}}
+              @onChange={{@controller.domainChanged}}
+              @options={{hash none="user.invited.all_domains"}}
+              @value={{@controller.selectedDomain}}
+            />
+          {{/if}}
+          {{#if @controller.showStatusFilter}}
+            <ComboBox
+              class="invite-status-filter"
+              @content={{@controller.statusOptions}}
+              @onChange={{@controller.statusChanged}}
+              @options={{hash none="user.invited.all_statuses"}}
+              @value={{@controller.selectedStatus}}
+            />
+          {{/if}}
           {{#if @controller.showBulkActionButtons}}
             {{#if @controller.inviteExpired}}
               <DButton
@@ -85,13 +106,33 @@ export default <template>
                     @label="user.invited.reinvited_all"
                   />
                 </span>
-              {{else if @controller.hasEmailInvites}}
-                <DButton
-                  class="btn-default"
-                  @action={{@controller.reinviteAll}}
-                  @icon="arrows-rotate"
-                  @label="user.invited.reinvite_all"
-                />
+              {{else}}
+                <DComboButton
+                  class="resend-delete-combo"
+                  @btnTypeClass="btn-default"
+                  @hasMenu={{true}}
+                  as |combo|
+                >
+                  <combo.Button
+                    @action={{@controller.reinviteAll}}
+                    @disabled={{not @controller.hasEmailInvites}}
+                    @icon="arrows-rotate"
+                    @label="user.invited.reinvite_all"
+                  />
+
+                  <combo.Menu @identifier="invite-bulk-actions-menu">
+                    <DDropdownMenu as |dropdown|>
+                      <dropdown.item>
+                        <DButton
+                          class="btn-danger delete-all-invites"
+                          @action={{@controller.deleteAllInvites}}
+                          @icon="trash-can"
+                          @label="user.invited.delete_all"
+                        />
+                      </dropdown.item>
+                    </DDropdownMenu>
+                  </combo.Menu>
+                </DComboButton>
               {{/if}}
             {{/if}}
           {{/if}}
@@ -111,6 +152,12 @@ export default <template>
                     }}</th>
                   {{#if @controller.model.can_see_invite_details}}
                     <th class="d-table__header-cell">{{i18n
+                        "user.invited.invited_email"
+                      }}</th>
+                    <th class="d-table__header-cell">{{i18n
+                        "user.invited.account_email"
+                      }}</th>
+                    <th class="d-table__header-cell">{{i18n
                         "user.last_seen"
                       }}</th>
                     <th class="d-table__header-cell">{{i18n
@@ -118,12 +165,6 @@ export default <template>
                       }}</th>
                     <th class="d-table__header-cell">{{i18n
                         "user.invited.posts_read_count"
-                      }}</th>
-                    <th class="d-table__header-cell">{{i18n
-                        "user.invited.time_read"
-                      }}</th>
-                    <th class="d-table__header-cell">{{i18n
-                        "user.invited.days_visited"
                       }}</th>
                     <th class="d-table__header-cell">{{i18n
                         "user.invited.invited_via"
@@ -153,6 +194,23 @@ export default <template>
                     {{#if @controller.model.can_see_invite_details}}
                       <td class="d-table__cell --detail">
                         <div class="d-table__mobile-label">
+                          {{i18n "user.invited.invited_email"}}
+                        </div>
+                        {{#if invite.email}}
+                          {{dIcon "envelope"}}
+                          {{invite.email}}
+                        {{else}}
+                          {{dIcon "link"}}
+                        {{/if}}
+                      </td>
+                      <td class="d-table__cell --detail">
+                        <div class="d-table__mobile-label">
+                          {{i18n "user.invited.account_email"}}
+                        </div>
+                        {{invite.user.email}}
+                      </td>
+                      <td class="d-table__cell --detail">
+                        <div class="d-table__mobile-label">
                           {{i18n "user.last_seen"}}
                         </div>
                         {{dFormatDate invite.user.last_seen_at}}
@@ -168,26 +226,6 @@ export default <template>
                           {{i18n "user.invited.posts_read_count"}}
                         </div>
                         {{dNumber invite.user.posts_read_count}}
-                      </td>
-                      <td class="d-table__cell --detail">
-                        <div class="d-table__mobile-label">
-                          {{i18n "user.invited.time_read"}}
-                        </div>
-                        {{dFormatDuration invite.user.time_read}}
-                      </td>
-                      <td class="d-table__cell --detail">
-                        <div class="d-table__mobile-label">
-                          {{i18n "user.invited.days_visited"}}
-                        </div>
-                        <div>
-                          <span
-                            title={{i18n "user.invited.days_visited"}}
-                          >{{trustHTML invite.user.days_visited}}</span>
-                          /
-                          <span
-                            title={{i18n "user.invited.account_age_days"}}
-                          >{{trustHTML invite.user.days_since_created}}</span>
-                        </div>
                       </td>
                       <td class="d-table__cell --detail">
                         <div class="d-table__mobile-label">
@@ -212,6 +250,9 @@ export default <template>
                     }}</th>
                   <th class="d-table__header-cell">{{i18n
                       "user.invited.expires_at"
+                    }}</th>
+                  <th class="d-table__header-cell">{{i18n
+                      "user.invited.delivery_status"
                     }}</th>
                   <th class="d-table__header-cell"></th>
                 </tr>
@@ -302,6 +343,13 @@ export default <template>
                       {{/if}}
                     </td>
 
+                    <td class="d-table__cell --detail invite-delivery-status">
+                      <div class="d-table__mobile-label">
+                        {{i18n "user.invited.delivery_status"}}
+                      </div>
+                      {{inviteDeliveryStatus invite.delivery_status}}
+                    </td>
+
                     {{#if invite.can_delete_invite}}
                       <td class="d-table__cell --controls invite-actions">
                         <div class="d-table__cell-actions">
@@ -350,6 +398,40 @@ export default <template>
                                       @translatedLabelAfterCopy={{i18n
                                         "user.invited.invite.link_copied"
                                       }}
+                                    />
+                                  </dropdown.item>
+                                {{/if}}
+                                {{#if (eq invite.delivery_status "scheduled")}}
+                                  <dropdown.item>
+                                    <DButton
+                                      class="btn-transparent send-now-invite"
+                                      @action={{fn @controller.sendNow invite}}
+                                      @icon="paper-plane"
+                                      @label="user.invited.invite.send_now"
+                                    />
+                                  </dropdown.item>
+                                {{/if}}
+                                {{#if invite.emailed}}
+                                  <dropdown.item>
+                                    <DButton
+                                      class="btn-transparent preview-sent-email"
+                                      @action={{fn
+                                        @controller.previewSentEmail
+                                        invite
+                                      }}
+                                      @icon="envelope"
+                                      @label="user.invited.invite.preview_sent_email"
+                                    />
+                                  </dropdown.item>
+                                  <dropdown.item>
+                                    <DButton
+                                      class="btn-transparent resend-invite"
+                                      @action={{fn
+                                        @controller.openResendInvite
+                                        invite
+                                      }}
+                                      @icon="paper-plane"
+                                      @label="user.invited.reinvite"
                                     />
                                   </dropdown.item>
                                 {{/if}}

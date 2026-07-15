@@ -25,7 +25,11 @@ export default class DirectoryItem extends Component {
       ...attributes
     >
       <div class="directory-table__cell" role="rowheader">
-        <DUserInfo @headingLevel={{3}} @user={{@item.user}} />
+        <DUserInfo
+          @headingLevel={{3}}
+          @nameOrUsernameOnly={{true}}
+          @user={{@item.user}}
+        />
       </div>
 
       {{#each @columns as |column|}}

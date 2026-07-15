@@ -2,7 +2,6 @@ import EmberObject, { computed, set } from "@ember/object";
 import { trackedArray } from "@ember/reactive/collections";
 import { isNone } from "@ember/utils";
 import { ajax } from "discourse/lib/ajax";
-import { popupAjaxError } from "discourse/lib/ajax-error";
 import { userPath } from "discourse/lib/url";
 import Topic from "discourse/models/topic";
 import User from "discourse/models/user";
@@ -16,7 +15,7 @@ export default class Invite extends EmberObject {
     return result;
   }
 
-  static async findInvitedBy(user, filter, search, offset) {
+  static async findInvitedBy(user, filter, search, offset, domain, status) {
     if (!user) {
       return;
     }
@@ -27,6 +26,12 @@ export default class Invite extends EmberObject {
     }
     if (!isNone(search)) {
       data.search = search;
+    }
+    if (!isNone(domain)) {
+      data.domain = domain;
+    }
+    if (!isNone(status)) {
+      data.status = status;
     }
     data.offset = offset || 0;
 
@@ -39,8 +44,32 @@ export default class Invite extends EmberObject {
     return EmberObject.create(result);
   }
 
-  static reinviteAll() {
-    return ajax("/invites/reinvite-all", { type: "POST" });
+  static reinviteAll(
+    domain,
+    status,
+    search,
+    { keywords, aiPersonalization, scheduleSend } = {}
+  ) {
+    const data = {};
+    if (!isNone(domain)) {
+      data.domain = domain;
+    }
+    if (!isNone(status)) {
+      data.status = status;
+    }
+    if (!isNone(search)) {
+      data.search = search;
+    }
+    if (!isNone(keywords)) {
+      data.keywords = keywords;
+    }
+    if (!isNone(aiPersonalization)) {
+      data.ai_personalization = aiPersonalization;
+    }
+    if (!isNone(scheduleSend)) {
+      data.schedule_send = scheduleSend;
+    }
+    return ajax("/invites/reinvite-all", { type: "POST", data });
   }
 
   static destroyAllExpired(user) {
@@ -48,6 +77,24 @@ export default class Invite extends EmberObject {
       type: "POST",
       data: { username: user.username },
     });
+  }
+
+  static destroyAllInvites(domain, status, search) {
+    const data = {};
+    if (!isNone(domain)) {
+      data.domain = domain;
+    }
+    if (!isNone(status)) {
+      data.status = status;
+    }
+    if (!isNone(search)) {
+      data.search = search;
+    }
+    return ajax("/invites/destroy-all", { type: "POST", data });
+  }
+
+  static findLatestSentEmail(inviteId) {
+    return ajax(`/admin/email-logs/invite_sent/${inviteId}.json`);
   }
 
   @computed("topics.firstObject.id")
@@ -105,12 +152,32 @@ export default class Invite extends EmberObject {
     }).then(() => this.set("destroyed", true));
   }
 
-  reinvite() {
+  reinvite({ keywords, aiPersonalization } = {}) {
+    // No .catch here, deliberately -- this is awaited from
+    // resend-invite.gjs's own try/catch (which calls popupAjaxError and
+    // keeps the modal open on failure), matching Invite.reinviteAll's
+    // behavior below. Swallowing the error here would resolve this
+    // promise regardless, so the modal would close looking successful
+    // even when the resend failed.
     return ajax("/invites/reinvite", {
       type: "POST",
-      data: { email: this.email },
-    })
-      .then(() => this.set("reinvited", true))
-      .catch(popupAjaxError);
+      data: {
+        invite_id: this.id,
+        keywords,
+        ai_personalization: aiPersonalization,
+      },
+    }).then(() => this.set("reinvited", true));
+  }
+
+  // Sends this invite immediately, bypassing Jobs::ProcessBulkInviteEmails'
+  // paced queue, and nudges that queue's chain in case it's blocked -- see
+  // InvitesController#send_now_invite. No .catch here either, for the same
+  // reason as reinvite above: the caller (user-invited/show.js) handles the
+  // error itself.
+  sendNow() {
+    return ajax("/invites/send-now", {
+      type: "POST",
+      data: { invite_id: this.id },
+    }).then((result) => this.set("delivery_status", result.delivery_status));
   }
 }

@@ -495,6 +495,21 @@ RSpec.describe Email::Sender do
           expect(message.header["Auto-Submitted"]).to eq(nil)
         end
       end
+
+      context "when the email is an invite" do
+        fab!(:invite)
+        let(:email_sender) { Email::Sender.new(message, :invite) }
+
+        before { message.header["X-Discourse-Invite-Id"] = invite.id }
+
+        it "stores the invite_id and the raw content, unlike other email types" do
+          email_sender.send
+
+          expect(email_log).to be_present
+          expect(email_log.invite_id).to eq(invite.id)
+          expect(email_log.raw).to include("hello")
+        end
+      end
     end
 
     context "with email log with a post id and topic id" do
@@ -952,6 +967,22 @@ RSpec.describe Email::Sender do
 
     it "records the SMTP transaction response" do
       expect(@email_log.smtp_transaction_response).to eq(mock_smtp_transaction_response)
+    end
+
+    it "does not set ses_message_id for a non-SES SMTP response" do
+      expect(@email_log.ses_message_id).to eq(nil)
+    end
+
+    context "when the SMTP transaction response is SES-shaped" do
+      let(:mock_smtp_transaction_response) do
+        "250 Ok 010901a075d1bd53-2bdf9bfa-57d6-41e7-a08f-e1884959e9a6-000000"
+      end
+
+      it "extracts the SES message ID" do
+        expect(@email_log.ses_message_id).to eq(
+          "010901a075d1bd53-2bdf9bfa-57d6-41e7-a08f-e1884959e9a6-000000",
+        )
+      end
     end
 
     describe "post reply keys" do

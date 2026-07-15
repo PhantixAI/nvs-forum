@@ -331,7 +331,7 @@ shared_examples "signup scenarios" do
 
   describe "full name field" do
     context "when full_name_requirement is optional_at_signup" do
-      before { SiteSetting.full_name_requirement = "optional_at_signup" }
+      before { stub_full_name_requirement("optional_at_signup") }
 
       context "when login_required is true" do
         before { SiteSetting.login_required = true }
@@ -353,7 +353,7 @@ shared_examples "signup scenarios" do
     end
 
     context "when full_name_requirement is hidden_at_signup" do
-      before { SiteSetting.full_name_requirement = "hidden_at_signup" }
+      before { stub_full_name_requirement("hidden_at_signup") }
 
       it "hides the name field" do
         signup_page.open
@@ -362,7 +362,7 @@ shared_examples "signup scenarios" do
     end
 
     context "when full_name_requirement is required_at_signup" do
-      before { SiteSetting.full_name_requirement = "required_at_signup" }
+      before { stub_full_name_requirement("required_at_signup") }
 
       it "displays the name field" do
         signup_page.open

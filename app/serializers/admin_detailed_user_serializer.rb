@@ -6,6 +6,9 @@ class AdminDetailedUserSerializer < AdminUserSerializer
              :can_revoke_admin,
              :can_grant_moderation,
              :can_revoke_moderation,
+             :is_batch_moderator,
+             :can_grant_batch_moderator,
+             :can_revoke_batch_moderator,
              :can_impersonate,
              :like_count,
              :like_given_count,
@@ -74,6 +77,29 @@ class AdminDetailedUserSerializer < AdminUserSerializer
   def can_grant_moderation
     scope.can_grant_moderation?(object)
   end
+
+  def is_batch_moderator
+    SiteSetting.enable_batch_moderation &&
+      BatchModeration::GroupSync.owned_batch_groups(object).exists?
+  end
+
+  def include_is_batch_moderator?
+    SiteSetting.enable_batch_moderation
+  end
+
+  def can_grant_batch_moderator
+    scope.can_grant_batch_moderator?(object)
+  end
+
+  def can_revoke_batch_moderator
+    scope.can_revoke_batch_moderator?(object)
+  end
+
+  def include_can_grant_batch_moderator?
+    SiteSetting.enable_batch_moderation
+  end
+
+  alias_method :include_can_revoke_batch_moderator?, :include_can_grant_batch_moderator?
 
   def can_delete_all_posts
     scope.can_delete_all_posts?(object)

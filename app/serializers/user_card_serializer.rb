@@ -56,6 +56,9 @@ class UserCardSerializer < BasicUserSerializer
              :can_mute_user,
              :can_send_private_messages,
              :can_send_private_message_to_user,
+             :can_batch_moderate,
+             :can_batch_report,
+             :is_batch_moderator,
              :trust_level,
              :moderator,
              :admin,
@@ -151,6 +154,19 @@ class UserCardSerializer < BasicUserSerializer
 
   def can_send_private_message_to_user
     scope.can_send_private_message?(object)
+  end
+
+  def can_batch_moderate
+    BatchModeration::Moderator.can_moderate?(scope.user, object)
+  end
+
+  def can_batch_report
+    BatchModeration::Moderator.can_report?(scope.user, object)
+  end
+
+  def is_batch_moderator
+    SiteSetting.enable_batch_moderation &&
+      BatchModeration::GroupSync.owned_batch_groups(object).exists?
   end
 
   def include_suspend_reason?
