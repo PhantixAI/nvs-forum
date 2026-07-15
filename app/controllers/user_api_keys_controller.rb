@@ -601,6 +601,8 @@ class UserApiKeysController < ApplicationController
     return if auth_redirect.blank? || auth_redirect == "discourse://auth_redirect"
 
     uri = URI.parse(auth_redirect)
+    return I18n.t("user_api_key.redirect_target_mobile_app") if %w[http https].exclude?(uri.scheme)
+
     if uri.port.nil? || [80, 443].include?(uri.port)
       uri.host
     else
