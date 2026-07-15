@@ -152,6 +152,14 @@
                 "ends_at"
               ]
             }
+          },
+          "event_scope": {
+            "type": "string",
+            "enum": [
+              "batch",
+              "college",
+              "forum"
+            ]
           }
         },
         "required": [

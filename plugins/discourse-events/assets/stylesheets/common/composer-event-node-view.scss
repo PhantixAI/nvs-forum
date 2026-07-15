@@ -204,20 +204,87 @@
     }
   }
 
-  .composer-event__livestream-toggle,
-  .composer-event__all-day-toggle {
+  .composer-event__livestream-toggle {
     display: flex;
     margin-bottom: var(--space-1);
     grid-column: 1 / -1;
+    grid-column-start: 2;
+    justify-self: start;
 
     @include viewport.from(sm) {
       padding-left: 0.5em;
     }
   }
 
-  .composer-event__livestream-toggle {
-    grid-column-start: 2;
-    justify-self: start;
+  .composer-event__all-day-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin-bottom: var(--space-1);
+    grid-column: 1 / -1;
+  }
+
+  .composer-event__all-day-toggle {
+    display: flex;
+
+    @include viewport.from(sm) {
+      padding-left: 0.5em;
+    }
+  }
+
+  .composer-event__event-scope {
+    display: flex;
+    align-items: center;
+    gap: var(--space-half);
+  }
+
+  // Matches the size/muted treatment of the other small inline icons in this
+  // editor (e.g. .composer-event__reminder-icon) -- a tooltip trigger, not a
+  // visible text label, so it stays compact next to the "All day" toggle.
+  .composer-event__event-scope-icon {
+    display: inline-flex;
+    color: var(--primary-medium);
+    font-size: var(--font-down-1);
+  }
+
+  .composer-event__event-scope-control {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  // Strips the native <select> chrome (border/background/OS arrow) so it reads
+  // as plain inline text -- like the rest of this editor's borderless controls
+  // (date/time inputs, location, description) -- with a custom caret standing
+  // in for the removed native arrow. A fixed min-width (sized to the longest
+  // option, "College Event") keeps the row from jumping width as the value
+  // changes between the three options.
+  .composer-event__event-scope-select {
+    appearance: none;
+    border: none;
+    background: transparent;
+    margin: 0;
+    padding: 0;
+    padding-right: 1.1em;
+    min-width: 8em;
+    font: inherit;
+    color: var(--primary);
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: 2px solid var(--tertiary);
+      outline-offset: 2px;
+      border-radius: var(--d-border-radius, 3px);
+    }
+  }
+
+  .composer-event__event-scope-caret {
+    position: absolute;
+    right: 0;
+    color: var(--primary-medium);
+    font-size: 0.7em;
+    pointer-events: none;
   }
 
   .d-toggle-switch:has(.composer-event__livestream-switch:disabled) {

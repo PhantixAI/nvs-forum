@@ -16,13 +16,20 @@ class UserCreator
     end
   end
 
-  def self.assign_signup_fields(user)
+  def self.assign_signup_fields(user, submitted_user_fields = nil)
     fields = user.custom_fields
     UserField.all.each do |field|
       value = yield(field)
       value = nil if value == "false"
       if value.blank?
-        if field.required?
+        required =
+          DiscoursePluginRegistry.apply_modifier(
+            :user_field_required_for_signup,
+            field.required?,
+            field,
+            submitted_user_fields,
+          )
+        if required
           user.errors.add(
             :base,
             I18n.t("login.missing_user_field_details", name: field.name, id: field.id),
@@ -68,7 +75,7 @@ class UserCreator
     error =
       self
         .class
-        .assign_signup_fields(user) do |field|
+        .assign_signup_fields(user, attributes[:user_fields]) do |field|
           self.class.clean_custom_field_values(field, attributes.dig(:user_fields, field.id.to_s))
         end
     return user if error

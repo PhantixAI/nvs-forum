@@ -640,10 +640,14 @@ en:
     moderator_invite_requires_staff_inviter: "Only staff can create moderator invites"
     existing_user_success: "Invite redeemed successfully"
     email_invites_disabled: "Sending invite emails is disabled"
+    email_required_to_send: "This invite has no email address to send to"
+    ai_personalization_failed: "Couldn't generate a personalized email for this invite right now. Nothing was sent -- try resending again shortly."
+    send_now_not_scheduled: "This invite is no longer scheduled -- it may have already been sent."
 
   bulk_invite:
     file_should_be_csv: "The uploaded file should be of csv format."
     max_rows: "First %{max_bulk_invites} invites has been sent. Try splitting the file in smaller parts."
+    file_too_large: "The uploaded file is too large. Please split it into smaller files."
     error: "There was an error uploading that file. Please try again later."
 
   invite_link:
@@ -1534,6 +1538,7 @@ en:
     logged_in_as: "Logged in as"
     permissions_header: 'This will allow "%{application_name}" to:'
     redirect_warning: "Authorizing will redirect you to"
+    redirect_target_mobile_app: "the mobile app"
     expiry_notice: 'This key for "%{application_name}" will expire on %{expires_at}.'
     write_scope_warning: "Full write access requested — this application will be able to post, edit, and delete content. Proceed only if you fully trust it."
     instructions: 'We just generated a new user API key for you to use with "%{application_name}", please paste the following key into your application:'
@@ -1543,6 +1548,10 @@ en:
     otp_confirmation:
       confirm_title: Continue to %{site_name}
       logging_in_as: Logging in as %{username}
+      finishing_sign_in: "Finishing sign-in…"
+      taking_longer: "Taking longer than expected — tap below to continue."
+      still_stuck: "Still not working?"
+      reload_button: Reload
       confirm_button: Finish Login
     no_trust_level: "Sorry, you do not have the required trust level to access the user API"
     generic_error: "Sorry, we are unable to issue user API keys, this feature may be disabled by the site admin"
@@ -2118,6 +2127,14 @@ en:
   site_settings:
     dsa_community_rules: "Community rules available for DSA classification when {{setting:dsa_reporting_enabled}} is enabled. Each rule needs an exact contractual reference (up to 500 characters) and an explanation (up to 2000 characters). Leave empty to disable classification."
     allow_bulk_invite: "Allow bulk invites by uploading a CSV file"
+    bulk_invite_ai_personalization_enabled: "Use an AI language model to rewrite each bulk invite email (subject and body) from {{setting:bulk_invite_ai_personalization_template}} into a distinct, personalized email per recipient, to reduce spam filtering on large sends. Requires an AI language model to be configured under AI plugin settings; when none is configured, invites send with the plain template as normal."
+    bulk_invite_ai_personalization_template: "Base email used as the starting point for each recipient's AI-personalized bulk invite -- write it as a complete, ready-to-send email. Supports placeholders %{site_title}, %{site_description}, and %{invite_link}. %{invite_link} here is for the AI's own context only, so it understands where a link naturally fits -- the real link is always appended to the final email automatically, verbatim, on its own line, regardless of whether you include this placeholder or where. Only used when {{setting:bulk_invite_ai_personalization_enabled}} is on."
+    bulk_invite_ai_personalization_rules: "Formatting and anti-spam rules the AI language model must follow when rewriting {{setting:bulk_invite_ai_personalization_template}} per recipient. Loosening or removing a rule here changes what the model is asked to do, but does not bypass the separate, fixed validation every generated email still has to pass (no link, URL, or domain of any kind from the model -- the real link is always appended separately and automatically, never left to the model to write or place; no Markdown; no shouting) before it is used -- an email that fails validation holds the invite back to retry rather than sending it. Only used when {{setting:bulk_invite_ai_personalization_enabled}} is on."
+    institute_acronyms: "Acronyms exempt from the ALL CAPS shouting check that every AI-generated bulk invite note is validated against (see {{setting:bulk_invite_ai_personalization_rules}}). Add an acronym here (e.g. your institution's short name) if it is legitimately getting rejected and falling back to the plain template. Only used when {{setting:bulk_invite_ai_personalization_enabled}} is on."
+    bulk_invite_ai_personalization_max_tokens: "Maximum output tokens requested from the AI language model per bulk invite email. A value too low can cause the model to truncate mid-response (rejected, falls back to the plain template); raise this if that happens often. Capped separately by the configured AI language model's own max output tokens, whichever is lower. Only used when {{setting:bulk_invite_ai_personalization_enabled}} is on."
+    bulk_invite_email_delay_min_seconds: "Minimum random delay, in seconds, between each bulk invite email being sent. Applies to every bulk invite, whether or not AI personalization is enabled."
+    bulk_invite_email_delay_max_seconds: "Maximum random delay, in seconds, between each bulk invite email being sent. Applies to every bulk invite, whether or not AI personalization is enabled."
+    bulk_invite_paced_resend_enabled: "When an admin uses Resend All Invites, re-queue matching invites through the same one-at-a-time, randomly-paced throttle a bulk invite CSV upload uses (governed by {{setting:bulk_invite_email_delay_min_seconds}} and {{setting:bulk_invite_email_delay_max_seconds}}), instead of emailing all of them immediately. Recommended for sites running large bulk invite campaigns, so a resend can't send a burst of emails that gets flagged as spam."
     disabled: "disabled"
     display_local_time_in_user_card: "Display the local time based on a user's timezone when their user card is opened."
     censored_words: "Words that will be automatically replaced with &#9632;&#9632;&#9632;&#9632;"
@@ -2846,6 +2863,11 @@ en:
     enable_user_directory: "Provide a directory of users for browsing"
     enable_group_directory: "Provide a directory of groups for browsing"
     enable_category_group_moderation: "Allow groups to moderate content in specific categories"
+    batch_moderation_batch_field_name: "Name of the signup UserField that identifies a user's cohort (e.g. graduation year) for batch moderation."
+    batch_moderation_secondary_field_names: "Names of additional signup UserFields batch moderation can use to further scope a cohort for Student-type members, alongside the batch field (e.g. Branch). The first one that exists on this site is used."
+    batch_moderation_institution_field_names: "Names of the signup UserFields batch moderation uses to identify a member's institution (e.g. College, Vidyalaya). Always part of a cohort's key, for both Student and Staff-type members. The first one that exists on this site is used."
+    batch_moderation_member_type_field_name: "Name of the signup UserField that distinguishes Student from Staff-type members for batch moderation cohort grouping (e.g. \"I am\"). If this field doesn't exist on a site, everyone is treated as a Student."
+    batch_moderation_staff_type_values: "Values of {{setting:batch_moderation_member_type_field_name}} that mean a member is Staff-type (their cohort is keyed on the institution field alone, without batch/secondary fields)."
     group_in_subject: "Set %%{optional_pm} in email subject to name of first group in PM, see: <a href='https://meta.discourse.org/t/customize-specific-email-templates/88323' target='_blank'>Customize subject format for standard emails</a>"
     allow_anonymous_mode: "Enable the option for users to switch to anonymous mode for posting. When activated, users can opt for their identities to be hidden when creating posts or topics throughout the site. See also {{setting:allow_likes_in_anonymous_mode}}."
     allow_likes_in_anonymous_mode: "Enable this setting to allow users who are browsing your site anonymously to like posts. When activated, users can opt for their identities to be hidden when liking posts or topics throughout the site. This setting requires the {{setting:allow_anonymous_mode}} setting to be enabled."
@@ -3090,6 +3112,8 @@ en:
        Admins and moderators can always create user API keys.
     allowed_user_api_auth_redirects: "Allowed URL for authentication redirect for user API keys. Wildcard symbol * can be used to match any part of it (e.g. www.example.com/*)."
     allowed_user_api_push_urls: "Allowed URLs for server push to user API"
+    fcm_service_account_json: "Firebase Cloud Messaging service account JSON key, used to send push notifications directly to Android app clients"
+    apns_bundle_id: "iOS app bundle identifier (APNs topic) that push notifications are sent to. Authenticates with APNs using the same key configured for {{setting:apple_pem}}"
     revoke_user_api_keys_unused_days: "Number of days since a user API key was last used before it is automatically revoked (0 for never)"
     revoke_user_api_keys_maxlife_days: "Number of days before a user API key is automatically revoked (0 for never)"
     max_user_api_key_expiry_days: "Maximum expiry, in days, that clients can request for user API keys"
@@ -3307,6 +3331,9 @@ en:
       max_username_length_exists: "You cannot set 'max username length' below the longest username (%{username})."
       max_group_name_length_exists: "You cannot set 'max username length' below the longest group name (%{group_name})."
       max_username_length_range: "You cannot set the 'max username length' below 'min username length'."
+      bulk_invite_email_delay_min: "You cannot set 'bulk invite email delay min seconds' above 'bulk invite email delay max seconds'."
+      full_name_requirement_locked: "Full name is always required at signup and cannot be changed."
+      bulk_invite_email_delay_max: "You cannot set 'bulk invite email delay max seconds' below 'bulk invite email delay min seconds'."
       invalid_hex_value: "Color values have to be 6-digit hexadecimal codes."
       empty_selectable_avatars: "You must first upload at least two selectable avatars before enabling this setting."
       category_search_priority:
@@ -3737,7 +3764,7 @@ en:
     email:
       blank: "can't be blank."
       invalid: "is invalid."
-      not_allowed: "is not allowed from that email provider. Please use another email address."
+      not_allowed: "domain is not in the list of allowed college domains. Please reach out to support to get your domain added."
       blocked: "is not allowed."
       revoked: "Won't be sending emails to '%{email}' until %{date}."
       does_not_exist: "N/A"
@@ -3867,6 +3894,16 @@ en:
 
       %{invite_link}
 
+  ai_personalized_invite_forum_mailer:
+    title: "AI-Personalized Invite Forum Mailer"
+    # Safety net only -- InviteMailer always passes subject_override for
+    # this template, which wins over this. Matches invite_forum_mailer's
+    # subject so a future caller that selects this template without an
+    # override still gets a real subject, never a missing-translation one.
+    subject_template: "%{inviter_name} invited you to join %{site_domain_name}"
+    text_body_template: |
+      %{user_custom_message}
+
   invite_password_instructions:
     title: "Invite Password Instructions"
     subject_template: "Set password for your %{site_name} account"
@@ -3890,6 +3927,43 @@ en:
       (If you *didn't* request this download, you should be seriously concerned -- someone has admin access to your site.)
     no_token: |
       Sorry, this backup download link has already been used or has expired.
+
+  batch_moderation:
+    system_actor: "the system"
+    actions:
+      suspend: "suspended"
+      silence: "silenced"
+      report: "reported"
+      cohort_joined: "joined a cohort"
+      cohort_left: "left a cohort"
+      moderator_granted: "granted Batch Moderator status to"
+      moderator_revoked: "revoked Batch Moderator status from"
+
+  batch_moderation_action_mailer:
+    title: "Batch Moderation Action"
+    subject_template: "[%{email_prefix}] %{action_title} by %{actor_username}"
+    text_body_template: |
+      **%{actor_username}** %{action_title} **%{target_username}**.
+
+      Reason given: %{reason}
+
+      [View %{target_username}'s profile](%{target_url})
+
+  batch_moderation_cohort_change_mailer:
+    title: "Batch Moderation Cohort Change"
+    subject_template: "[%{email_prefix}] %{user_username} %{action_title} (%{group_name})"
+    text_body_template: |
+      **%{user_username}** %{action_title}: **%{group_name}**.
+
+      [View %{user_username}'s profile](%{target_url})
+
+  batch_moderation_status_change_mailer:
+    title: "Batch Moderation Status Change"
+    subject_template: "[%{email_prefix}] %{actor_username} %{action_title} %{user_username} (%{group_name})"
+    text_body_template: |
+      **%{actor_username}** %{action_title} **%{user_username}** for **%{group_name}**.
+
+      [View %{user_username}'s profile](%{target_url})
 
   admin_confirmation_mailer:
     title: "Admin Confirmation"
@@ -4296,6 +4370,16 @@ en:
         ``` text
         %{logs}
         ```
+    reviewable_bulk_invite_rejected:
+      title: "Bulk Invite Rejected"
+      subject_template: "Your bulk invite request was rejected"
+      text_body_template: |
+        Hi %{username},
+
+        Your bulk invite request on %{site_name} (%{invite_count} invites) was reviewed by staff and was not approved. No invites were sent.
+
+        If you have questions, please contact a staff member.
+
     user_added_to_group_as_owner:
       title: "Added to Group as Owner"
       subject_template: "You have been added as an owner of the %{group_name} group"
@@ -6475,6 +6559,22 @@ en:
         watched_word: "This post included a Watched Word. Check the %{link} for more."
 
     actions:
+      agree_report:
+        title: "Agree"
+        description: "Confirm this report is valid."
+        complete: "Report confirmed."
+      disagree_report:
+        title: "Disagree"
+        description: "Dismiss this report."
+        complete: "Report dismissed."
+      approve_bulk_invite:
+        title: "Approve"
+        description: "Send these invites."
+        complete: "Invites sent."
+      reject_bulk_invite:
+        title: "Reject"
+        description: "Discard this bulk invite without sending anything."
+        complete: "Bulk invite rejected."
       agree:
         title: "Yes"
       agree_and_keep:

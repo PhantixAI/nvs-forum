@@ -1,4 +1,5 @@
 engineStrict: true
+childConcurrency: 1
 publicHoistPattern:
 - playwright
 - playwright-core

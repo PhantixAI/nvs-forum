@@ -106,6 +106,7 @@ export default class DiscoursePostEventEvent {
   @tracked customFields;
   @tracked channel;
   @tracked imageUpload;
+  @tracked eventScope;
 
   @tracked _watchingInvitee;
   @tracked _sampleInvitees;
@@ -158,6 +159,7 @@ export default class DiscoursePostEventEvent {
     this.stats = args.stats;
     this.reminders = args.reminders;
     this.customFields = EmberObject.create(args.custom_fields || {});
+    this.eventScope = args.event_scope || "batch";
     if (args.channel && ChatChannel) {
       this.channel = ChatChannel.create(args.channel);
     }
@@ -255,6 +257,7 @@ export default class DiscoursePostEventEvent {
     this.isExpired = event.isExpired;
     this.isStandalone = event.isStandalone;
     this.minimal = event.minimal;
+    this.eventScope = event.eventScope;
     this.chatEnabled = event.chatEnabled;
     this.livestream = event.livestream;
     this.livestreamOnebox = event.livestreamOnebox;

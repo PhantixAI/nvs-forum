@@ -77,7 +77,6 @@ RSpec.describe UserApiKey do
     it "excludes expired keys" do
       freeze_time
       SiteSetting.allow_user_api_key_scopes = "push"
-      SiteSetting.allowed_user_api_push_urls = "https://push.example.com"
       user = Fabricate(:user)
       active_client = Fabricate(:user_api_key_client, client_id: "active-client")
       expired_client = Fabricate(:user_api_key_client, client_id: "expired-client")
@@ -86,7 +85,7 @@ RSpec.describe UserApiKey do
         :user_api_key,
         user: user,
         client: active_client,
-        push_url: "https://push.example.com",
+        push_url: "ios",
         expires_at: 1.hour.from_now,
         scopes: [Fabricate.build(:user_api_key_scope, name: "push")],
       )
@@ -94,14 +93,43 @@ RSpec.describe UserApiKey do
         :user_api_key,
         user: user,
         client: expired_client,
-        push_url: "https://push.example.com",
+        push_url: "ios",
         expires_at: 1.hour.ago,
         scopes: [Fabricate.build(:user_api_key_scope, name: "push")],
       )
 
-      expect(described_class.push_clients_for(user)).to eq(
-        [%w[active-client https://push.example.com]],
+      expect(described_class.push_clients_for(user)).to eq([%w[active-client ios]])
+    end
+
+    it "excludes keys without a registered platform" do
+      SiteSetting.allow_user_api_key_scopes = "push"
+      user = Fabricate(:user)
+      client = Fabricate(:user_api_key_client, client_id: "no-platform-client")
+
+      Fabricate(
+        :user_api_key,
+        user: user,
+        client: client,
+        push_url: nil,
+        scopes: [Fabricate.build(:user_api_key_scope, name: "push")],
       )
+
+      expect(described_class.push_clients_for(user)).to eq([])
+    end
+  end
+
+  describe "#has_push?" do
+    it "is true only when the key has a push/notifications scope and a registered platform" do
+      key_with_push =
+        described_class.new(push_url: "ios", scopes: [UserApiKeyScope.new(name: "push")])
+      key_without_platform =
+        described_class.new(push_url: nil, scopes: [UserApiKeyScope.new(name: "push")])
+      key_without_scope =
+        described_class.new(push_url: "ios", scopes: [UserApiKeyScope.new(name: "read")])
+
+      expect(key_with_push.has_push?).to eq(true)
+      expect(key_without_platform.has_push?).to eq(false)
+      expect(key_without_scope.has_push?).to eq(false)
     end
   end
 end

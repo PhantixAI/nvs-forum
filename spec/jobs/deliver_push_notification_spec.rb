@@ -22,28 +22,32 @@ RSpec.describe Jobs::DeliverPushNotification do
 
     it "does not deliver when user is missing" do
       PushNotificationPusher.expects(:push).never
-      HubPushNotificationPusher.expects(:push).never
+      FcmPushNotificationPusher.expects(:push).never
+      ApnsPushNotificationPusher.expects(:push).never
       Jobs::DeliverPushNotification.new.execute(user_id: -999, payload: payload)
     end
 
     it "does not deliver when user was recently seen" do
       user.update!(last_seen_at: 1.minute.ago)
       PushNotificationPusher.expects(:push).never
-      HubPushNotificationPusher.expects(:push).never
+      FcmPushNotificationPusher.expects(:push).never
+      ApnsPushNotificationPusher.expects(:push).never
       Jobs::DeliverPushNotification.new.execute(user_id: user.id, payload: payload)
     end
 
     it "delivers when user is offline" do
       user.update!(last_seen_at: 10.minutes.ago)
       PushNotificationPusher.expects(:push).with(user, payload)
-      HubPushNotificationPusher.expects(:push).with(user, payload)
+      FcmPushNotificationPusher.expects(:push).with(user, payload)
+      ApnsPushNotificationPusher.expects(:push).with(user, payload)
       Jobs::DeliverPushNotification.new.execute(user_id: user.id, payload: payload)
     end
 
     it "delivers when bypass_time_window is true despite user being active" do
       user.update!(last_seen_at: 1.minute.ago)
       PushNotificationPusher.expects(:push).with(user, payload)
-      HubPushNotificationPusher.expects(:push).with(user, payload)
+      FcmPushNotificationPusher.expects(:push).with(user, payload)
+      ApnsPushNotificationPusher.expects(:push).with(user, payload)
 
       Jobs::DeliverPushNotification.new.execute(
         user_id: user.id,
@@ -68,22 +72,24 @@ RSpec.describe Jobs::DeliverPushNotification do
     end
   end
 
-  describe "hub push delivery" do
+  describe "mobile push delivery" do
     before { user.update!(last_seen_at: 10.minutes.ago) }
 
-    it "calls HubPushNotificationPusher" do
-      HubPushNotificationPusher.expects(:push).with(user, payload).once
+    it "calls FcmPushNotificationPusher and ApnsPushNotificationPusher" do
+      FcmPushNotificationPusher.expects(:push).with(user, payload).once
+      ApnsPushNotificationPusher.expects(:push).with(user, payload).once
       Jobs::DeliverPushNotification.new.execute(user_id: user.id, payload: payload)
     end
   end
 
   describe "both mechanisms" do
-    it "delivers via both pushers for the same user" do
+    it "delivers via web push and mobile pushers for the same user" do
       user.update!(last_seen_at: 10.minutes.ago)
       Fabricate(:push_subscription, user: user)
 
       PushNotificationPusher.expects(:push).with(user, payload).once
-      HubPushNotificationPusher.expects(:push).with(user, payload).once
+      FcmPushNotificationPusher.expects(:push).with(user, payload).once
+      ApnsPushNotificationPusher.expects(:push).with(user, payload).once
 
       Jobs::DeliverPushNotification.new.execute(user_id: user.id, payload: payload)
     end
@@ -137,14 +143,21 @@ RSpec.describe Jobs::DeliverPushNotification do
       Jobs::DeliverPushNotification.new.execute(user_id: user.id, payload: localizable_payload)
     end
 
-    it "localizes payload before delivering to hub push" do
-      SiteSetting.allowed_user_api_push_urls = "https://hub.example.com/push"
+    it "localizes payload before delivering to FCM push" do
+      SiteSetting.fcm_service_account_json = {
+        project_id: "test-project",
+        client_email: "fcm@test-project.iam.gserviceaccount.com",
+        private_key: OpenSSL::PKey::RSA.new(2048).to_pem,
+      }.to_json
+      FcmPushNotificationPusher.instance_variable_set(:@service_account, nil)
+      Discourse.cache.delete(FcmPushNotificationPusher::ACCESS_TOKEN_CACHE_KEY)
+
       client = Fabricate(:user_api_key_client)
       Fabricate(
         :user_api_key,
         user: user,
         scopes: ["notifications"].map { |name| UserApiKeyScope.new(name: name) },
-        push_url: "https://hub.example.com/push",
+        push_url: "android",
         user_api_key_client_id: client.id,
       )
       Fabricate(
@@ -155,15 +168,23 @@ RSpec.describe Jobs::DeliverPushNotification do
         fancy_title: "ローカライズされたトピック",
       )
 
+      stub_request(:post, "https://oauth2.googleapis.com/token").to_return(
+        status: 200,
+        body: { access_token: "test-access-token" }.to_json,
+      )
+
       body = nil
-      stub_request(:post, "https://hub.example.com/push").to_return do |request|
+      stub_request(
+        :post,
+        "https://fcm.googleapis.com/v1/projects/test-project/messages:send",
+      ).to_return do |request|
         body = JSON.parse(request.body)
         { status: 200 }
       end
 
       Jobs::DeliverPushNotification.new.execute(user_id: user.id, payload: localizable_payload)
 
-      expect(body["notifications"].first["topic_title"]).to eq("ローカライズされたトピック")
+      expect(body["message"]["notification"]["title"]).to include("ローカライズされたトピック")
     end
 
     it "does not localize when content_localization_enabled is false" do

@@ -701,11 +701,13 @@ login:
     client: true
     default: false
     area: "login"
+    hidden: true
     depends_on:
       - enable_local_logins_via_code
   random_username_adjectives:
     type: list
     list_type: compact
+    hidden: true
     default: "agile|amber|azure|bold|brave|breezy|bright|calm|candid|cheery|civic|clever|cosmic|crisp|curious|daring|deft|eager|earnest|fabled|gentle|golden|happy|hardy|hearty|humble|jolly|keen|kind|lively|lucid|lunar|mellow|merry|mighty|nimble|noble|plucky|proud|quick|quiet|rapid|rustic|silent|silver|smart|snappy|solar|stellar|sunny|swift|tidy|upbeat|valiant|vivid|warm|witty|zesty"
     area: "login"
     validator: "RandomUsernameWordListValidator"
@@ -714,6 +716,7 @@ login:
   random_username_nouns:
     type: list
     list_type: compact
+    hidden: true
     default: "acorn|badger|beacon|bison|breeze|brook|canyon|cedar|comet|condor|coral|cougar|coyote|crane|cricket|dolphin|ember|falcon|fern|finch|fjord|fox|gecko|glacier|harbor|heron|hawk|ibis|jaguar|lagoon|lark|lemur|lynx|maple|marmot|meadow|meteor|nebula|newt|orca|osprey|otter|owl|panda|pebble|penguin|pine|prairie|puffin|quokka|raven|reef|river|sequoia|sparrow|summit|tundra|walrus|willow|wren|zephyr"
     area: "login"
     validator: "RandomUsernameWordListValidator"
@@ -1096,13 +1099,16 @@ users:
     area: "users"
   full_name_requirement:
     type: enum
-    default: hidden_at_signup
+    default: required_at_signup
     enum: "FullNameRequirement"
     area: "users"
+    hidden: true
+    validator: "FullNameRequirementValidator"
   enable_names:
     client: true
     default: true
     area: "users"
+    hidden: true
   invite_expiry_days:
     default: 90
     client: true
@@ -1305,6 +1311,38 @@ groups:
     client: true
     default: false
     area: "group_permissions|categories"
+  enable_batch_moderation:
+    client: true
+    default: false
+    area: "group_permissions"
+  batch_moderation_auto_promote_count:
+    client: false
+    default: 10
+    min: 0
+    area: "group_permissions"
+  batch_moderation_batch_field_name:
+    client: false
+    default: "Batch"
+    area: "group_permissions"
+  batch_moderation_secondary_field_names:
+    client: false
+    default: "Branch"
+    type: list
+    area: "group_permissions"
+  batch_moderation_institution_field_names:
+    client: false
+    default: "College|Vidyalaya"
+    type: list
+    area: "group_permissions"
+  batch_moderation_member_type_field_name:
+    client: false
+    default: "I am"
+    area: "group_permissions"
+  batch_moderation_staff_type_values:
+    client: false
+    default: "Dean/Professor/Staff"
+    type: list
+    area: "group_permissions"
   max_automatic_membership_email_domains:
     default: 50
     hidden: true
@@ -4251,6 +4289,82 @@ uncategorized:
     default: false
     hidden: true
 
+  bulk_invite_ai_personalization_enabled:
+    default: false
+    client: false
+    area: "users"
+
+  bulk_invite_ai_personalization_template:
+    default: ""
+    textarea: true
+    client: false
+    area: "users"
+    depends_on:
+      - bulk_invite_ai_personalization_enabled
+    depends_behavior: "hidden"
+    dependent_setting_display: "inline"
+
+  institute_acronyms:
+    default: "NIT|IIT|MNIT|VNIT|SVNIT|MANIT|NITK|NITT|NITW|NITJ|NITP|NITH|NITD|NITC|IIIT|IIM|IISC|BITS"
+    type: list
+    list_type: compact
+    client: false
+    area: "users"
+    depends_on:
+      - bulk_invite_ai_personalization_enabled
+    depends_behavior: "hidden"
+    dependent_setting_display: "inline"
+
+  bulk_invite_ai_personalization_rules:
+    default: |
+      - Output strictly plain text. No HTML tags, no Markdown formatting (no asterisks, headers, bullet lists, or links in brackets), no tracking pixels.
+      - Total words should be around 100 words, in 2 paragraphs, and fine to have as few as 10-20 words.
+      - Preserve the user names (Must be preserved) and institute acronyms.
+      - Do not include the join link, a URL, or any other link, domain, or attachment anywhere in your output -- the real link is appended automatically, verbatim, on its own line, immediately after your text. End with a sentence that naturally leads into the link appearing right after it (e.g. an invitation to take a look or join), rather than describing or repeating the link yourself.
+      - Tone: conversational, peer-to-peer, low-pressure. No marketing jargon or buzzwords (e.g. "revolutionary", "boost revenue", "guarantee").
+      - No exclamation points. No ALL CAPS words. No dollar signs.
+      - End with a low-friction, interest-based question (e.g. "Open to exploring this?"), not a hard call to action.
+      - Vary sentence structure and phrasing each time you are called -- never reuse the same opening sentence pattern, so automated spam filters cannot fingerprint a repeated template.
+      - You may reference the recipient's college/institution ONLY using the email domain given to you below. If you are not confident of the exact institution name from the domain, refer to it generically as "your college" or "your institution" -- never invent or guess a specific name.
+      - If a recipient name is given below, you may use it naturally within the message. If no name is given, do not invent one.
+      - If additional context/keywords are given below, use them to make the message feel specific and relevant. Never invent facts, achievements, or details beyond what is explicitly given.
+    textarea: true
+    client: false
+    area: "users"
+    depends_on:
+      - bulk_invite_ai_personalization_enabled
+    depends_behavior: "hidden"
+    dependent_setting_display: "inline"
+
+  bulk_invite_ai_personalization_max_tokens:
+    default: 2000
+    type: integer
+    min: 500
+    max: 8000
+    client: false
+    area: "users"
+    depends_on:
+      - bulk_invite_ai_personalization_enabled
+    depends_behavior: "hidden"
+    dependent_setting_display: "inline"
+
+  bulk_invite_email_delay_min_seconds:
+    default: 5
+    client: false
+    area: "users"
+    validator: "BulkInviteEmailDelayMinSecondsValidator"
+
+  bulk_invite_email_delay_max_seconds:
+    default: 15
+    client: false
+    area: "users"
+    validator: "BulkInviteEmailDelayMaxSecondsValidator"
+
+  bulk_invite_paced_resend_enabled:
+    default: false
+    client: false
+    area: "users"
+
   max_api_invites:
     default: 200
     hidden: true
@@ -4595,6 +4709,12 @@ user_api:
     default: ""
     type: list
     hidden: true
+  fcm_service_account_json:
+    default: ""
+    textarea: true
+    secret: true
+  apns_bundle_id:
+    default: ""
   allowed_user_api_auth_redirects:
     default: "https://api.discourse.org/api/auth_redirect|discourse://auth_redirect"
     type: list

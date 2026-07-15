@@ -240,7 +240,7 @@ describe "Sign up via email code" do
     SiteSetting.enable_random_usernames = true
     SiteSetting.login_required = true
     SiteSetting.must_approve_users = true
-    SiteSetting.full_name_requirement = "required_at_signup"
+    stub_full_name_requirement("required_at_signup")
     user_field = Fabricate(:user_field, name: "Occupation")
     admin = Fabricate(:admin)
     email = "approve.me@example.com"
@@ -430,7 +430,7 @@ describe "Sign up via email code" do
   end
 
   context "when a full name is required at signup" do
-    before { SiteSetting.full_name_requirement = "required_at_signup" }
+    before { stub_full_name_requirement("required_at_signup") }
 
     it "collects the name after the code is verified" do
       open_code_signup

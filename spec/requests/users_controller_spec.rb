@@ -1988,6 +1988,45 @@ RSpec.describe UsersController do
       end
     end
 
+    context "when a plugin modifier exempts a user field from being required" do
+      fab!(:user_field) { Fabricate(:user_field, requirement: "for_all_users") }
+
+      it "still blocks signup with a blank value when no modifier is registered" do
+        expect do post_user(user_fields: { user_field.id.to_s => "" }) end.not_to change {
+          User.count
+        }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["success"]).not_to eq(true)
+      end
+
+      it "allows signup with a blank value when a modifier exempts the field" do
+        plugin = Plugin::Instance.new
+        modifier_block =
+          Proc.new do |required, field, _submitted_user_fields|
+            field == user_field ? false : required
+          end
+        DiscoursePluginRegistry.register_modifier(
+          plugin,
+          :user_field_required_for_signup,
+          &modifier_block
+        )
+
+        expect { post_user(user_fields: { user_field.id.to_s => "" }) }.to change { User.count }.by(
+          1,
+        )
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["success"]).to eq(true)
+      ensure
+        DiscoursePluginRegistry.unregister_modifier(
+          plugin,
+          :user_field_required_for_signup,
+          &modifier_block
+        )
+      end
+    end
+
     context "with only optional custom fields" do
       fab!(:user_field) { Fabricate(:user_field, requirement: "optional") }
 
@@ -2727,6 +2766,218 @@ RSpec.describe UsersController do
       expect(invites[0]["user"]).to be_present
     end
 
+    it "includes both the invited and the redeeming account's email on the redeemed tab for the inviter" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      redeeming_user = Fabricate(:user, email: "actually-redeemed-with@example.com")
+      redeemed_invite =
+        Fabricate(:invite, email: "originally-invited@example.com", invited_by: inviter)
+      Fabricate(:invited_user, invite: redeemed_invite, user: redeeming_user)
+
+      sign_in(inviter)
+      get "/u/#{inviter.username}/invited.json", params: { filter: "redeemed" }
+      expect(response.status).to eq(200)
+
+      invite = response.parsed_body["invites"].first
+      expect(invite["email"]).to eq("originally-invited@example.com")
+      expect(invite["user"]["email"]).to eq("actually-redeemed-with@example.com")
+    end
+
+    it "omits both redeemed-tab emails for a viewer who can't see invite details" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      other_viewer = Fabricate(:user, trust_level: TrustLevel[2])
+      redeeming_user = Fabricate(:user, email: "actually-redeemed-with@example.com")
+      redeemed_invite =
+        Fabricate(:invite, email: "originally-invited@example.com", invited_by: inviter)
+      Fabricate(:invited_user, invite: redeemed_invite, user: redeeming_user)
+
+      sign_in(other_viewer)
+      get "/u/#{inviter.username}/invited.json", params: { filter: "redeemed" }
+      expect(response.status).to eq(200)
+
+      invite = response.parsed_body["invites"].first
+      expect(invite).not_to include("email")
+      expect(invite["user"]).not_to include("email")
+    end
+
+    it "finds an allow_any_email invite by its stashed recipient in description" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      Fabricate(
+        :invite,
+        email: nil,
+        description: "student@college.edu",
+        invited_by: inviter,
+        emailed_status: Invite.emailed_status_types[:sent],
+      )
+      Fabricate(:invite, email: "billybob@example.com", invited_by: inviter)
+
+      get "/u/#{inviter.username}/invited.json",
+          params: {
+            filter: "pending",
+            search: "student@college.edu",
+          }
+      expect(response.status).to eq(200)
+
+      invites = response.parsed_body["invites"]
+      expect(invites.size).to eq(1)
+      expect(invites.first).to include("description" => "student@college.edu")
+    end
+
+    it "includes each pending invite's delivery_status, preloaded without an EmailLog query per invite" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      sent_invite =
+        Fabricate(
+          :invite,
+          email: "sent@example.com",
+          invited_by: inviter,
+          emailed_status: Invite.emailed_status_types[:sent],
+        )
+      Fabricate(:email_log, invite_id: sent_invite.id, email_type: "invite", bounced: true)
+      Fabricate(
+        :invite,
+        email: "scheduled@example.com",
+        invited_by: inviter,
+        emailed_status: Invite.emailed_status_types[:bulk_pending],
+      )
+
+      queries =
+        track_sql_queries do
+          get "/u/#{inviter.username}/invited.json", params: { filter: "pending" }
+        end
+      email_log_queries = queries.count { |q| q.include?("email_logs") }
+
+      expect(response.status).to eq(200)
+      expect(email_log_queries).to eq(1)
+
+      statuses = response.parsed_body["invites"].to_h { |i| [i["email"], i["delivery_status"]] }
+      expect(statuses["sent@example.com"]).to eq("bounced")
+      expect(statuses["scheduled@example.com"]).to eq("scheduled")
+    end
+
+    it "filters invites by domain and recomputes tab counts for that domain" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      Fabricate(:invite, email: "student@nit.ac.in", invited_by: inviter)
+      Fabricate(:invite, email: "student2@nit.ac.in", invited_by: inviter)
+      Fabricate(:invite, email: "student@iitb.ac.in", invited_by: inviter)
+
+      get "/u/#{inviter.username}/invited.json", params: { filter: "pending", domain: "nit.ac.in" }
+      expect(response.status).to eq(200)
+
+      emails = response.parsed_body["invites"].map { |i| i["email"] }
+      expect(emails).to contain_exactly("student@nit.ac.in", "student2@nit.ac.in")
+      expect(response.parsed_body["counts"]["pending"]).to eq(2)
+      # "ac.in" is the umbrella option (see Invite::AC_IN_UMBRELLA_DOMAIN),
+      # included because this inviter has *.ac.in invites.
+      expect(response.parsed_body["available_domains"]).to contain_exactly(
+        "ac.in",
+        "nit.ac.in",
+        "iitb.ac.in",
+      )
+    end
+
+    it "treats ac.in as an umbrella domain filter across every *.ac.in invite" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      Fabricate(:invite, email: "student@nit.ac.in", invited_by: inviter)
+      Fabricate(:invite, email: "student@iitb.ac.in", invited_by: inviter)
+      Fabricate(:invite, email: "student@example.com", invited_by: inviter)
+
+      get "/u/#{inviter.username}/invited.json", params: { filter: "pending", domain: "ac.in" }
+      expect(response.status).to eq(200)
+
+      emails = response.parsed_body["invites"].map { |i| i["email"] }
+      expect(emails).to contain_exactly("student@nit.ac.in", "student@iitb.ac.in")
+      expect(response.parsed_body["counts"]["pending"]).to eq(2)
+    end
+
+    it "omits the ac.in umbrella option when the inviter has no *.ac.in invites" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      Fabricate(:invite, email: "student@example.com", invited_by: inviter)
+
+      get "/u/#{inviter.username}/invited.json", params: { filter: "pending" }
+      expect(response.parsed_body["available_domains"]).to contain_exactly("example.com")
+    end
+
+    it "filters invites by delivery status and recomputes tab counts for it" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      Fabricate(
+        :invite,
+        email: "skipped@nit.ac.in",
+        invited_by: inviter,
+        emailed_status: Invite.emailed_status_types[:skipped],
+      )
+      delivered =
+        Fabricate(
+          :invite,
+          email: "delivered@nit.ac.in",
+          invited_by: inviter,
+          emailed_status: Invite.emailed_status_types[:sent],
+        )
+      Fabricate(
+        :email_log,
+        invite_id: delivered.id,
+        email_type: "invite",
+        delivered_at: Time.current,
+      )
+      Fabricate(
+        :invite,
+        email: "sent@iitb.ac.in",
+        invited_by: inviter,
+        emailed_status: Invite.emailed_status_types[:sent],
+      )
+
+      get "/u/#{inviter.username}/invited.json", params: { filter: "pending", status: "skipped" }
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["invites"].map { |i| i["email"] }).to eq(["skipped@nit.ac.in"])
+      expect(response.parsed_body["invites"].first["delivery_status"]).to eq("skipped")
+      expect(response.parsed_body["counts"]["pending"]).to eq(1)
+      expect(response.parsed_body["available_statuses"]).to eq(Invite::DELIVERY_STATUSES)
+
+      get "/u/#{inviter.username}/invited.json",
+          params: {
+            filter: "pending",
+            status: "delivered",
+            domain: "nit.ac.in",
+          }
+      expect(response.parsed_body["invites"].map { |i| i["email"] }).to eq(["delivered@nit.ac.in"])
+    end
+
+    it "ignores a status param that isn't a known delivery status" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      Fabricate(:invite, email: "student@nit.ac.in", invited_by: inviter)
+
+      get "/u/#{inviter.username}/invited.json", params: { filter: "pending", status: "bogus" }
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["invites"].size).to eq(1)
+    end
+
+    it "ignores a domain param that isn't shaped like a domain" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      Fabricate(:invite, email: "student@nit.ac.in", invited_by: inviter)
+
+      get "/u/#{inviter.username}/invited.json",
+          params: {
+            filter: "pending",
+            domain: "'; DROP TABLE invites; --",
+          }
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["invites"].size).to eq(1)
+    end
+
     it "hides last seen timestamps for hidden profiles" do
       SiteSetting.allow_users_to_hide_profile = true
 
@@ -2955,6 +3206,7 @@ RSpec.describe UsersController do
             "expired" => 0,
             "total" => 0,
           )
+          expect(response.parsed_body["available_domains"]).to eq([])
         end
       end
     end
@@ -3214,6 +3466,40 @@ RSpec.describe UsersController do
 
               expect(user.user_fields[user_field.id.to_s]).to eq("sad")
               expect(user.user_fields[optional_field.id.to_s]).to eq("feet")
+            end
+          end
+
+          context "when a plugin modifier exempts a user field from being required" do
+            fab!(:user_field) { Fabricate(:user_field, requirement: "for_all_users") }
+
+            it "still blocks clearing the value when no modifier is registered" do
+              put "/u/#{user.username}.json", params: { user_fields: { user_field.id.to_s => "" } }
+
+              expect(response.status).to eq(422)
+            end
+
+            it "allows clearing the value when a modifier exempts the field" do
+              plugin = Plugin::Instance.new
+              modifier_block =
+                Proc.new do |required, field, _submitted_user_fields, _user|
+                  field == user_field ? false : required
+                end
+              DiscoursePluginRegistry.register_modifier(
+                plugin,
+                :user_field_required_for_update,
+                &modifier_block
+              )
+
+              put "/u/#{user.username}.json", params: { user_fields: { user_field.id.to_s => "" } }
+
+              expect(response.status).to eq(200)
+              expect(user.reload.user_fields[user_field.id.to_s]).to eq("")
+            ensure
+              DiscoursePluginRegistry.unregister_modifier(
+                plugin,
+                :user_field_required_for_update,
+                &modifier_block
+              )
             end
           end
 

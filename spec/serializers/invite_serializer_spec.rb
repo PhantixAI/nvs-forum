@@ -32,6 +32,7 @@ RSpec.describe InviteSerializer do
         :email,
         :domain,
         :emailed,
+        :delivery_status,
         :max_redemptions_allowed,
         :redemption_count,
         :custom_message,
@@ -47,6 +48,89 @@ RSpec.describe InviteSerializer do
       json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
 
       expect(json[:topics]).to eq([])
+    end
+  end
+
+  describe "#delivery_status" do
+    fab!(:user)
+    fab!(:invite) do
+      Fabricate(
+        :invite,
+        invited_by: user,
+        email: "invitee@example.com",
+        emailed_status: Invite.emailed_status_types[:sent],
+      )
+    end
+
+    it "falls back to querying for the EmailLog when none is preloaded" do
+      Fabricate(:email_log, invite_id: invite.id, email_type: "invite", bounced: true)
+
+      json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
+
+      expect(json[:delivery_status]).to eq("bounced")
+    end
+
+    it "uses a preloaded EmailLog passed via email_logs_by_invite_id, avoiding a query" do
+      email_log = Fabricate(:email_log, invite_id: invite.id, email_type: "invite", bounced: true)
+
+      json =
+        InviteSerializer.new(
+          invite,
+          scope: Guardian.new(user),
+          root: false,
+          email_logs_by_invite_id: {
+            invite.id => email_log,
+          },
+        ).as_json
+
+      expect(json[:delivery_status]).to eq("bounced")
+    end
+
+    it "treats a missing entry in the preloaded hash as no EmailLog, not as unloaded" do
+      Fabricate(:email_log, invite_id: invite.id, email_type: "invite", bounced: true)
+
+      json =
+        InviteSerializer.new(
+          invite,
+          scope: Guardian.new(user),
+          root: false,
+          email_logs_by_invite_id: {
+          },
+        ).as_json
+
+      expect(json[:delivery_status]).to eq("sent")
+    end
+  end
+
+  describe "emailed/delivery_status for allow_any_email invites" do
+    fab!(:user)
+
+    it "includes emailed and delivery_status for a sent allow_any_email invite, using description as the recipient" do
+      # Mirrors Jobs::BulkInvite#send_invite: email: nil, description: the
+      # real address, emailed_status explicitly moved off :not_required once
+      # actually sent.
+      invite =
+        Invite.generate(
+          user,
+          email: nil,
+          description: "asharani@ee.nits.ac.in",
+          allow_any_email: true,
+          max_redemptions_allowed: 1,
+        )
+      invite.update_column(:emailed_status, Invite.emailed_status_types[:sent])
+
+      json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
+
+      expect(json[:emailed]).to eq(true)
+      expect(json[:delivery_status]).to eq("sent")
+    end
+
+    it "omits emailed and delivery_status for a never-emailed invite link with no description" do
+      invite = Invite.generate(user, email: nil, max_redemptions_allowed: 1)
+
+      json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
+
+      expect(json).not_to include(:emailed, :delivery_status)
     end
   end
 

@@ -26,6 +26,7 @@ const CLEARABLE_ATTRS = [
   "chatEnabled",
   "livestream",
   "allDay",
+  "eventScope",
   "allowedGroups",
   "reminders",
   "image",

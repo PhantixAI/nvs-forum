@@ -75,6 +75,168 @@ describe DiscourseEvents::Events::Finder do
     end
   end
 
+  describe "by calendar event scope" do
+    fab!(:college_field) { Fabricate(:user_field, name: "College") }
+    fab!(:batch_field) { Fabricate(:user_field, name: "Batch") }
+
+    fab!(:forum_event) do
+      Fabricate(:event, status: DiscourseEvents::Events::Event.statuses[:public])
+    end
+    fab!(:mit_college_event) do
+      Fabricate(
+        :event,
+        status: DiscourseEvents::Events::Event.statuses[:public],
+        custom_fields: {
+          "_calendar_event_scope" => "college",
+          "_calendar_separation_value" => "MIT",
+        },
+      )
+    end
+    fab!(:stanford_college_event) do
+      Fabricate(
+        :event,
+        status: DiscourseEvents::Events::Event.statuses[:public],
+        custom_fields: {
+          "_calendar_event_scope" => "college",
+          "_calendar_separation_value" => "Stanford",
+        },
+      )
+    end
+    fab!(:legacy_forum_event) do
+      # Pre-existing event saved before `_calendar_event_scope` existed, with no
+      # separation value either -- today's "forum event" (see plan D3).
+      Fabricate(:event, status: DiscourseEvents::Events::Event.statuses[:public], custom_fields: {})
+    end
+    fab!(:legacy_college_event) do
+      # Pre-existing event saved before `_calendar_event_scope` existed, with a
+      # separation value -- today's "college-scoped event" (see plan D3).
+      Fabricate(
+        :event,
+        status: DiscourseEvents::Events::Event.statuses[:public],
+        custom_fields: {
+          "_calendar_separation_value" => "MIT",
+        },
+      )
+    end
+
+    def set_college(user, value)
+      user.custom_fields["user_field_#{college_field.id}"] = value
+      user.save_custom_fields
+    end
+
+    def set_batch(user, value)
+      user.custom_fields["user_field_#{batch_field.id}"] = value
+      user.save_custom_fields
+    end
+
+    context "for college-scoped events" do
+      before { set_college(current_user, "MIT") }
+
+      it "shows forum events and the viewer's own college, hides other colleges" do
+        expect(finder.search(current_user, {})).to match_array(
+          [forum_event, mit_college_event, legacy_forum_event, legacy_college_event],
+        )
+      end
+
+      it "hides all college/batch-scoped events for an anonymous viewer, keeping forum events" do
+        expect(finder.search(nil, {})).to match_array([forum_event, legacy_forum_event])
+      end
+    end
+
+    context "for batch-scoped events" do
+      fab!(:same_cohort_user, :user)
+      fab!(:different_batch_user, :user)
+
+      fab!(:batch_event) do
+        Fabricate(
+          :event,
+          status: DiscourseEvents::Events::Event.statuses[:public],
+          custom_fields: {
+            "_calendar_event_scope" => "batch",
+          },
+        )
+      end
+
+      before do
+        [current_user, same_cohort_user].each do |u|
+          set_college(u, "MIT")
+          set_batch(u, "2024")
+        end
+        set_college(different_batch_user, "MIT")
+        set_batch(different_batch_user, "2023")
+
+        batch_event.update!(
+          custom_fields: {
+            "_calendar_event_scope" => "batch",
+            "_calendar_separation_value" => "MIT",
+            "_calendar_batch_cohort_digest" =>
+              DiscourseEvents::CalendarEventScope.cohort_digest_for(current_user),
+          },
+        )
+      end
+
+      it "is visible to a viewer in the same batch+branch cohort as the creator" do
+        expect(finder.search(same_cohort_user, {})).to include(batch_event)
+      end
+
+      it "is hidden from a viewer in a different batch, even in the same college" do
+        expect(finder.search(different_batch_user, {})).not_to include(batch_event)
+      end
+
+      it "is hidden from an anonymous viewer" do
+        expect(finder.search(nil, {})).not_to include(batch_event)
+      end
+    end
+
+    context "for a staff-type viewer (institution-only cohort key)" do
+      fab!(:member_type_field) { Fabricate(:user_field, name: "I am") }
+      fab!(:staff_viewer, :user)
+
+      fab!(:batch_event) do
+        Fabricate(
+          :event,
+          status: DiscourseEvents::Events::Event.statuses[:public],
+          custom_fields: {
+            "_calendar_event_scope" => "batch",
+          },
+        )
+      end
+
+      before do
+        set_college(staff_viewer, "MIT")
+        staff_viewer.custom_fields["user_field_#{member_type_field.id}"] = "Dean/Professor/Staff"
+        staff_viewer.save_custom_fields
+
+        other_batch_owner = Fabricate(:user)
+        set_college(other_batch_owner, "MIT")
+        set_batch(other_batch_owner, "2024")
+
+        batch_event.update!(
+          custom_fields: {
+            "_calendar_event_scope" => "batch",
+            "_calendar_separation_value" => "MIT",
+            "_calendar_batch_cohort_digest" =>
+              DiscourseEvents::CalendarEventScope.cohort_digest_for(other_batch_owner),
+          },
+        )
+      end
+
+      it "cannot see a batch-scoped event even at their own college, since staff have no batch cohort to match" do
+        expect(finder.search(staff_viewer, {})).not_to include(batch_event)
+      end
+    end
+
+    describe "the voluntary calendar_separation_value narrowing filter" do
+      before { set_college(current_user, "MIT") }
+
+      it "narrows further, without ever showing events the mandatory scope filter already excludes" do
+        expect(
+          finder.search(current_user, { calendar_separation_value: "Stanford" }),
+        ).to match_array([forum_event, legacy_forum_event])
+      end
+    end
+  end
+
   context "when the event is associated to a visible post" do
     let(:post1) do
       PostCreator.create!(

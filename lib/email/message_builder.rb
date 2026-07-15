@@ -108,6 +108,22 @@ module Email
     end
 
     def subject
+      # A literal, caller-supplied subject that must win over anything
+      # template-derived -- unlike @opts[:subject] below, which only the
+      # final `else` branch reads, this applies even when @opts[:template]
+      # is also given (needed by invite_mailer's AI-personalized subject;
+      # no other caller combines template: with a subject override today).
+      if @opts[:subject_override].present?
+        return(
+          DiscoursePluginRegistry.apply_modifier(
+            :message_builder_subject,
+            @opts[:subject_override],
+            @opts,
+            @to,
+          )
+        )
+      end
+
       has_override =
         TranslationOverride.exists?(
           locale: I18n.locale,
@@ -272,6 +288,7 @@ module Email
       result["X-Discourse-Post-Ids"] = @opts[:post_ids].join(",") if @opts[:post_ids].present?
       result["X-Discourse-Topic-Id"] = @opts[:topic_id].to_s if @opts[:topic_id]
       result["X-Discourse-Topic-Ids"] = @opts[:topic_ids].join(",") if @opts[:topic_ids].present?
+      result["X-Discourse-Invite-Id"] = @opts[:invite_id].to_s if @opts[:invite_id]
 
       # At this point these have been filtered by the recipient's guardian for visibility,
       # see UserNotifications#send_notification_email

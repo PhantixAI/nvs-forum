@@ -4,7 +4,15 @@ class DirectoryItemSerializer < ApplicationSerializer
   class UserSerializer < UserNameSerializer
     include UserPrimaryGroupMixin
 
-    attributes :user_fields
+    attributes :user_fields, :is_batch_moderator, :is_staff_type, :admin, :moderator
+
+    def is_batch_moderator
+      (@options[:batch_moderator_user_ids] || []).include?(object.id)
+    end
+
+    def is_staff_type
+      (@options[:staff_type_user_ids] || []).include?(object.id)
+    end
 
     def user_fields
       fields = {}

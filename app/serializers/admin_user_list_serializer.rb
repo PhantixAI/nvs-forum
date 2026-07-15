@@ -27,7 +27,9 @@ class AdminUserListSerializer < BasicUserSerializer
              :can_be_deleted,
              :can_be_suspended,
              :silence_reason,
-             :suspend_reason
+             :suspend_reason,
+             :is_batch_moderator,
+             :is_staff_type
 
   %i[days_visited posts_read_count topics_entered post_count].each do |sym|
     attributes sym
@@ -141,5 +143,21 @@ class AdminUserListSerializer < BasicUserSerializer
 
   def include_suspend_reason?
     @options[:include_suspend_reason]
+  end
+
+  def is_batch_moderator
+    @options[:batch_moderator_user_ids]&.include?(object.id) || false
+  end
+
+  def include_is_batch_moderator?
+    SiteSetting.enable_batch_moderation
+  end
+
+  def is_staff_type
+    @options[:staff_type_user_ids]&.include?(object.id) || false
+  end
+
+  def include_is_staff_type?
+    SiteSetting.enable_batch_moderation
   end
 end

@@ -196,8 +196,13 @@ export default <template>
                   {{/if}}
                   <span class="directory-table__value">
                     {{#if m.owner}}
-                      {{dIcon "shield-halved"}}
-                      {{i18n "groups.members.owner"}}<br />
+                      {{#if @controller.model.is_batch_moderation_group}}
+                        {{dIcon "shield"}}
+                        {{i18n "groups.members.batch_moderator"}}<br />
+                      {{else}}
+                        {{dIcon "shield-halved"}}
+                        {{i18n "groups.members.owner"}}<br />
+                      {{/if}}
                     {{/if}}
                     {{#if m.primary}}
                       {{i18n "groups.members.primary"}}
