@@ -56,3 +56,22 @@ acceptance(
     });
   }
 );
+
+acceptance(
+  "User invites - bulk invite button (moderator with setting)",
+  function (needs) {
+    needs.user({
+      admin: false,
+      moderator: true,
+      staff: true,
+      can_bulk_invite_to_forum: true,
+    });
+    needs.settings({ allow_bulk_invite: true });
+
+    test("shows bulk invite button when moderator and setting enabled", async function (assert) {
+      await visit("/u/eviltrout/invited");
+
+      assert.dom(".user-invite-buttons .btn .d-icon-upload").exists();
+    });
+  }
+);

@@ -51,7 +51,7 @@ module InviteGuardian
   end
 
   def can_bulk_invite_to_forum?
-    is_admin?
+    is_staff?
   end
 
   def can_resend_all_invites?
