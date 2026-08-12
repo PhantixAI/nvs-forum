@@ -280,12 +280,16 @@ RSpec.describe InviteGuardian do
       expect(Guardian.new(admin).can_bulk_invite_to_forum?).to be_truthy
     end
 
-    it "returns false for moderators" do
-      expect(Guardian.new(moderator).can_bulk_invite_to_forum?).to be_falsey
+    it "returns true for moderators" do
+      expect(Guardian.new(moderator).can_bulk_invite_to_forum?).to be_truthy
     end
 
     it "returns false for regular users" do
       expect(Guardian.new(user).can_bulk_invite_to_forum?).to be_falsey
+    end
+
+    it "returns false for trust_level_2 users (non-staff), even though they can send individual invites" do
+      expect(Guardian.new(trust_level_2).can_bulk_invite_to_forum?).to be_falsey
     end
   end
 
