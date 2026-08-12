@@ -73,13 +73,13 @@ export default class UserInvitedShowController extends Controller {
   }
 
   @computed(
-    "currentUser.admin",
+    "currentUser.can_bulk_invite_to_forum",
     "siteSettings.allow_bulk_invite",
     "viewingSelf"
   )
   get canBulkInvite() {
     return (
-      this.currentUser?.admin &&
+      this.currentUser?.can_bulk_invite_to_forum &&
       this.siteSettings?.allow_bulk_invite &&
       this.viewingSelf
     );
