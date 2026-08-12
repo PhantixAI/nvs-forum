@@ -2232,6 +2232,13 @@ RSpec.describe InvitesController do
         expect(Jobs::BulkInvite.jobs.size).to eq(1)
       end
 
+      it "allows moderator to bulk invite" do
+        sign_in(Fabricate(:moderator))
+        post "/invites/upload_csv.json", params: { file: file, name: "discourse.csv" }
+        expect(response.status).to eq(200)
+        expect(Jobs::BulkInvite.jobs.size).to eq(1)
+      end
+
       it "allows admin to bulk invite when DiscourseConnect enabled" do
         SiteSetting.discourse_connect_url = "https://example.com"
         SiteSetting.discourse_connect_secret = "x" * 10
