@@ -22,6 +22,7 @@ export default class UserApiKeyNewController extends Controller {
     "public_key",
     "auth_redirect",
     "push_url",
+    "platform",
     "padding",
     "expires_in_seconds",
   ];
@@ -66,6 +67,7 @@ export default class UserApiKeyNewController extends Controller {
       nonce: this.page.nonce,
       client_id: this.page.client_id,
       push_url: this.page.push_url,
+      platform: this.page.platform,
       public_key: this.page.public_key,
       scopes: this.page.scopes,
     };

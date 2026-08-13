@@ -59,9 +59,10 @@ class UserApiKey < ActiveRecord::Base
     @available_scopes ||= Set.new(UserApiKeyScopes.all_scopes.keys.map(&:to_s))
   end
 
+  # push_url stores the platform ("ios"/"android") for direct FCM/APNs push clients —
+  # repurposed from the old relay-URL scheme, which no longer applies.
   def has_push?
-    scopes.any? { |s| s.name == "push" || s.name == "notifications" } && push_url.present? &&
-      SiteSetting.allowed_user_api_push_urls.include?(push_url)
+    scopes.any? { |s| s.name == "push" || s.name == "notifications" } && push_url.present?
   end
 
   def expired?
@@ -70,15 +71,13 @@ class UserApiKey < ActiveRecord::Base
 
   def self.push_clients_for(user)
     return [] if SiteSetting.allow_user_api_key_scopes.split("|").exclude?("push")
-    return [] if SiteSetting.allowed_user_api_push_urls.blank?
 
     user
       .user_api_keys
       .active
       .joins(:scopes, :client)
       .where("user_api_key_scopes.name IN ('push', 'notifications')")
-      .where("push_url IS NOT NULL AND push_url <> ''")
-      .where("position(push_url IN ?) > 0", SiteSetting.allowed_user_api_push_urls)
+      .where("push_url IN ('ios', 'android')")
       .order("user_api_key_clients.client_id ASC")
       .pluck("user_api_key_clients.client_id, user_api_keys.push_url")
   end
