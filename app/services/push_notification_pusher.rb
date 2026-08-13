@@ -38,6 +38,10 @@ class PushNotificationPusher
     message
   end
 
+  def self.absolute_post_url(payload)
+    UrlHelper.absolute_without_cdn(Discourse.base_path + payload[:post_url].to_s)
+  end
+
   def self.title(payload)
     translation_key =
       case payload[:notification_type]

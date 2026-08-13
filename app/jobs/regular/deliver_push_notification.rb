@@ -20,7 +20,8 @@ module Jobs
       end
 
       PushNotificationPusher.push(user, payload.deep_dup) if user.push_subscriptions.exists?
-      HubPushNotificationPusher.push(user, payload.deep_dup)
+      FcmPushNotificationPusher.push(user, payload.deep_dup)
+      ApnsPushNotificationPusher.push(user, payload.deep_dup)
     end
 
     private
