@@ -12,6 +12,7 @@ export default class UserApiKeyNewRoute extends DiscourseRoute {
     public_key: { refreshModel: true },
     auth_redirect: { refreshModel: true },
     push_url: { refreshModel: true },
+    platform: { refreshModel: true },
     padding: { refreshModel: true },
     expires_in_seconds: { refreshModel: true },
   };
