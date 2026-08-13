@@ -108,6 +108,10 @@ GEM
     annotaterb (4.20.0)
       activerecord (>= 6.0.0)
       activesupport (>= 6.0.0)
+    apnotic (1.8.0)
+      base64
+      connection_pool (>= 2, < 4)
+      net-http2 (>= 0.18.3, < 2)
     ast (2.4.3)
     auth-sanitizer (0.1.4)
       version_gem (~> 1.1, >= 1.1.9)
@@ -282,6 +286,7 @@ GEM
     highline (3.1.2)
       reline
     htmlentities (4.4.2)
+    http-2 (1.2.1)
     http_accept_language (2.1.1)
     i18n (1.15.2)
       concurrent-ruby (~> 1.0)
@@ -385,7 +390,9 @@ GEM
     mustache (1.1.2)
     net-http (0.9.1)
       uri (>= 0.11.1)
-    net-imap (0.6.6)
+    net-http2 (0.19.0)
+      http-2 (>= 1.0)
+    net-imap (0.6.4.1)
       date
       net-protocol
     net-pop (0.1.2)
@@ -823,6 +830,7 @@ DEPENDENCIES
   addressable
   afm
   annotaterb
+  apnotic
   aws-sdk-bedrockruntime
   aws-sdk-mediaconvert
   aws-sdk-s3
@@ -995,6 +1003,7 @@ CHECKSUMS
   addressable (2.9.0) sha256=7fdf6ac3660f7f4e867a0838be3f6cf722ace541dd97767fa42bc6cfa980c7af
   afm (1.0.0) sha256=5bd4d6f6241e7014ef090985ec6f4c3e9745f6de0828ddd58bc1efdd138f4545
   annotaterb (4.20.0) sha256=871b2e898d1d60c23bdc59b72a5b840678a56355bf5f6fdeb8c79d317ff98bf7
+  apnotic (1.8.0) sha256=2638d2820d7a2ae94fc46cd38bdee47bb87d3823c13623d1d44393ba973002e9
   ast (2.4.3) sha256=954615157c1d6a382bc27d690d973195e79db7f55e9765ac7c481c60bdb4d383
   auth-sanitizer (0.1.4) sha256=ded72221d4d3a7c91e34e8a87b21e6a42cbf7829697f140dcf49d542422faedc
   aws-eventstream (1.4.0) sha256=116bf85c436200d1060811e6f5d2d40c88f65448f2125bc77ffce5121e6e183b
@@ -1087,6 +1096,7 @@ CHECKSUMS
   hashie (5.1.0) sha256=c266471896f323c446ea8207f8ffac985d2718df0a0ba98651a3057096ca3870
   highline (3.1.2) sha256=67cbd34d19f6ef11a7ee1d82ffab5d36dfd5b3be861f450fc1716c7125f4bb4a
   htmlentities (4.4.2) sha256=bbafbdf69f2eca9262be4efef7e43e6a1de54c95eb600f26984f71d2fe96c5c3
+  http-2 (1.2.1) sha256=d290f3b7daa70b8be8cd2260306c01243c73ec4df9d598feadaf0ed26e00b9b7
   http_accept_language (2.1.1) sha256=0043f0d55a148cf45b604dbdd197cb36437133e990016c68c892d49dbea31634
   i18n (1.15.2) sha256=00f9eb62412fe593b2a65a97daa75300d37abb8f7202ec748e94b6d46a9dd1b5
   image_optim (0.32.0) sha256=457d5ea28ee93244c2aabc7134e06455587fb670f210e88e1be40aea882c2ba3
@@ -1149,7 +1159,8 @@ CHECKSUMS
   multipart-post (2.4.1) sha256=9872d03a8e552020ca096adadbf5e3cb1cd1cdd6acd3c161136b8a5737cdb4a8
   mustache (1.1.2) sha256=d420243400354da78ded2d81541b381ad8d94e8e9b95022d0d71d66f8ef36c00
   net-http (0.9.1) sha256=25ba0b67c63e89df626ed8fac771d0ad24ad151a858af2cc8e6a716ca4336996
-  net-imap (0.6.6) sha256=96aa4ee50df3060203e649efc341f53480b791d49e150f2fdebf68beb141a8df
+  net-http2 (0.19.0) sha256=84c03b8dbff7e82ef7ff06958c228554cd6963e19f65a5bd10f4473662048ab2
+  net-imap (0.6.4.1) sha256=29f0360d75a7efd3539f16ac1957dea5c0a51ddeceb348db4553c3120914ea0d
   net-pop (0.1.2) sha256=848b4e982013c15b2f0382792268763b748cce91c9e91e36b0f27ed26420dff3
   net-protocol (0.3.0) sha256=ba310c3d4f1cad46bb1ab20336b06669b1ff8f7c568d9cb9342b32a718547472
   net-smtp (0.5.1) sha256=ed96a0af63c524fceb4b29b0d352195c30d82dd916a42f03c62a3a70e5b70736

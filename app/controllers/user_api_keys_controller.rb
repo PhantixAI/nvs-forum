@@ -92,7 +92,7 @@ class UserApiKeysController < ApplicationController
     key =
       @client.keys.create!(
         user_id: current_user.id,
-        push_url: params[:push_url],
+        push_url: params[:platform],
         expires_at: expires_at,
         scopes: scopes.map { |name| UserApiKeyScope.new(name: name) },
       )
@@ -517,6 +517,7 @@ class UserApiKeysController < ApplicationController
       auth_redirect: params[:auth_redirect],
       redirect_uri: redirect_uri_for(params[:auth_redirect]),
       push_url: params[:push_url],
+      platform: params[:platform],
       localized_scopes: localized_scopes(scopes),
       scopes: scopes,
       write_scope: scopes.split(",").include?("write"),

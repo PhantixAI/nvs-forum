@@ -255,6 +255,7 @@ group :generic_import, optional: true do
 end
 
 gem "web-push"
+gem "apnotic"
 gem "colored2", require: false
 gem "maxminddb"
 
