@@ -34,7 +34,9 @@
   <%- end %>
 
   <section id='main'>
-    <%= render partial: 'header', locals: { hide_auth_buttons: local_assigns[:hide_auth_buttons] } %>
+    <%- unless local_assigns[:hide_header] %>
+      <%= render partial: 'header', locals: { hide_auth_buttons: local_assigns[:hide_auth_buttons] } %>
+    <%- end %>
     <div id="main-outlet" class="<%= @container_class ? @container_class : 'wrap' %>">
       <%= yield %>
     </div>
