@@ -1194,6 +1194,34 @@ RSpec.describe InvitesController do
         expect(response.status).to eq(409)
       end
 
+      context "when the invite has no email" do
+        fab!(:link_invite) do
+          Fabricate(
+            :invite,
+            invited_by: admin,
+            email: nil,
+            description: "shared with jane@example.com",
+          )
+        end
+
+        it "refuses to send email using description as the recipient" do
+          put "/invites/#{link_invite.id}",
+              params: {
+                description: "updated note with jane@example.com in it",
+                send_email: true,
+              }
+          expect(response.status).to eq(422)
+          expect(response.parsed_body["errors"]).to include(I18n.t("invite.email_required_to_send"))
+          expect(Jobs::InviteEmail.jobs.size).to eq(0)
+        end
+
+        it "still allows binding an email and sending in the same request" do
+          put "/invites/#{link_invite.id}", params: { email: "jane@example.com", send_email: true }
+          expect(response.status).to eq(200)
+          expect(Jobs::InviteEmail.jobs.size).to eq(1)
+        end
+      end
+
       describe "rate limiting" do
         before { RateLimiter.enable }
 
@@ -2186,6 +2214,28 @@ RSpec.describe InvitesController do
       expect(response.status).to eq(422)
       expect(response.parsed_body["errors"]).to include(I18n.t("invite.email_invites_disabled"))
     end
+
+    it "resends an allow_any_email invite but not an ordinary never-emailed link invite" do
+      sent_invite =
+        Invite.generate(
+          admin,
+          email: nil,
+          description: "student@college.edu",
+          max_redemptions_allowed: 1,
+        )
+      sent_invite.update_column(:emailed_status, Invite.emailed_status_types[:sending])
+
+      never_emailed_invite =
+        Invite.generate(admin, email: nil, description: "just a label", max_redemptions_allowed: 1)
+
+      sign_in(admin)
+      post "/invites/reinvite-all"
+
+      expect(response.status).to eq(200)
+      invite_ids = Jobs::InviteEmail.jobs.map { |job| job["args"].first["invite_id"] }
+      expect(invite_ids).to include(sent_invite.id)
+      expect(invite_ids).not_to include(never_emailed_invite.id)
+    end
   end
 
   describe "#upload_csv" do
@@ -2217,6 +2267,12 @@ RSpec.describe InvitesController do
       end
       let(:file_with_valid_and_invalid_headers) do
         Rack::Test::UploadedFile.new(File.open(csv_file_with_valid_and_invalid_headers))
+      end
+      let(:csv_file_with_allow_any_email) do
+        File.new("#{Rails.root.join("spec/fixtures/csv/discourse_allow_any_email.csv")}")
+      end
+      let(:file_with_allow_any_email) do
+        Rack::Test::UploadedFile.new(File.open(csv_file_with_allow_any_email))
       end
 
       it "fails if you cannot bulk invite to the forum" do
@@ -2323,6 +2379,24 @@ RSpec.describe InvitesController do
 
         expect(invites.first).to eq({ "email" => "test@example.com", "groups" => "discourse" })
         expect(invites.second).to eq({ "email" => "test2@example.com" })
+      end
+
+      it "passes the allow_any_email column through to the bulk invite job" do
+        sign_in(admin)
+
+        post "/invites/upload_csv.json",
+             params: {
+               file: file_with_allow_any_email,
+               name: "discourse_allow_any_email.csv",
+             }
+
+        expect(response.status).to eq(200)
+
+        job_args = Jobs::BulkInvite.jobs.first["args"].first
+        invites = job_args["invites"]
+
+        expect(invites.first["allow_any_email"]).to eq("true")
+        expect(invites.second["allow_any_email"]).to eq("false")
       end
 
       it "allows valid user field names in CSV headers while stripping others" do

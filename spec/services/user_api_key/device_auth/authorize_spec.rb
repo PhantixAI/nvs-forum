@@ -38,6 +38,27 @@ RSpec.describe UserApiKey::DeviceAuth::Authorize do
       expect(grant.payload).to be_present
     end
 
+    context "when the request included a platform" do
+      let(:device_request) do
+        create_user_api_key_device_auth_request!(
+          params: {
+            nonce: "nonce",
+            scopes: "push",
+            client_id: "device-client",
+            application_name: "Device Client",
+            public_key: key.public_key.to_pem,
+            platform: "android",
+          },
+        )
+      end
+
+      it "stores the platform as the key's push_url, matching the direct new-key flow" do
+        result
+
+        expect(UserApiKey.where(user: user).last.push_url).to eq("android")
+      end
+    end
+
     context "when the user does not exist" do
       let(:params) { { device_code: device_request[:device_code], user_id: 0 } }
 
