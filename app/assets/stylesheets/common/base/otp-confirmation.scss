@@ -1,0 +1,50 @@
+.otp-confirmation {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 40vh;
+  padding: 3em 1em;
+
+  &__spinner-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1em;
+
+    .spinner {
+      width: 2em;
+      height: 2em;
+    }
+  }
+
+  &__fallback {
+    display: none;
+    max-width: 22em;
+
+    &.-visible {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5em;
+    }
+  }
+
+  &__stuck {
+    display: none;
+    margin-top: 2em;
+
+    &.-visible {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5em;
+    }
+  }
+
+  &__hint {
+    color: var(--primary-medium);
+    font-size: var(--font-down-1);
+  }
+}

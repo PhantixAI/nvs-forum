@@ -540,7 +540,7 @@ class SessionController < ApplicationController
       @error = I18n.t("user_api_key.invalid_token")
     end
 
-    render layout: "no_ember", locals: { hide_auth_buttons: true }
+    render layout: "no_ember", locals: { hide_auth_buttons: true, hide_header: true }
   end
 
   def second_factor_auth_show

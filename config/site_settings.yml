@@ -4498,9 +4498,6 @@ user_api:
     secret: true
   apns_bundle_id:
     default: ""
-  mobile_stable_version:
-    client: true
-    default: ""
   allowed_user_api_auth_redirects:
     default: "https://api.discourse.org/api/auth_redirect|discourse://auth_redirect"
     type: list
