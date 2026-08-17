@@ -75,6 +75,23 @@ RSpec.describe UserApiKey::DeviceAuth::CreateRequest do
       it { is_expected.to fail_with_exception(Discourse::InvalidParameters) }
     end
 
+    context "when the platform is not a recognized push platform" do
+      let(:params) { super().merge(platform: "invalid") }
+
+      it { is_expected.to fail_with_exception(Discourse::InvalidParameters) }
+    end
+
+    context "when the platform is a recognized push platform" do
+      let(:params) { super().merge(platform: "ios") }
+
+      it "stores it on the grant" do
+        device_request = result[:device_request]
+        grant = UserApiKey::DeviceAuth::GrantStore.load(device_request[:device_code])
+
+        expect(grant.platform).to eq("ios")
+      end
+    end
+
     context "with a registered client" do
       let!(:client) do
         UserApiKeyClient.create!(
