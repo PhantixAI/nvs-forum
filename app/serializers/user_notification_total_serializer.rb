@@ -6,8 +6,7 @@ class UserNotificationTotalSerializer < ApplicationSerializer
              :unread_personal_messages,
              :unseen_reviewables,
              :topic_tracking,
-             :group_inboxes,
-             :mobile_stable_version
+             :group_inboxes
 
   def unread_notifications
     object.all_unread_notifications_count - new_personal_messages_notifications_count
@@ -62,9 +61,5 @@ class UserNotificationTotalSerializer < ApplicationSerializer
 
   def new_personal_messages_notifications_count
     @new_personal_messages_notifications_count ||= object.new_personal_messages_notifications_count
-  end
-
-  def mobile_stable_version
-    SiteSetting.mobile_stable_version
   end
 end
