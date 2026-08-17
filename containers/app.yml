@@ -86,6 +86,7 @@ hooks:
         cd: $home/plugins
         cmd:
           - git clone https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-follow.git
+          - git clone https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-authentication-validations.git
   after_db_migrate:
     - exec:
         cd: $home
