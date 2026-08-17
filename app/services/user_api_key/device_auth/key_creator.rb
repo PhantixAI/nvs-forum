@@ -13,7 +13,7 @@ class UserApiKey::DeviceAuth::KeyCreator
       client.keys.where(user_id: user.id).destroy_all
       client.keys.create!(
         user_id: user.id,
-        push_url: grant.push_url,
+        push_url: grant.platform,
         expires_at: grant.expires_at,
         scopes: grant.scopes.map { |name| UserApiKeyScope.new(name: name) },
       )

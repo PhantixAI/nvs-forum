@@ -3,7 +3,9 @@
 require "csv"
 
 class InvitesController < ApplicationController
-  ALLOWED_BULK_INVITE_COLUMNS = %w[email groups topic_id locale]
+  # allow_any_email: per-row CSV flag consumed by Jobs::BulkInvite -- see there for
+  # what it does.
+  ALLOWED_BULK_INVITE_COLUMNS = %w[email groups topic_id locale allow_any_email]
 
   requires_login only: %i[
                    create
@@ -308,6 +310,15 @@ class InvitesController < ApplicationController
           return render_json_error(I18n.t("invite.email_invites_disabled"))
         end
 
+        # invite.email here is still the pre-update, persisted value -- update! hasn't run
+        # yet -- so this also covers binding a new email and sending in the same request.
+        # Without this check, a blank-email invite (e.g. an invite link) could be sent via
+        # Jobs::InviteEmail's description-as-recipient fallback just by editing its
+        # description (an ordinary note field) and requesting send_email, even though no
+        # email was ever actually provided for this invite.
+        effective_email = params.has_key?(:email) ? params[:email].presence : invite.email.presence
+        return render_json_error(I18n.t("invite.email_required_to_send")) if effective_email.blank?
+
         if invite.emailed_status != Invite.emailed_status_types[:pending]
           begin
             RateLimiter.new(current_user, "resend-invite-per-hour", 10, 1.hour).performed!
@@ -505,7 +516,14 @@ class InvitesController < ApplicationController
       return render_json_error(I18n.t("rate_limiter.slow_down"))
     end
 
-    Invite.pending(current_user).where.not(email: nil).find_each { |invite| invite.resend_invite }
+    # email IS NOT NULL keeps today's normal (bound) invites; the emailed_status clause
+    # additionally picks up unbound allow_any_email invites that were genuinely sent
+    # (see Jobs::BulkInvite) without sweeping in ordinary never-emailed link invites,
+    # which stay at :not_required.
+    Invite
+      .pending(current_user)
+      .where("email IS NOT NULL OR emailed_status != ?", Invite.emailed_status_types[:not_required])
+      .find_each { |invite| invite.resend_invite }
 
     render json: success_json
   end

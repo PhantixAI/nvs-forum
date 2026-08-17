@@ -2681,6 +2681,9 @@ en:
             <p>Invite a list of users to get your community going quickly. Prepare a <a href="https://en.wikipedia.org/wiki/Comma-separated_values" target="_blank">CSV file</a> containing at least one row per email address of users you want to invite. The following comma separated information can be provided if you want to add people to groups or send them to a specific topic the first time they sign in.</p>
             <pre>john@smith.com,first_group_name;second_group_name,topic_id</pre>
             <p>Every email address in your uploaded CSV file will be sent an invitation, and you will be able to manage it later.</p>
+            <p>Add a header row with an <code>allow_any_email</code> column, set to <code>true</code> for a row, to let that invite be redeemed with any email address instead of only the one it was sent to:</p>
+            <pre>email,groups,topic_id,allow_any_email</pre>
+            <pre>john@smith.com,first_group_name;second_group_name,topic_id,true</pre>
 
           progress: "Uploaded %{progress}%…"
           success: "File uploaded successfully. You will be notified via message when the process is complete."

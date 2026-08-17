@@ -2448,6 +2448,31 @@ RSpec.describe UsersController do
       expect(invites[0]["user"]).to be_present
     end
 
+    it "finds an allow_any_email invite by its stashed recipient in description" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      Fabricate(
+        :invite,
+        email: nil,
+        description: "student@college.edu",
+        invited_by: inviter,
+        emailed_status: Invite.emailed_status_types[:sent],
+      )
+      Fabricate(:invite, email: "billybob@example.com", invited_by: inviter)
+
+      get "/u/#{inviter.username}/invited.json",
+          params: {
+            filter: "pending",
+            search: "student@college.edu",
+          }
+      expect(response.status).to eq(200)
+
+      invites = response.parsed_body["invites"]
+      expect(invites.size).to eq(1)
+      expect(invites.first).to include("description" => "student@college.edu")
+    end
+
     it "hides last seen timestamps for hidden profiles" do
       SiteSetting.allow_users_to_hide_profile = true
 

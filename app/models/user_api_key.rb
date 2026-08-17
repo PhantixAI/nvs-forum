@@ -1,6 +1,12 @@
 # frozen_string_literal: true
 
 class UserApiKey < ActiveRecord::Base
+  # push_url stores the platform for direct FCM/APNs push clients -- repurposed
+  # from the old relay-URL scheme, which no longer applies. Kept as a single
+  # source of truth so the write-side validators and this read-side filter
+  # can't drift apart again.
+  ALLOWED_PUSH_PLATFORMS = %w[ios android].freeze
+
   self.ignored_columns = [
     "client_id", # TODO: Add post-migration to remove column after 3.4.0 stable release (not before early 2025)
     "application_name", # TODO: Add post-migration to remove column after 3.4.0 stable release (not before early 2025)
@@ -59,10 +65,9 @@ class UserApiKey < ActiveRecord::Base
     @available_scopes ||= Set.new(UserApiKeyScopes.all_scopes.keys.map(&:to_s))
   end
 
-  # push_url stores the platform ("ios"/"android") for direct FCM/APNs push clients —
-  # repurposed from the old relay-URL scheme, which no longer applies.
   def has_push?
-    scopes.any? { |s| s.name == "push" || s.name == "notifications" } && push_url.present?
+    scopes.any? { |s| s.name == "push" || s.name == "notifications" } &&
+      ALLOWED_PUSH_PLATFORMS.include?(push_url)
   end
 
   def expired?
@@ -77,7 +82,7 @@ class UserApiKey < ActiveRecord::Base
       .active
       .joins(:scopes, :client)
       .where("user_api_key_scopes.name IN ('push', 'notifications')")
-      .where("push_url IN ('ios', 'android')")
+      .where(push_url: ALLOWED_PUSH_PLATFORMS)
       .order("user_api_key_clients.client_id ASC")
       .pluck("user_api_key_clients.client_id, user_api_keys.push_url")
   end

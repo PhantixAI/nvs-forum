@@ -136,7 +136,13 @@ module Jobs
       groups = get_groups(invite[:groups], email)
       topic = get_topic(invite[:topic_id], email)
       locale = invite[:locale]
-      user_fields = get_user_fields(invite.except(:email, :groups, :topic_id, :locale), email)
+      # ActiveModel::Type::Boolean#cast fails open (anything not in its narrow
+      # FALSE_VALUES list, e.g. "no"/"n"/a typo, casts to true), which is wrong for a
+      # security-relevant flag filled in free-text by an admin -- only treat an explicit
+      # truthy spelling as true, everything else (including typos) stays false/bound.
+      allow_any_email = %w[true t 1 yes y].include?(invite[:allow_any_email].to_s.strip.downcase)
+      user_fields =
+        get_user_fields(invite.except(:email, :groups, :topic_id, :locale, :allow_any_email), email)
 
       begin
         if user = Invite.find_user_by_email(email)
@@ -162,7 +168,15 @@ module Jobs
 
           user
         else
-          if user_fields.present? || locale.present?
+          # A staged user pre-created here is only ever found and unstaged by
+          # create_user_from_invite when the redeemer's email matches the invite's, so for
+          # allow_any_email invites (redeemable with any email) it would never be looked up
+          # -- silently discarding the prefilled fields/locale and leaving a dangling staged
+          # user behind. Warn instead of creating one.
+          if allow_any_email && (user_fields.present? || locale.present?)
+            save_log "User fields/locale ignored for '#{email}' -- not supported with allow_any_email"
+            @warnings += 1
+          elsif user_fields.present? || locale.present?
             user = User.where(staged: true).find_by_email(email)
             user ||=
               User.new(username: UserNameSuggester.suggest(email), email: email, staged: true)
@@ -176,8 +190,16 @@ module Jobs
             user.save!
           end
 
+          # allow_any_email leaves the invite unbound (email: nil), which makes it an
+          # "invite link" as far as Invite#is_invite_link? is concerned -- the redeemer
+          # can then complete signup with any email address (see InvitesController
+          # #perform_accept_invitation and InviteRedeemer#can_redeem_invite?, neither of
+          # which enforce an email match for this invite type). `description` keeps the
+          # CSV row's email visible on the admin Pending/Redeemed invite list even though
+          # it's no longer bound to the invite.
           invite_opts = {
-            email: email,
+            email: allow_any_email ? nil : email,
+            description: allow_any_email ? email : nil,
             topic: topic,
             group_ids: groups.map(&:id),
             skip_email: @skip_email,
@@ -187,7 +209,48 @@ module Jobs
             invite_opts[:emailed_status] = Invite.emailed_status_types[:bulk_pending]
           end
 
-          Invite.generate(@current_user, invite_opts)
+          # Invite.generate's own reinvites-per-day limiter only runs when email is
+          # present, which allow_any_email rows never satisfy (they pass email: nil by
+          # design) -- so without this, repeated allow_any_email rows for the same address
+          # would bypass rate limiting entirely, even though this job still knows and
+          # delivers to that real address via to_override below. Reuse the exact same
+          # limiter key as Invite.generate so bound and unbound invites to the same
+          # recipient share one daily budget.
+          if allow_any_email
+            # Match Invite.generate's own downcasing (Email.downcase) before hashing --
+            # otherwise differently-cased rows for the same address (or a subsequent
+            # bound invite via Invite.generate) land in different limiter buckets and
+            # don't actually share the daily budget this is meant to enforce.
+            email_digest = Digest::SHA256.hexdigest(Email.downcase(email))
+            RateLimiter.new(
+              @current_user,
+              "reinvites-per-day-#{email_digest}",
+              3,
+              1.day.to_i,
+            ).performed!
+          end
+
+          invite = Invite.generate(@current_user, invite_opts)
+
+          # Invite.generate only auto-sends when email is present, so an unbound invite
+          # needs to be delivered explicitly -- to_override tells InviteMailer where to
+          # send it without binding the invite to that address. Skip this when the invite
+          # is bulk_pending: Jobs::ProcessBulkInviteEmails already re-enqueues delivery for
+          # those on its own throttle, and Jobs::InviteEmail falls back to invite.description
+          # for the recipient in that case -- enqueuing here too would double-send.
+          if allow_any_email && !@skip_email &&
+               invite.emailed_status != Invite.emailed_status_types[:bulk_pending]
+            # Invite.generate leaves emailed_status at :not_required for an unbound invite
+            # (it only auto-assigns :pending when email is present), which would make
+            # InvitesController#resend_all_invites treat this as never-emailed and skip it
+            # forever. Set it here, via update_column so it doesn't trip Invite.generate's
+            # own :pending-triggered auto-enqueue (that has no to_override and would
+            # double-send). Jobs::InviteEmail already advances this to :sent once delivered.
+            invite.update_column(:emailed_status, Invite.emailed_status_types[:sending])
+            ::Jobs.enqueue(:invite_email, invite_id: invite.id, to_override: email)
+          end
+
+          invite
         end
       rescue => e
         save_log "Error inviting '#{email}' -- #{Rails::Html::FullSanitizer.new.sanitize(e.message)}"

@@ -66,6 +66,12 @@ pre-commit:
         - "themes/**/*.scss"
       run: pnpm stylelint {staged_files}
 
+pre-push:
+  scripts:
+    "tag-before-force-push.sh":
+      runner: bash
+      use_stdin: true
+
 fix-staged:
   parallel: false
   commands:

@@ -99,8 +99,12 @@ export default class UserInvitedShowController extends Controller {
 
   @computed("model")
   get hasEmailInvites() {
+    // An allow_any_email invite has no bound email, but is still resendable via its
+    // stashed description recipient -- see InvitesController#resend_all_invites, which
+    // already includes these. Match that here so the button doesn't disappear just
+    // because the visible page happens to be dominated by unbound invites.
     return this.model.invites.some((invite) => {
-      return invite.email;
+      return invite.email || invite.description;
     });
   }
 

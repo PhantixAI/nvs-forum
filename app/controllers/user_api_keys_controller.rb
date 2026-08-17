@@ -649,6 +649,7 @@ class UserApiKeysController < ApplicationController
 
     parsed_public_key if public_key_str.present?
     validate_padding
+    validate_platform
   end
 
   def require_params_otp
@@ -664,6 +665,12 @@ class UserApiKeysController < ApplicationController
     return if params[:padding].blank?
     return if ALLOWED_PADDING_MODES.include?(params[:padding])
     raise Discourse::InvalidParameters.new(:padding)
+  end
+
+  def validate_platform
+    return if params[:platform].blank?
+    return if UserApiKey::ALLOWED_PUSH_PLATFORMS.include?(params[:platform])
+    raise Discourse::InvalidParameters.new(:platform)
   end
 
   def validate_auth_redirect

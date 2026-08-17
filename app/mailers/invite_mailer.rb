@@ -5,7 +5,8 @@ class InviteMailer < ActionMailer::Base
 
   layout "email_template"
 
-  def send_invite(invite, invite_to_topic: false)
+  # `to` overrides the recipient for invites with no bound email (invite.email nil).
+  def send_invite(invite, invite_to_topic: false, to: nil)
     # Find the first topic they were invited to
     first_topic = invite.topics.order(:created_at).first
 
@@ -37,7 +38,7 @@ class InviteMailer < ActionMailer::Base
       end
 
       build_email(
-        invite.email,
+        to || invite.email,
         template: sanitized_message ? "custom_invite_mailer" : "invite_mailer",
         inviter_name: inviter_name,
         site_domain_name: Discourse.current_hostname,
@@ -56,7 +57,7 @@ class InviteMailer < ActionMailer::Base
           invite,
         )
       build_email(
-        invite.email,
+        to || invite.email,
         template: sanitized_message ? "custom_invite_forum_mailer" : template,
         inviter_name: inviter_name,
         site_domain_name: Discourse.current_hostname,

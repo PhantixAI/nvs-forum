@@ -122,6 +122,51 @@ RSpec.describe InviteMailer do
       end
     end
 
+    context "with an explicit recipient override" do
+      fab!(:unbound_invite) { Fabricate(:invite, email: nil, max_redemptions_allowed: 10) }
+      fab!(:invite)
+
+      it "sends to the override address instead of invite.email" do
+        mail = InviteMailer.send_invite(unbound_invite, to: "override@example.com")
+
+        expect(mail.to).to eql(["override@example.com"])
+        expect(mail.subject).to be_present
+        expect(mail.body).to be_present
+      end
+
+      it "falls back to invite.email when no override is given" do
+        mail = InviteMailer.send_invite(invite)
+
+        expect(mail.to).to eql([invite.email])
+      end
+
+      context "when inviting to a topic" do
+        fab!(:trust_level_2)
+        let(:topic) do
+          Fabricate(
+            :topic,
+            excerpt: "Topic invite support is now available in Discourse!",
+            user: trust_level_2,
+          )
+        end
+        let(:topic_invite) do
+          Invite.generate(topic.user, email: nil, topic_id: topic.id, max_redemptions_allowed: 10)
+        end
+
+        it "sends to the override address" do
+          mail =
+            InviteMailer.send_invite(
+              topic_invite,
+              invite_to_topic: true,
+              to: "override@example.com",
+            )
+
+          expect(mail.to).to eql(["override@example.com"])
+          expect(mail.subject).to match(topic.title)
+        end
+      end
+    end
+
     context "when inviting to topic" do
       fab!(:trust_level_2)
       let(:topic) do
