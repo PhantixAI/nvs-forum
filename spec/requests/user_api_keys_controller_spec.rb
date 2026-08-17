@@ -327,6 +327,28 @@ RSpec.describe UserApiKeysController do
       expect(response.status).to eq(400)
     end
 
+    it "rejects invalid platform parameter" do
+      SiteSetting.user_api_key_allowed_groups = Group::AUTO_GROUPS[:trust_level_0]
+      sign_in(Fabricate(:user, trust_level: TrustLevel[0]))
+
+      post "/user-api-key.json", params: args.except(:auth_redirect).merge(platform: "invalid")
+      expect(response.status).to eq(400)
+    end
+
+    it "creates a key with a working push_url when a valid platform is given" do
+      SiteSetting.user_api_key_allowed_groups = Group::AUTO_GROUPS[:trust_level_0]
+      user = Fabricate(:user, trust_level: TrustLevel[0])
+      sign_in(user)
+
+      post "/user-api-key.json", params: args.except(:auth_redirect).merge(platform: "android")
+      expect(response.status).to eq(200)
+
+      encrypted = Base64.decode64(response.parsed_body["payload"])
+      parsed = JSON.parse(decrypt_payload(encrypted))
+      key = UserApiKey.with_key(parsed["key"]).first
+      expect(key.push_url).to eq("android")
+    end
+
     it "allows redirect to wildcard urls" do
       SiteSetting.allowed_user_api_auth_redirects = args[:auth_redirect] + "/*"
       sign_in(Fabricate(:user, refresh_auto_groups: true))

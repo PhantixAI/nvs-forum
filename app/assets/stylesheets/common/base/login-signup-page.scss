@@ -756,5 +756,14 @@ body.signup-page {
     box-sizing: border-box;
     box-shadow: none;
     max-width: 550px;
+
+    // 550px was sized for the single-column invite form. With social login
+    // buttons showing (.has-alt-auth), .login-body wants up to 800px for its
+    // two side-by-side columns -- without more room here, that width gets
+    // taken entirely from the form column while the button column stays
+    // full-size, crushing the form illegibly narrow.
+    &:has(.has-alt-auth) {
+      max-width: 900px;
+    }
   }
 }
