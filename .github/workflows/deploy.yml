@@ -14,6 +14,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free up Docker disk space
+        run: |
+          sudo docker image prune -af
+          sudo docker builder prune -af
+
       - name: Write app.yml with secrets
         env:
           NVS_GITHUB_PAT: ${{ secrets.NVS_GITHUB_PAT }}

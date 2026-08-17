@@ -24,6 +24,7 @@ class UserApiKey::DeviceAuth::RequestValidator
     validate_requested_scopes!(scopes)
     validate_client_scopes!(client, scopes)
     validate_padding!(params[:padding])
+    validate_platform!(params[:platform])
     validate_public_key_constraints!(
       UserApiKey::DeviceAuth::Crypto.parse_public_key!(public_key_str(params, client)),
     )
@@ -53,6 +54,12 @@ class UserApiKey::DeviceAuth::RequestValidator
     return if padding.blank? || ALLOWED_PADDING_MODES.include?(padding)
 
     raise Discourse::InvalidParameters.new(:padding)
+  end
+
+  def self.validate_platform!(platform)
+    return if platform.blank? || UserApiKey::ALLOWED_PUSH_PLATFORMS.include?(platform)
+
+    raise Discourse::InvalidParameters.new(:platform)
   end
 
   def self.validate_public_key_constraints!(public_key)

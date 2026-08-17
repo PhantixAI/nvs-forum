@@ -169,5 +169,181 @@ RSpec.describe Jobs::BulkInvite do
       invite = Invite.last
       expect(invite.emailed_status).to eq(Invite.emailed_status_types[:not_required])
     end
+
+    context "with allow_any_email" do
+      it "creates an unbound invite" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu", allow_any_email: "true" }],
+        )
+
+        invite = Invite.last
+        expect(invite.email).to eq(nil)
+        expect(invite.is_invite_link?).to eq(true)
+        expect(invite.description).to eq("student@college.edu")
+      end
+
+      it "marks the invite as emailed so it's eligible for Resend All Invites" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu", allow_any_email: "true" }],
+        )
+
+        expect(Invite.last.emailed_status).not_to eq(Invite.emailed_status_types[:not_required])
+      end
+
+      it "keeps the invite bound when absent or false" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [
+            { email: "student1@college.edu" },
+            { email: "student2@college.edu", allow_any_email: "false" },
+          ],
+        )
+
+        Invite
+          .where(email: %w[student1@college.edu student2@college.edu])
+          .find_each do |invite|
+            expect(invite.email).to be_present
+            expect(invite.description).to eq(nil)
+          end
+      end
+
+      it "keeps the invite bound for any non-explicit-true spelling (fails closed)" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [
+            { email: "student3@college.edu", allow_any_email: "no" },
+            { email: "student4@college.edu", allow_any_email: "maybe" },
+            { email: "student5@college.edu", allow_any_email: "disabled" },
+          ],
+        )
+
+        Invite
+          .where(email: %w[student3@college.edu student4@college.edu student5@college.edu])
+          .find_each { |invite| expect(invite.email).to be_present }
+      end
+
+      it "delivers the invite to the CSV address" do
+        Jobs.run_immediately!
+        mailer = Mail::Message.new(to: "student@college.edu")
+        Email::Sender.any_instance.expects(:send)
+        InviteMailer
+          .expects(:send_invite)
+          .with(anything, has_entries(to: "student@college.edu"))
+          .returns(mailer)
+
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu", allow_any_email: "true" }],
+        )
+      end
+
+      it "does not enqueue delivery when skip_email_bulk_invites is true" do
+        SiteSetting.skip_email_bulk_invites = true
+
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu", allow_any_email: "true" }],
+        )
+
+        expect(Jobs::InviteEmail.jobs).to be_empty
+      end
+
+      it "does not misinterpret allow_any_email as a user field" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu", allow_any_email: "true" }],
+        )
+
+        post = Post.last
+        expect(post.raw).to include("0 warning")
+      end
+
+      it "still applies groups and topic to an unbound invite" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [
+            {
+              email: "student@college.edu",
+              allow_any_email: "true",
+              groups: "GROUP1;group2",
+              topic_id: topic.id,
+            },
+          ],
+        )
+
+        invite = Invite.last
+        expect(invite.invited_groups.pluck(:group_id)).to contain_exactly(group1.id, group2.id)
+        expect(invite.topic_invites.pluck(:topic_id)).to contain_exactly(topic.id)
+      end
+
+      it "does not create an orphaned staged user when prefilling fields for an unbound invite" do
+        user_field = Fabricate(:user_field, name: "Location")
+
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu", allow_any_email: "true", location: "value 1" }],
+        )
+
+        expect(User.where(staged: true).find_by_email("student@college.edu")).to eq(nil)
+        expect(Invite.last.email).to eq(nil)
+
+        post = Post.last
+        expect(post.raw).to include("1 warning")
+      end
+
+      it "rate limits repeated allow_any_email rows to the same address" do
+        RateLimiter.enable
+        # Staff (e.g. admin) are exempt from this limiter by default, same as the
+        # bound-email reinvites-per-day check it mirrors -- use a non-staff inviter
+        # so the limit is actually exercised.
+
+        4.times do
+          described_class.new.execute(
+            current_user_id: user.id,
+            invites: [{ email: "student@college.edu", allow_any_email: "true" }],
+          )
+        end
+
+        expect(Invite.where(description: "student@college.edu", email: nil).count).to eq(3)
+
+        post = Post.last
+        expect(post.raw).to include("1 error(s)")
+      end
+
+      it "shares the rate limit budget across differently-cased rows for the same address" do
+        RateLimiter.enable
+
+        described_class.new.execute(
+          current_user_id: user.id,
+          invites: [
+            { email: "student@college.edu", allow_any_email: "true" },
+            { email: "Student@College.edu", allow_any_email: "true" },
+            { email: "STUDENT@COLLEGE.EDU", allow_any_email: "true" },
+            { email: "sTuDeNt@college.edu", allow_any_email: "true" },
+          ],
+        )
+
+        expect(Invite.where(email: nil).count).to eq(3)
+
+        post = Post.last
+        expect(post.raw).to include("1 error(s)")
+      end
+
+      it "does not immediately enqueue delivery for a bulk_pending batch" do
+        bulk_invites =
+          (Invite::BULK_INVITE_EMAIL_LIMIT + 1).times.map do |i|
+            { email: "student#{i}@college.edu", allow_any_email: "true" }
+          end
+
+        described_class.new.execute(current_user_id: admin.id, invites: bulk_invites)
+
+        invite = Invite.last
+        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+        expect(Jobs::InviteEmail.jobs).to be_empty
+        expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
+      end
+    end
   end
 end
