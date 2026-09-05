@@ -301,6 +301,7 @@ module DiscourseEvents
       def allowed_custom_fields
         allowed_custom_fields = SiteSetting.discourse_post_event_allowed_custom_fields.split("|")
         custom_fields.each do |key, value|
+          next if key == DiscourseEvents::CalendarSeparation::RESERVED_CUSTOM_FIELD_KEY
           if !allowed_custom_fields.include?(key)
             errors.add(
               :base,

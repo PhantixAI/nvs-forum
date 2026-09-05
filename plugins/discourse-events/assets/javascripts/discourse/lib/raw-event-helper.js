@@ -246,6 +246,10 @@ export function buildParams(startsAt, endsAt, event, siteSettings) {
     params.allDay = "true";
   }
 
+  // Unlike the other booleans here, forumEvent is always written (never omitted when false) so
+  // it's always faithfully recoverable when the modal reopens an event for editing.
+  params.forumEvent = event.forumEvent ? "true" : "false";
+
   if (endsAt) {
     params.end = event.allDay
       ? moment(endsAt).format("YYYY-MM-DD")
@@ -394,6 +398,7 @@ export function defaultEventState() {
     closed: false,
     customFields: {},
     hosts: null,
+    forumEvent: false,
   };
 }
 
@@ -433,6 +438,7 @@ export function parseEventAttrs(
     closed: attrs.closed === "true",
     customFields,
     hosts: attrs.hosts || null,
+    forumEvent: attrs.forumEvent === "true",
   };
 }
 
@@ -457,6 +463,7 @@ export function stateToEventInput(state) {
     imageUpload: state.image ? { url: state.image } : null,
     customFields: state.customFields,
     hosts: state.hosts ? state.hosts.split(",") : [],
+    forumEvent: state.forumEvent,
   };
 }
 
