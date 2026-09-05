@@ -75,6 +75,42 @@ describe DiscourseEvents::Events::Finder do
     end
   end
 
+  describe "by calendar separation value" do
+    fab!(:mit_event) do
+      Fabricate(
+        :event,
+        status: DiscourseEvents::Events::Event.statuses[:public],
+        custom_fields: {
+          "_calendar_separation_value" => "MIT",
+        },
+      )
+    end
+    fab!(:stanford_event) do
+      Fabricate(
+        :event,
+        status: DiscourseEvents::Events::Event.statuses[:public],
+        custom_fields: {
+          "_calendar_separation_value" => "Stanford",
+        },
+      )
+    end
+    fab!(:forum_event) do
+      Fabricate(:event, status: DiscourseEvents::Events::Event.statuses[:public])
+    end
+
+    it "returns events matching the value plus events with no value (forum events)" do
+      expect(finder.search(current_user, { calendar_separation_value: "MIT" })).to match_array(
+        [mit_event, forum_event],
+      )
+    end
+
+    it "returns every event when no value is given" do
+      expect(finder.search(current_user, {})).to match_array(
+        [mit_event, stanford_event, forum_event],
+      )
+    end
+  end
+
   context "when the event is associated to a visible post" do
     let(:post1) do
       PostCreator.create!(

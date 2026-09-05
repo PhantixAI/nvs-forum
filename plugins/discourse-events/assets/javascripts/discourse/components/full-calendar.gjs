@@ -1,8 +1,10 @@
 import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
 import { inject as controller } from "@ember/controller";
 import { action } from "@ember/object";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
 import didUpdate from "@ember/render-modifiers/modifiers/did-update";
+import { schedule } from "@ember/runloop";
 import { service } from "@ember/service";
 import { trustHTML } from "@ember/template";
 import { modifier as modifierFn } from "ember-modifier";
@@ -20,11 +22,11 @@ import { normalizeViewForCalendar } from "../lib/calendar-view-helper";
 
 const PostEventMenu = <template>
   <DiscoursePostEvent
-    @clampDescription={{true}}
-    @event={{@data.event}}
     @linkToPost={{true}}
+    @event={{@data.event}}
     @onClose={{@data.onClose}}
     @withDescription={{true}}
+    @clampDescription={{true}}
   />
 </template>;
 
@@ -38,7 +40,9 @@ export default class FullCalendar extends Component {
 
   @controller topic;
 
+  @tracked toolbarExtraAnchor = null;
   calendar = null;
+  element = null;
 
   // TODO: remove this workaround when updating to fullcalendar v7
   forceUpdateSize = modifierFn((element) => {
@@ -72,31 +76,9 @@ export default class FullCalendar extends Component {
     }
   }
 
-  get defaultLeftHeaderToolbar() {
-    return !this.capabilities.viewport.md ? "prev,next" : "prev,next today";
-  }
-
-  get headerToolbar() {
-    return {
-      left: this.args.leftHeaderToolbar ?? this.defaultLeftHeaderToolbar,
-      center: this.args.centerHeaderToolbar ?? "title",
-      right:
-        this.args.rightHeaderToolbar ??
-        "timeGridDay,timeGridWeek,dayGridMonth,listYear",
-    };
-  }
-
-  get initialView() {
-    const normalizedView = normalizeViewForCalendar(this.args.initialView);
-
-    return (
-      normalizedView ||
-      (this.capabilities.viewport.sm ? "dayGridMonth" : "timeGridWeek")
-    );
-  }
-
   @action
   async setupCalendar(element) {
+    this.element = element;
     const calendarModule = await loadFullCalendar();
 
     this.calendar = new calendarModule.Calendar(element, {
@@ -148,6 +130,7 @@ export default class FullCalendar extends Component {
         }
       },
       datesSet: (info) => {
+        this.ensureToolbarExtraAnchor();
         this.args.onDatesChange?.(info);
       },
       eventMouseLeave: async () => {
@@ -213,12 +196,58 @@ export default class FullCalendar extends Component {
     if (this.calendar) {
       this.calendar.setOption("headerToolbar", this.headerToolbar);
       this.calendar.refetchEvents();
+      this.ensureToolbarExtraAnchor();
     }
+  }
+
+  // Mounts yielded block content (e.g. a filter control) into the toolbar as a genuine
+  // sibling `.fc-toolbar-chunk`, appended via plain DOM manipulation rather than through
+  // FullCalendar's own customButtons/headerToolbar string mechanism -- mixing a custom
+  // button into that string alongside view-switcher buttons silently drops every other
+  // button in the same toolbar section, so this deliberately avoids that mechanism.
+  ensureToolbarExtraAnchor() {
+    schedule("afterRender", () => {
+      const toolbar = this.element?.querySelector(".fc-header-toolbar");
+      if (!toolbar) {
+        return;
+      }
+
+      let anchor = toolbar.querySelector(":scope > .fc-toolbar-chunk-extra");
+      if (!anchor) {
+        anchor = document.createElement("div");
+        anchor.classList.add("fc-toolbar-chunk", "fc-toolbar-chunk-extra");
+        toolbar.appendChild(anchor);
+      }
+
+      this.toolbarExtraAnchor = anchor;
+    });
+  }
+
+  get defaultLeftHeaderToolbar() {
+    return !this.capabilities.viewport.md ? "prev,next" : "prev,next today";
+  }
+
+  get headerToolbar() {
+    return {
+      left: this.args.leftHeaderToolbar ?? this.defaultLeftHeaderToolbar,
+      center: this.args.centerHeaderToolbar ?? "title",
+      right:
+        this.args.rightHeaderToolbar ??
+        "timeGridDay,timeGridWeek,dayGridMonth,listYear",
+    };
+  }
+
+  get initialView() {
+    const normalizedView = normalizeViewForCalendar(this.args.initialView);
+
+    return (
+      normalizedView ||
+      (this.capabilities.viewport.sm ? "dayGridMonth" : "timeGridWeek")
+    );
   }
 
   <template>
     <div
-      ...attributes
       {{didInsert this.setupCalendar}}
       {{didUpdate
         this.updateCalendar
@@ -227,8 +256,16 @@ export default class FullCalendar extends Component {
         this.capabilities.viewport.md
       }}
       {{this.forceUpdateSize}}
+      ...attributes
     >
       {{! The calendar will be rendered inside this div by the library }}
     </div>
+    {{#if (has-block)}}
+      {{#if this.toolbarExtraAnchor}}
+        {{#in-element this.toolbarExtraAnchor}}
+          {{yield}}
+        {{/in-element}}
+      {{/if}}
+    {{/if}}
   </template>
 }
