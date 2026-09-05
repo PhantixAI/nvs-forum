@@ -19139,6 +19139,13 @@ CREATE UNIQUE INDEX idx_discourse_calendar_post_event_dates_event_id_starts_at_u
 
 
 --
+-- Name: idx_discourse_post_event_events_calendar_separation_value; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_discourse_post_event_events_calendar_separation_value ON public.discourse_post_event_events USING btree (((custom_fields ->> '_calendar_separation_value'::text))) WHERE ((custom_fields ->> '_calendar_separation_value'::text) IS NOT NULL);
+
+
+--
 -- Name: idx_dwf_ai_sessions_on_status_updated_at; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -25071,6 +25078,7 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20260908160656'),
 ('20260908153158'),
 ('20260908112615'),
+('20260905074814'),
 ('20260904065041'),
 ('20260904063128'),
 ('20260904000537'),
