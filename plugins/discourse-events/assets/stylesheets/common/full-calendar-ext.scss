@@ -107,6 +107,19 @@
   height: 100%;
 }
 
+.fc-toolbar-chunk-extra {
+  display: flex;
+  align-items: center;
+
+  .calendar-separation-filter {
+    font-size: var(--font-0);
+
+    @include viewport.from(md) {
+      font-size: var(--font-down-1);
+    }
+  }
+}
+
 [data-identifier="post-event-tooltip"] img.only-emoji {
   width: 1em;
   height: 1em;

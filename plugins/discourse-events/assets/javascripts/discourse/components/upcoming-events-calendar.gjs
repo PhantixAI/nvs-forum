@@ -1,4 +1,5 @@
 import Component from "@glimmer/component";
+import { tracked } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import { schedule } from "@ember/runloop";
 import { service } from "@ember/service";
@@ -8,6 +9,10 @@ import { i18n } from "discourse-i18n";
 import { normalizeViewForRoute } from "../lib/calendar-view-helper";
 import formatEventForCalendar from "../lib/format-event-for-calendar";
 import openEventComposer from "../lib/open-event-composer";
+import CalendarSeparationFilter, {
+  ALL_VALUE as SEPARATION_ALL_VALUE,
+  findSeparationField,
+} from "./calendar-separation-filter";
 import FullCalendar from "./full-calendar";
 
 export default class UpcomingEventsCalendar extends Component {
@@ -16,7 +21,12 @@ export default class UpcomingEventsCalendar extends Component {
   @service router;
   @service capabilities;
   @service siteSettings;
+  @service site;
   @service discoursePostEventService;
+
+  // Explicit dropdown selection, if the viewer has changed it this visit. `null` means
+  // "no override yet" -- fall back to the live default (see `selectedSeparationValue`).
+  @tracked explicitSeparationValue = null;
 
   get canCreateEvent() {
     if (!this.currentUser) {
@@ -29,8 +39,59 @@ export default class UpcomingEventsCalendar extends Component {
     );
   }
 
+  @action
+  async onDateClick(info) {
+    await openEventComposer({
+      composer: this.composer,
+      currentUser: this.currentUser,
+      siteSettings: this.siteSettings,
+      info,
+      category: this.args.categoryId
+        ? (Category.findById(this.args.categoryId) ?? null)
+        : null,
+    });
+  }
+
+  get separationField() {
+    return findSeparationField(this.site);
+  }
+
+  get separationEnabled() {
+    return !!this.separationField;
+  }
+
+  // Read live off `currentUser.user_fields` (core's own saveable profile-field cache, kept
+  // fresh by the preferences form on every save) rather than a serializer attribute baked
+  // into the page's initial boot payload -- the latter goes stale until a hard reload if the
+  // viewer edits their profile field and comes back via an in-app transition.
+  get defaultSeparationValue() {
+    const fieldId = this.separationField?.id;
+    if (!fieldId) {
+      return SEPARATION_ALL_VALUE;
+    }
+
+    // `user_fields` is only populated client-side after the viewer has visited (or saved)
+    // the preferences/profile route in this session, but it's the freshest value we have
+    // when present. `calendar_event_separation_value` is a serializer attribute included in
+    // every page's initial boot payload, so it's reliable on a session that hasn't touched
+    // the profile route yet -- but it won't reflect an in-session profile edit. Prefer the
+    // live one; fall back to the boot-time one.
+    const liveValue = this.currentUser?.user_fields?.[String(fieldId)];
+    if (liveValue !== undefined) {
+      return liveValue;
+    }
+
+    return (
+      this.currentUser?.calendar_event_separation_value ?? SEPARATION_ALL_VALUE
+    );
+  }
+
+  get selectedSeparationValue() {
+    return this.explicitSeparationValue ?? this.defaultSeparationValue;
+  }
+
   get customButtons() {
-    return {
+    const buttons = {
       mineEvents: {
         text: i18n("discourse_post_event.upcoming_events.my_events"),
         click: () => {
@@ -58,6 +119,45 @@ export default class UpcomingEventsCalendar extends Component {
         },
       },
     };
+
+    return buttons;
+  }
+
+  @action
+  async loadEvents(info) {
+    const params = {
+      after: info.startStr,
+      before: info.endStr,
+      include_ongoing: true,
+      attending_user: this.args.mine ? this.currentUser?.username : null,
+    };
+
+    if (this.args.categoryId) {
+      params.category_id = this.args.categoryId;
+    }
+
+    if (this.args.includeSubcategories !== undefined) {
+      params.include_subcategories = this.args.includeSubcategories;
+    }
+
+    if (
+      this.selectedSeparationValue &&
+      this.selectedSeparationValue !== SEPARATION_ALL_VALUE
+    ) {
+      params.calendar_separation_value = this.selectedSeparationValue;
+    }
+
+    const events = await this.discoursePostEventService.fetchEvents(params);
+
+    const timezone = this.currentUser?.user_option?.timezone;
+
+    return events.map((event) =>
+      formatEventForCalendar(
+        event,
+        this.siteSettings.map_events_to_color,
+        timezone
+      )
+    );
   }
 
   get refreshKey() {
@@ -65,6 +165,7 @@ export default class UpcomingEventsCalendar extends Component {
       this.currentUser?.id,
       this.args.categoryId,
       this.args.includeSubcategories,
+      this.selectedSeparationValue,
     ].join("-");
   }
 
@@ -98,49 +199,6 @@ export default class UpcomingEventsCalendar extends Component {
     } else {
       return "title";
     }
-  }
-
-  @action
-  async onDateClick(info) {
-    await openEventComposer({
-      composer: this.composer,
-      currentUser: this.currentUser,
-      siteSettings: this.siteSettings,
-      info,
-      category: this.args.categoryId
-        ? (Category.findById(this.args.categoryId) ?? null)
-        : null,
-    });
-  }
-
-  @action
-  async loadEvents(info) {
-    const params = {
-      after: info.startStr,
-      before: info.endStr,
-      include_ongoing: true,
-      attending_user: this.args.mine ? this.currentUser?.username : null,
-    };
-
-    if (this.args.categoryId) {
-      params.category_id = this.args.categoryId;
-    }
-
-    if (this.args.includeSubcategories !== undefined) {
-      params.include_subcategories = this.args.includeSubcategories;
-    }
-
-    const events = await this.discoursePostEventService.fetchEvents(params);
-
-    const timezone = this.currentUser?.user_option?.timezone;
-
-    return events.map((event) =>
-      formatEventForCalendar(
-        event,
-        this.siteSettings.map_events_to_color,
-        timezone
-      )
-    );
   }
 
   @action
@@ -185,20 +243,32 @@ export default class UpcomingEventsCalendar extends Component {
     });
   }
 
+  @action
+  onSeparationValueChange(value) {
+    this.explicitSeparationValue = value;
+  }
+
   <template>
     <div id="upcoming-events-calendar">
       <FullCalendar
-        @centerHeaderToolbar={{this.centerHeaderToolbar}}
-        @customButtons={{this.customButtons}}
         @initialDate={{@initialDate}}
-        @initialView={{@initialView}}
-        @leftHeaderToolbar={{this.leftHeaderToolbar}}
-        @onDateClick={{if this.canCreateEvent this.onDateClick}}
         @onDatesChange={{this.onDatesChange}}
+        @onDateClick={{if this.canCreateEvent this.onDateClick}}
         @onLoadEvents={{this.loadEvents}}
-        @refreshKey={{this.refreshKey}}
+        @initialView={{@initialView}}
+        @customButtons={{this.customButtons}}
+        @leftHeaderToolbar={{this.leftHeaderToolbar}}
+        @centerHeaderToolbar={{this.centerHeaderToolbar}}
         @rightHeaderToolbar={{this.rightHeaderToolbar}}
-      />
+        @refreshKey={{this.refreshKey}}
+      >
+        {{#if this.separationEnabled}}
+          <CalendarSeparationFilter
+            @value={{this.selectedSeparationValue}}
+            @onChange={{this.onSeparationValueChange}}
+          />
+        {{/if}}
+      </FullCalendar>
     </div>
   </template>
 }

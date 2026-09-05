@@ -189,6 +189,7 @@ module DiscourseEvents
         :topic_id,
         :category_id,
         :include_subcategories,
+        :calendar_separation_value,
         :include_interested,
         :include_ongoing,
         :include_closed,
