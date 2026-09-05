@@ -14,6 +14,7 @@ require_relative "lib/discourse_events/configuration/time_of_day_validator"
 require_relative "lib/discourse_events/configuration/event_custom_fields_validator"
 require_relative "lib/discourse_events/configuration/first_day_of_week"
 require_relative "lib/discourse_events/configuration/upcoming_events_default_view"
+require_relative "lib/discourse_events/calendar_separation"
 
 enabled_site_setting :discourse_events_enabled
 
@@ -360,6 +361,14 @@ after_initialize do
 
   add_to_serializer(:current_user, :can_create_discourse_post_event) do
     scope.can_create_discourse_post_event?
+  end
+
+  # Reliable at fresh page load / boot (unlike `user_fields`, which is only populated
+  # client-side after visiting/saving the preferences/profile route in the same session --
+  # see CalendarSeparationFilter's default-value logic, which prefers the live client value
+  # when present and falls back to this for a session that hasn't touched that route yet).
+  add_to_serializer(:current_user, :calendar_event_separation_value) do
+    DiscourseEvents::CalendarSeparation.value_for_user(object)
   end
 
   add_class_method(:group, :discourse_post_event_allowed_groups) do

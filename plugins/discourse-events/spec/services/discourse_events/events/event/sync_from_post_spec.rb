@@ -112,6 +112,88 @@ RSpec.describe DiscourseEvents::Events::Event::SyncFromPost do
       end
     end
 
+    context "with calendar separation" do
+      fab!(:college_field) { Fabricate(:user_field, name: "College") }
+
+      before do
+        author.custom_fields["user_field_#{college_field.id}"] = "MIT"
+        author.save_custom_fields
+      end
+
+      context "when the raw has an event and the post has none" do
+        it "auto-populates the reserved custom field from the creator's profile value" do
+          result
+          expect(post.reload.event.custom_fields["_calendar_separation_value"]).to eq("MIT")
+        end
+      end
+
+      context "when the event already has a separation value and is edited again" do
+        fab!(:event) do
+          Fabricate(
+            :event,
+            post:,
+            original_starts_at: "2020-01-01 10:00",
+            custom_fields: {
+              "_calendar_separation_value" => "MIT",
+            },
+          )
+        end
+
+        before do
+          author.custom_fields["user_field_#{college_field.id}"] = "Stanford"
+          author.save_custom_fields
+        end
+
+        it "preserves the existing value rather than re-deriving it from the creator" do
+          result
+          expect(post.reload.event.custom_fields["_calendar_separation_value"]).to eq("MIT")
+        end
+      end
+
+      context "when a legacy event with no separation value is edited by someone other than the author" do
+        fab!(:editor) { Fabricate(:user, admin: true, refresh_auto_groups: true) }
+        fab!(:event) { Fabricate(:event, post:, original_starts_at: "2020-01-01 10:00") }
+
+        before do
+          post.update_columns(last_editor_id: editor.id)
+          editor.custom_fields["user_field_#{college_field.id}"] = "Stanford"
+          editor.save_custom_fields
+        end
+
+        it "derives the value from the editor, not the original author" do
+          result
+          expect(post.reload.event.custom_fields["_calendar_separation_value"]).to eq("Stanford")
+        end
+      end
+
+      context "when the raw event is marked as a forum event" do
+        let(:raw_event) { super().merge("forum-event": "true") }
+
+        it "omits the reserved custom field" do
+          result
+          expect(post.reload.event.custom_fields).not_to have_key("_calendar_separation_value")
+        end
+
+        context "when the event previously had a separation value" do
+          fab!(:event) do
+            Fabricate(
+              :event,
+              post:,
+              original_starts_at: "2020-01-01 10:00",
+              custom_fields: {
+                "_calendar_separation_value" => "MIT",
+              },
+            )
+          end
+
+          it "clears the previously set value" do
+            result
+            expect(post.reload.event.custom_fields).not_to have_key("_calendar_separation_value")
+          end
+        end
+      end
+    end
+
     context "when the parsed event is invalid downstream of the contract" do
       let(:raw_event) do
         {
