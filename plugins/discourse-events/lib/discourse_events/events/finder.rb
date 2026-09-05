@@ -12,6 +12,7 @@ module DiscourseEvents
           .then { |query| filter_by_attending_user(query, params, guardian, user) }
           .then { |query| filter_by_dates(query, params) }
           .then { |query| filter_by_category(query, params) }
+          .then { |query| filter_by_calendar_separation_value(query, params) }
           .then { |query| filter_by_tags(query, params, guardian) }
           .then { |query| filter_by_search(query, params) }
           .then { |query| filter_by_status(query, params) }
@@ -205,6 +206,18 @@ module DiscourseEvents
           )
 
         events.where(topics: { category_id: category_ids })
+      end
+
+      def self.filter_by_calendar_separation_value(events, params)
+        return events if params[:calendar_separation_value].blank?
+
+        reserved_key = DiscourseEvents::CalendarSeparation::RESERVED_CUSTOM_FIELD_KEY
+        events.where(
+          "discourse_post_event_events.custom_fields ->> ? = ? OR discourse_post_event_events.custom_fields ->> ? IS NULL",
+          reserved_key,
+          params[:calendar_separation_value],
+          reserved_key,
+        )
       end
 
       def self.filter_by_tags(events, params, guardian)
