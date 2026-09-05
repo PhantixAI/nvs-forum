@@ -33,10 +33,12 @@ import {
   livestreamSource,
   reconcileDefaultReminder,
 } from "../../lib/raw-event-helper";
+import { findSeparationField } from "../calendar-separation-filter";
 import CompactEventEditor from "../compact-event-editor";
 
 export default class PostEventBuilder extends Component {
   @service dialog;
+  @service site;
   @service siteSettings;
   @service currentUser;
 
@@ -113,6 +115,7 @@ export default class PostEventBuilder extends Component {
       startsAt: this.startsAt ?? null,
       endsAt: this.endsAt ?? null,
       allDay: !!this.event.allDay,
+      forumEvent: !!this.event.forumEvent,
       showLocalTime: !!this.event.showLocalTime,
       chatEnabled: !!this.event.chatEnabled,
       livestream: !!this.event.livestream,
@@ -422,6 +425,13 @@ export default class PostEventBuilder extends Component {
       this.siteSettings.chat_enabled &&
       (this.currentUser.admin || this.currentUser.moderator)
     );
+  }
+
+  // Hides the checkbox entirely on sites where calendar separation isn't configured at all
+  // -- otherwise it's confusing, meaningless UI ("regardless of college" when there's no
+  // college-based filtering happening on this site to begin with).
+  get showForumEvent() {
+    return !!findSeparationField(this.site);
   }
 
   get isAdvancedScreen() {
@@ -860,6 +870,25 @@ export default class PostEventBuilder extends Component {
                     }}
                   </field.Control>
                 </form.Field>
+
+                {{#if this.showForumEvent}}
+                  <form.Field
+                    @name="forumEvent"
+                    @title={{i18n
+                      "discourse_post_event.builder_modal.forum_event.label"
+                    }}
+                    @type="checkbox"
+                    @format="full"
+                    @onSet={{fn this.syncFieldToEvent "forumEvent"}}
+                    as |field|
+                  >
+                    <field.Control>
+                      {{i18n
+                        "discourse_post_event.builder_modal.forum_event.checkbox_label"
+                      }}
+                    </field.Control>
+                  </form.Field>
+                {{/if}}
 
                 <form.Field
                   @name="name"

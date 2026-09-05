@@ -17,10 +17,15 @@ module DiscourseEvents
                  :duration,
                  :occurrences,
                  :all_day,
-                 :custom_fields
+                 :custom_fields,
+                 :forum_event
 
       def category_id
         object.post&.topic&.category_id
+      end
+
+      def forum_event
+        custom_fields.exclude?(DiscourseEvents::CalendarSeparation::RESERVED_CUSTOM_FIELD_KEY)
       end
 
       def post

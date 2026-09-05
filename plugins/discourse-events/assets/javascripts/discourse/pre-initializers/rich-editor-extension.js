@@ -30,6 +30,7 @@ export const EVENT_ATTRIBUTES = {
   chatEnabled: { default: null },
   livestream: { default: null },
   allDay: { default: null },
+  forumEvent: { default: null },
   image: { default: null },
   hosts: { default: null },
 };

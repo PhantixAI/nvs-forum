@@ -420,14 +420,15 @@ en:
         inline_title: "Inline bulk invite"
         csv_title: "CSV bulk invite"
       upcoming_events:
-        title: "Upcoming events"
+        title: "Calendar"
         creator: "Creator"
         status: "Status"
         starts_at: "Starts at"
         all_events: "All events"
         my_events: "My events"
+        all_colleges: "All colleges"
       upcoming_events_list:
-        title: "Upcoming events"
+        title: "Calendar"
         empty: "No upcoming events"
         all_day: "All day"
         error: "Failed to retrieve events"
@@ -549,6 +550,9 @@ en:
         all_day:
           label: "All day event"
           description: "An all day event will not have specific times, just a date. The event will run from the start of the day to the end of the day."
+        forum_event:
+          label: "Forum event"
+          checkbox_label: "Show this event to everyone, regardless of college"
         reminders:
           label: "Reminders"
           types:

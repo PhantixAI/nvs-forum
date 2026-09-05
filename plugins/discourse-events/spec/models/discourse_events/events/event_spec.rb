@@ -366,6 +366,40 @@ describe DiscourseEvents::Events::Event do
     end
   end
 
+  describe "#allowed_custom_fields" do
+    fab!(:user) { Fabricate(:user, admin: true, refresh_auto_groups: true) }
+    fab!(:topic) { Fabricate(:topic, user: user) }
+    fab!(:post) { Fabricate(:post, topic: topic) }
+
+    it "is invalid when a custom field key is not admin-allowed" do
+      event =
+        Fabricate.build(
+          :event,
+          post: post,
+          original_starts_at: Time.now,
+          custom_fields: {
+            "not_allowed" => "value",
+          },
+        )
+
+      expect(event).not_to be_valid
+    end
+
+    it "is valid when the reserved calendar separation key is present, even though it's never admin-allowed" do
+      event =
+        Fabricate.build(
+          :event,
+          post: post,
+          original_starts_at: Time.now,
+          custom_fields: {
+            "_calendar_separation_value" => "MIT",
+          },
+        )
+
+      expect(event).to be_valid
+    end
+  end
+
   describe "topic custom fields callback" do
     let(:user) { Fabricate(:user, admin: true, refresh_auto_groups: true) }
     let!(:notified_user) { Fabricate(:user) }

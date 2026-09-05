@@ -54,6 +54,7 @@ export default class CompactEventEditor extends Component {
   @tracked hosts;
   @tracked closed;
   @tracked customFields;
+  @tracked forumEvent;
   @tracked linkify;
   #startedWithUrl = false;
   #previousRsvpStatus = "public";
@@ -100,6 +101,7 @@ export default class CompactEventEditor extends Component {
     this.hosts = s.hosts;
     this.closed = s.closed;
     this.customFields = { ...s.customFields };
+    this.forumEvent = s.forumEvent;
 
     if (this.status && this.status !== "standalone") {
       this.#previousRsvpStatus = this.status;
@@ -131,6 +133,7 @@ export default class CompactEventEditor extends Component {
       hosts: this.hosts,
       closed: this.closed,
       customFields: this.customFields,
+      forumEvent: this.forumEvent,
     };
   }
 
@@ -618,6 +621,7 @@ export default class CompactEventEditor extends Component {
       raw_invitees: this.allowedGroups?.split(",") || [],
       hosts: this.hosts?.split(",").map((username) => ({ username })) || [],
       custom_fields: { ...this.customFields },
+      forum_event: this.forumEvent,
       starts_at: this.startsAt,
       ends_at: this.endsAt,
       url: this.url,
@@ -662,6 +666,7 @@ export default class CompactEventEditor extends Component {
             ? updatedEvent.imageUpload.short_url
             : updatedEvent.imageUpload?.url || null;
           this.customFields = { ...(updatedEvent.customFields || {}) };
+          this.forumEvent = !!updatedEvent.forumEvent;
 
           if (this.status && this.status !== "standalone") {
             this.#previousRsvpStatus = this.status;
