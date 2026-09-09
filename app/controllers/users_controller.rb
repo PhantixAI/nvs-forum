@@ -224,10 +224,14 @@ class UsersController < ApplicationController
         value = value[0...UserField.max_length] if value
 
         if value.blank? &&
-             (
+             DiscoursePluginRegistry.apply_modifier(
+               :user_field_required_for_update,
                field.for_all_users? ||
                  field.on_signup? &&
-                   user.custom_fields["#{User::USER_FIELD_PREFIX}#{field_id}"].present?
+                   user.custom_fields["#{User::USER_FIELD_PREFIX}#{field_id}"].present?,
+               field,
+               params[:user_fields],
+               user,
              )
           return render_json_error(I18n.t("login.missing_user_field"))
         end
@@ -776,7 +780,14 @@ class UsersController < ApplicationController
         field_val = clean_custom_field_values(f)
         field_val = nil if field_val == "false"
         if field_val.blank?
-          return fail_with("login.missing_user_field") if f.required?
+          if DiscoursePluginRegistry.apply_modifier(
+               :user_field_required_for_signup,
+               f.required?,
+               f,
+               params[:user_fields],
+             )
+            return fail_with("login.missing_user_field")
+          end
         else
           fields["#{User::USER_FIELD_PREFIX}#{f.id}"] = field_val[0...UserField.max_length]
         end
