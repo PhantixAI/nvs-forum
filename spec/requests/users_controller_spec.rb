@@ -1986,6 +1986,45 @@ RSpec.describe UsersController do
       end
     end
 
+    context "when a plugin modifier exempts a user field from being required" do
+      fab!(:user_field) { Fabricate(:user_field, requirement: "for_all_users") }
+
+      it "still blocks signup with a blank value when no modifier is registered" do
+        expect do post_user(user_fields: { user_field.id.to_s => "" }) end.not_to change {
+          User.count
+        }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["success"]).not_to eq(true)
+      end
+
+      it "allows signup with a blank value when a modifier exempts the field" do
+        plugin = Plugin::Instance.new
+        modifier_block =
+          Proc.new do |required, field, _submitted_user_fields|
+            field == user_field ? false : required
+          end
+        DiscoursePluginRegistry.register_modifier(
+          plugin,
+          :user_field_required_for_signup,
+          &modifier_block
+        )
+
+        expect { post_user(user_fields: { user_field.id.to_s => "" }) }.to change { User.count }.by(
+          1,
+        )
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["success"]).to eq(true)
+      ensure
+        DiscoursePluginRegistry.unregister_modifier(
+          plugin,
+          :user_field_required_for_signup,
+          &modifier_block
+        )
+      end
+    end
+
     context "with only optional custom fields" do
       fab!(:user_field) { Fabricate(:user_field, requirement: "optional") }
 
@@ -3121,6 +3160,40 @@ RSpec.describe UsersController do
 
               expect(user.user_fields[user_field.id.to_s]).to eq("sad")
               expect(user.user_fields[optional_field.id.to_s]).to eq("feet")
+            end
+          end
+
+          context "when a plugin modifier exempts a user field from being required" do
+            fab!(:user_field) { Fabricate(:user_field, requirement: "for_all_users") }
+
+            it "still blocks clearing the value when no modifier is registered" do
+              put "/u/#{user.username}.json", params: { user_fields: { user_field.id.to_s => "" } }
+
+              expect(response.status).to eq(422)
+            end
+
+            it "allows clearing the value when a modifier exempts the field" do
+              plugin = Plugin::Instance.new
+              modifier_block =
+                Proc.new do |required, field, _submitted_user_fields, _user|
+                  field == user_field ? false : required
+                end
+              DiscoursePluginRegistry.register_modifier(
+                plugin,
+                :user_field_required_for_update,
+                &modifier_block
+              )
+
+              put "/u/#{user.username}.json", params: { user_fields: { user_field.id.to_s => "" } }
+
+              expect(response.status).to eq(200)
+              expect(user.reload.user_fields[user_field.id.to_s]).to eq("")
+            ensure
+              DiscoursePluginRegistry.unregister_modifier(
+                plugin,
+                :user_field_required_for_update,
+                &modifier_block
+              )
             end
           end
 
