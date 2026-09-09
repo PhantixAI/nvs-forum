@@ -233,10 +233,14 @@ class UsersController < ApplicationController
         value = value[0...UserField.max_length] if value
 
         if value.blank? &&
-             (
+             DiscoursePluginRegistry.apply_modifier(
+               :user_field_required_for_update,
                field.for_all_users? ||
                  field.on_signup? &&
-                   user.custom_fields["#{User::USER_FIELD_PREFIX}#{field_id}"].present?
+                   user.custom_fields["#{User::USER_FIELD_PREFIX}#{field_id}"].present?,
+               field,
+               params[:user_fields],
+               user,
              )
           return render_json_error(I18n.t("login.missing_user_field"))
         end
@@ -787,7 +791,10 @@ class UsersController < ApplicationController
       ReviewableUser.set_approved_fields!(user, current_user)
     end
 
-    if error = UserCreator.assign_signup_fields(user) { |field| clean_custom_field_values(field) }
+    if error =
+         UserCreator.assign_signup_fields(user, params[:user_fields]) { |field|
+           clean_custom_field_values(field)
+         }
       return fail_with(error)
     end
 
