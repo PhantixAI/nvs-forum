@@ -3421,4 +3421,150 @@ RSpec.describe Admin::UsersController do
       end
     end
   end
+
+  describe "#index for Batch Moderators" do
+    fab!(:college_field) { Fabricate(:user_field, name: "College", requirement: "optional") }
+    fab!(:batch_field) { Fabricate(:user_field, name: "Batch", requirement: "optional") }
+
+    def set_cohort(target_user, college:, batch:)
+      target_user.custom_fields["#{User::USER_FIELD_PREFIX}#{college_field.id}"] = college
+      target_user.custom_fields["#{User::USER_FIELD_PREFIX}#{batch_field.id}"] = batch
+      target_user.save_custom_fields(true, run_validations: false)
+      BatchModeration::GroupSync.sync(target_user)
+    end
+
+    before do
+      SiteSetting.enable_batch_moderation = true
+      SiteSetting.batch_moderation_auto_promote_count = 0
+    end
+
+    it "is reachable by staff with full fields, cohort filters, and staff_only honored" do
+      sign_in(admin)
+      set_cohort(user, college: "NIT Trichy", batch: "2024")
+      other_user = Fabricate(:user)
+      set_cohort(other_user, college: "NIT Warangal", batch: "2024")
+
+      get "/admin/users/list/active.json",
+          params: {
+            filters: { college_field.id => "NIT Trichy" }.to_json,
+          }
+
+      expect(response.status).to eq(200)
+      usernames = response.parsed_body.map { |u| u["username"] }
+      expect(usernames).to include(user.username)
+      expect(usernames).not_to include(other_user.username)
+      # staff view uses the full serializer -- email is present when desired
+      expect(response.parsed_body.first).to have_key("silence_reason")
+    end
+
+    it "is reachable by a Batch Moderator, scoped to their own cohort regardless of query params" do
+      cohort_member = user
+      set_cohort(cohort_member, college: "NIT Trichy", batch: "2024")
+      moderator_user = Fabricate(:user)
+      set_cohort(moderator_user, college: "NIT Trichy", batch: "2024")
+      Group.last.add_owner(moderator_user)
+
+      stranger = Fabricate(:user)
+      set_cohort(stranger, college: "NIT Warangal", batch: "2024")
+
+      sign_in(moderator_user)
+      # attempt to widen the view via query/filters params -- must be ignored
+      get "/admin/users/list/staff.json",
+          params: {
+            filters: { college_field.id => "NIT Warangal" }.to_json,
+          }
+
+      expect(response.status).to eq(200)
+      usernames = response.parsed_body.map { |u| u["username"] }
+      expect(usernames).to include(cohort_member.username, moderator_user.username)
+      expect(usernames).not_to include(stranger.username)
+      # restricted serializer -- no staff-only fields present
+      expect(response.parsed_body.first).not_to have_key("silence_reason")
+      expect(response.parsed_body.first).not_to have_key("email")
+    end
+
+    it "returns 404 for a user who is not staff and not a Batch Moderator" do
+      sign_in(user)
+
+      get "/admin/users/list/active.json"
+
+      expect(response.status).to eq(404)
+    end
+
+    it "returns 404 for an anonymous user" do
+      get "/admin/users/list/active.json"
+
+      expect(response.status).to eq(404)
+    end
+
+    it "returns 404 for a former Batch Moderator once the site setting is disabled" do
+      moderator_user = Fabricate(:user)
+      set_cohort(moderator_user, college: "NIT Trichy", batch: "2024")
+      Group.last.add_owner(moderator_user)
+
+      SiteSetting.enable_batch_moderation = false
+      sign_in(moderator_user)
+
+      get "/admin/users/list/active.json"
+
+      expect(response.status).to eq(404)
+    end
+  end
+
+  describe "#grant_batch_moderator and #revoke_batch_moderator" do
+    fab!(:college_field) { Fabricate(:user_field, name: "College", requirement: "optional") }
+    fab!(:batch_field) { Fabricate(:user_field, name: "Batch", requirement: "optional") }
+
+    before do
+      SiteSetting.enable_batch_moderation = true
+      SiteSetting.batch_moderation_auto_promote_count = 0
+      user.custom_fields["#{User::USER_FIELD_PREFIX}#{college_field.id}"] = "NIT Trichy"
+      user.custom_fields["#{User::USER_FIELD_PREFIX}#{batch_field.id}"] = "2024"
+      user.save_custom_fields(true, run_validations: false)
+      BatchModeration::GroupSync.sync(user)
+    end
+
+    it "allows an admin to grant and revoke Batch Moderator" do
+      sign_in(admin)
+
+      put "/admin/users/#{user.id}/grant_batch_moderator.json"
+      expect(response.status).to eq(200)
+      expect(BatchModeration::GroupSync.owned_batch_groups(user.reload).exists?).to eq(true)
+
+      put "/admin/users/#{user.id}/revoke_batch_moderator.json"
+      expect(response.status).to eq(200)
+      expect(BatchModeration::GroupSync.owned_batch_groups(user.reload).exists?).to eq(false)
+    end
+
+    it "is admin-only -- unreachable for a plain moderator" do
+      sign_in(moderator)
+
+      put "/admin/users/#{user.id}/grant_batch_moderator.json"
+
+      expect(response.status).to eq(404)
+    end
+
+    it "returns 403 for a user with no cohort group -- nothing to grant" do
+      other_user = Fabricate(:user)
+      sign_in(admin)
+
+      put "/admin/users/#{other_user.id}/grant_batch_moderator.json"
+
+      expect(response.status).to eq(403)
+    end
+
+    it "notifies on grant and revoke" do
+      sign_in(admin)
+      allow(BatchModeration::Notifier).to receive(:notify_moderator_status_change)
+
+      put "/admin/users/#{user.id}/grant_batch_moderator.json"
+
+      expect(BatchModeration::Notifier).to have_received(:notify_moderator_status_change).with(
+        actor: admin,
+        user: user,
+        group: an_instance_of(Group),
+        granted: true,
+      )
+    end
+  end
 end

@@ -14,6 +14,7 @@ import DButton from "discourse/ui-kit/d-button";
 import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
 import DEmptyState from "discourse/ui-kit/d-empty-state";
 import DLoadMore from "discourse/ui-kit/d-load-more";
+import DToggleSwitch from "discourse/ui-kit/d-toggle-switch";
 import dBasePath from "discourse/ui-kit/helpers/d-base-path";
 import { i18n } from "discourse-i18n";
 
@@ -70,15 +71,26 @@ export default <template>
                   (withEventValue @controller.onUsernameFilterChanged)
                 }}
               />
-              {{#if @controller.showGroupFilter}}
+              {{#each @controller.cohortFilterFields as |field|}}
                 <ComboBox
-                  class="directory-group-selector"
-                  @content={{@controller.groupOptions}}
-                  @onChange={{@controller.groupChanged}}
-                  @options={{hash none="directory.group.all"}}
-                  @value={{@controller.group}}
+                  class="directory-cohort-filter"
+                  @content={{field.content}}
+                  @onChange={{fn @controller.cohortFilterChanged field.id}}
+                  @options={{hash
+                    translatedNone=field.noneLabel
+                    disabled=field.disabled
+                  }}
+                  @value={{field.value}}
                 />
-              {{/if}}
+              {{/each}}
+              <div class="directory-staff-only-filter">
+                <DToggleSwitch
+                  aria-label={{i18n "directory.staff_badge_title"}}
+                  @state={{@controller.staff_only}}
+                  @translatedInsideLabel={{i18n "directory.staff_badge_title"}}
+                  {{on "click" @controller.toggleStaffOnly}}
+                />
+              </div>
               {{#if @controller.currentUser.staff}}
                 <DButton
                   class="btn-default open-edit-columns-btn"

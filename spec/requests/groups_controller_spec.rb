@@ -39,6 +39,43 @@ RSpec.describe GroupsController do
       expect(body["load_more_groups"]).to eq("/groups?page=2")
     end
 
+    context "with batch-moderation cohort groups" do
+      fab!(:college_field) { Fabricate(:user_field, name: "College", requirement: "optional") }
+      fab!(:batch_field) { Fabricate(:user_field, name: "Batch", requirement: "optional") }
+
+      def create_batch_group
+        member = Fabricate(:user)
+        member.custom_fields["#{User::USER_FIELD_PREFIX}#{college_field.id}"] = "MNIT Jaipur"
+        member.custom_fields["#{User::USER_FIELD_PREFIX}#{batch_field.id}"] = "2024"
+        member.save_custom_fields(true, run_validations: false)
+        BatchModeration::GroupSync.sync(member)
+        Group.last
+      end
+
+      it "excludes batch groups from the listing when the site setting is enabled, for staff and non-staff alike" do
+        SiteSetting.enable_batch_moderation = true
+        batch_group = create_batch_group
+
+        sign_in(user)
+        get "/groups.json"
+        expect(response.parsed_body["groups"].map { |g| g["id"] }).not_to include(batch_group.id)
+
+        sign_in(admin)
+        get "/groups.json"
+        expect(response.parsed_body["groups"].map { |g| g["id"] }).not_to include(batch_group.id)
+      end
+
+      it "includes batch groups in the listing when the site setting is disabled" do
+        SiteSetting.enable_batch_moderation = true
+        batch_group = create_batch_group
+        SiteSetting.enable_batch_moderation = false
+
+        sign_in(user)
+        get "/groups.json"
+        expect(response.parsed_body["groups"].map { |g| g["id"] }).to include(batch_group.id)
+      end
+    end
+
     it "only accepts valid page numbers" do
       get "/groups.json", params: { page: -1 }
       expect(response.status).to eq(400)

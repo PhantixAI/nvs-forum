@@ -12,7 +12,7 @@ import getURL from "discourse/lib/get-url";
 import ComboBox from "discourse/select-kit/components/combo-box";
 import DropdownSelectBox from "discourse/select-kit/components/dropdown-select-box";
 import GroupChooser from "discourse/select-kit/components/group-chooser";
-import { and, gt, not } from "discourse/truth-helpers";
+import { and, gt, not, or } from "discourse/truth-helpers";
 import DButton from "discourse/ui-kit/d-button";
 import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
 import dAvatar from "discourse/ui-kit/helpers/d-avatar";
@@ -463,6 +463,39 @@ export default <template>
         {{/if}}
       </div>
     </div>
+
+    {{#if
+      (or
+        @controller.model.is_batch_moderator
+        @controller.model.can_grant_batch_moderator
+        @controller.model.can_revoke_batch_moderator
+      )
+    }}
+      <div class="display-row">
+        <div class="field">{{i18n "admin.user.batch_moderator"}}</div>
+        <div class="value">{{i18nYesNo
+            @controller.model.is_batch_moderator
+          }}</div>
+        <div class="controls">
+          {{#if @controller.model.can_revoke_batch_moderator}}
+            <DButton
+              class="btn-default"
+              @action={{@controller.revokeBatchModerator}}
+              @icon="shield"
+              @label="admin.user.revoke_batch_moderator"
+            />
+          {{/if}}
+          {{#if @controller.model.can_grant_batch_moderator}}
+            <DButton
+              class="btn-default"
+              @action={{@controller.grantBatchModerator}}
+              @icon="shield"
+              @label="admin.user.grant_batch_moderator"
+            />
+          {{/if}}
+        </div>
+      </div>
+    {{/if}}
 
     <div class="display-row">
       <div class="field">{{i18n "trust_level"}}</div>

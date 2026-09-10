@@ -57,6 +57,70 @@ RSpec.describe DirectoryItemSerializer do
     end
   end
 
+  context "when serializing is_batch_moderator" do
+    fab!(:college_field) { Fabricate(:user_field, name: "College", requirement: "optional") }
+    fab!(:branch_field) { Fabricate(:user_field, name: "Branch", requirement: "optional") }
+    fab!(:batch_field) { Fabricate(:user_field, name: "Batch", requirement: "optional") }
+
+    def sync(user, branch:, batch:)
+      user.custom_fields["#{User::USER_FIELD_PREFIX}#{college_field.id}"] = "MNIT Jaipur"
+      user.custom_fields["#{User::USER_FIELD_PREFIX}#{branch_field.id}"] = branch
+      user.custom_fields["#{User::USER_FIELD_PREFIX}#{batch_field.id}"] = batch
+      user.save_custom_fields(true, run_validations: false)
+      BatchModeration::GroupSync.sync(user)
+    end
+
+    # The controller precomputes batch-moderator status for a whole page of
+    # users in one pass (see `DirectoryItemsController#index`) and hands it to
+    # the serializer as `batch_moderator_user_ids`, rather than the serializer
+    # querying per row, so these tests build that same precomputed set.
+    def batch_moderator_user_ids
+      BatchModeration::GroupSync.batch_moderator_user_ids(User.pluck(:id))
+    end
+
+    it "is true when the site setting is enabled and the user owns a batch group" do
+      SiteSetting.enable_batch_moderation = true
+      sync(user, branch: "CSE", batch: "2024")
+      Group.last.add_owner(user)
+
+      payload =
+        serialized_payload(
+          { attributes: [], batch_moderator_user_ids: batch_moderator_user_ids },
+          :is_batch_moderator,
+        )
+      expect(payload).to eq(true)
+    end
+
+    it "is false when the user is a batch group member but not an owner" do
+      SiteSetting.enable_batch_moderation = true
+      SiteSetting.batch_moderation_auto_promote_count = 0
+      other_user = Fabricate(:user)
+      sync(other_user, branch: "CSE", batch: "2024")
+      sync(user, branch: "CSE", batch: "2024")
+
+      payload =
+        serialized_payload(
+          { attributes: [], batch_moderator_user_ids: batch_moderator_user_ids },
+          :is_batch_moderator,
+        )
+      expect(payload).to eq(false)
+    end
+
+    it "is false when the site setting is disabled even if the user owns a batch group" do
+      SiteSetting.enable_batch_moderation = true
+      sync(user, branch: "CSE", batch: "2024")
+      Group.last.add_owner(user)
+      ids = batch_moderator_user_ids
+      SiteSetting.enable_batch_moderation = false
+
+      # Mirrors the controller, which skips computing `batch_moderator_user_ids`
+      # entirely when the setting is off, so the serializer never sees it.
+      payload = serialized_payload({ attributes: [] }, :is_batch_moderator)
+      expect(ids).to include(user.id)
+      expect(payload).to eq(false)
+    end
+  end
+
   context "when serializing directory columns" do
     let :serializer do
       directory_item =
@@ -90,12 +154,12 @@ RSpec.describe DirectoryItemSerializer do
 
   private
 
-  def serialized_payload(serializer_opts)
+  def serialized_payload(serializer_opts, key = :user_fields)
     serializer =
       DirectoryItemSerializer.new(
         DirectoryItem.find_by(user: user),
         serializer_opts.merge(scope: Guardian.new(user)),
       )
-    serializer.as_json.dig(:directory_item, :user, :user_fields)
+    serializer.as_json.dig(:directory_item, :user, key)
   end
 end

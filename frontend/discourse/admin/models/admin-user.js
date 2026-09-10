@@ -244,6 +244,34 @@ export default class AdminUser extends User {
       .catch(popupAjaxError);
   }
 
+  revokeBatchModerator() {
+    return ajax(`/admin/users/${this.id}/revoke_batch_moderator`, {
+      type: "PUT",
+    })
+      .then(() => {
+        this.setProperties({
+          is_batch_moderator: false,
+          can_grant_batch_moderator: true,
+          can_revoke_batch_moderator: false,
+        });
+      })
+      .catch(popupAjaxError);
+  }
+
+  grantBatchModerator() {
+    return ajax(`/admin/users/${this.id}/grant_batch_moderator`, {
+      type: "PUT",
+    })
+      .then(() => {
+        this.setProperties({
+          is_batch_moderator: true,
+          can_grant_batch_moderator: false,
+          can_revoke_batch_moderator: true,
+        });
+      })
+      .catch(popupAjaxError);
+  }
+
   disableSecondFactor() {
     return ajax(`/admin/users/${this.id}/disable_second_factor`, {
       type: "PUT",
