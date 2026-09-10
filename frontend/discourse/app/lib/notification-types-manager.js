@@ -1,5 +1,8 @@
 import AdminProblems from "discourse/lib/notification-types/admin-problems";
 import NotificationTypeBase from "discourse/lib/notification-types/base";
+import BatchModerationAction from "discourse/lib/notification-types/batch-moderation-action";
+import BatchModerationCohortChange from "discourse/lib/notification-types/batch-moderation-cohort-change";
+import BatchModerationStatusChange from "discourse/lib/notification-types/batch-moderation-status-change";
 import BookmarkReminder from "discourse/lib/notification-types/bookmark-reminder";
 import Custom from "discourse/lib/notification-types/custom";
 import Edited from "discourse/lib/notification-types/edited";
@@ -20,6 +23,9 @@ import UpcomingChangeAvailable from "discourse/lib/notification-types/upcoming-c
 import WatchingFirstPost from "discourse/lib/notification-types/watching-first-post";
 
 const CLASS_FOR_TYPE = {
+  batch_moderation_action: BatchModerationAction,
+  batch_moderation_cohort_change: BatchModerationCohortChange,
+  batch_moderation_status_change: BatchModerationStatusChange,
   bookmark_reminder: BookmarkReminder,
   custom: Custom,
   edited: Edited,

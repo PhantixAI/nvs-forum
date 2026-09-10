@@ -1,4 +1,5 @@
 import { dasherize } from "@ember/string";
+import ReviewableBatchModerationReport from "discourse/components/reviewable/batch-moderation-report";
 import ReviewableFlaggedPost from "discourse/components/reviewable/flagged-post";
 import ReviewablePost from "discourse/components/reviewable/post";
 import ReviewableQueuedPost from "discourse/components/reviewable/queued-post";
@@ -7,6 +8,7 @@ import deprecated from "discourse/lib/deprecated";
 import { applyValueTransformer } from "discourse/lib/transformer";
 
 const coreLoaders = {
+  ReviewableBatchModerationReport: () => ReviewableBatchModerationReport,
   ReviewableFlaggedPost: () => ReviewableFlaggedPost,
   ReviewablePost: () => ReviewablePost,
   ReviewableQueuedPost: () => ReviewableQueuedPost,

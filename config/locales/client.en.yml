@@ -108,11 +108,11 @@ en:
       # Use Moment.js format string: https://momentjs.com/docs/#/displaying/format/
       long_no_year_no_time: "MMM D"
       # Use Moment.js format string: https://momentjs.com/docs/#/displaying/format/
-      full_no_year_no_time: "MMMM Do"
+      full_no_year_no_time: "MMM Do"
       # Use Moment.js format string: https://momentjs.com/docs/#/displaying/format/
       long_with_year: "MMM D, YYYY h:mm a"
       # Use Moment.js format string: https://momentjs.com/docs/#/displaying/format/
-      long_with_year_no_time: "MMM D, YYYY"
+      long_with_year_no_time: "MMM D 'YY"
       # Use Moment.js format string: https://momentjs.com/docs/#/displaying/format/
       full_with_year_no_time: "MMMM Do, YYYY"
       # Use Moment.js format string: https://momentjs.com/docs/#/displaying/format/
@@ -1401,8 +1401,10 @@ en:
         title: "Edit Directory Columns"
         save: "Save"
         reset_to_default: "Reset to default"
-      group:
-        all: "all groups"
+      staff_only: "Staff Only"
+      staff_badge_title: "Staff"
+      cohort_filter:
+        all: "All %{name}"
       sort:
         label: "Sort by %{criteria}"
 
@@ -1601,6 +1603,7 @@ en:
         remove_all_primary_description: "Remove this group as primary"
         status: "Status"
         owner: "Owner"
+        batch_moderator: "Batch Moderator"
         primary: "Primary"
         forbidden: "You're not allowed to view the members."
         no_filter_matches: "No members match that search."
@@ -1736,6 +1739,24 @@ en:
       confirm_delete_other_accounts: "Are you sure you want to delete these accounts?"
       powered_by: "using <a href='https://maxmind.com'>MaxMindDB</a>"
       copied: "copied"
+
+    batch_moderation:
+      suspend: "Suspend"
+      silence: "Silence"
+      report: "Report"
+      suspend_title: "Suspend %{username}"
+      silence_title: "Silence %{username}"
+      report_title: "Report %{username}"
+      reason: "Reason"
+      reason_placeholder: "Why are you taking this action?"
+      until: "Until"
+      submit: "Submit"
+      cancel: "Cancel"
+      reviewable:
+        reported_by: "Reported by"
+        reported_user: "Reported user"
+      badge_title: "Batch Moderator"
+      system_actor: "the system"
 
     user_fields:
       none: "(select an option)"
@@ -4026,7 +4047,23 @@ en:
         confirm_body: "Success! Notifications have been enabled."
         custom: "Notification from %{username} on %{site_title}"
 
+      batch_moderation_action:
+        suspend: "suspended %{username}"
+        silence: "silenced %{username}"
+        report: "reported %{username}"
+
+      batch_moderation_cohort_change:
+        joined: "joined %{group_name}"
+        left: "left %{group_name}"
+
+      batch_moderation_status_change:
+        granted: "granted Batch Moderator to %{username} (%{group_name})"
+        revoked: "revoked Batch Moderator from %{username} (%{group_name})"
+
       titles:
+        batch_moderation_action: "branch coordinator action"
+        batch_moderation_cohort_change: "cohort change"
+        batch_moderation_status_change: "batch moderator status change"
         mentioned: "mentioned"
         replied: "new reply"
         quoted: "quoted"
@@ -9955,6 +9992,9 @@ en:
           all: "All users"
           activated: "Activated"
           not_activated: "Not activated"
+        site_moderator_only: "Site Moderator"
+        batch_moderator_only: "Batch Moderator"
+        batch_moderator_short: "Batch"
         approved: "Approved?"
         titles:
           active: "Active users"
@@ -10080,6 +10120,9 @@ en:
         grant_admin_confirm: "We've sent you an email to verify the new administrator. Please open it and follow the instructions."
         revoke_moderation: "Revoke Moderation"
         grant_moderation: "Grant Moderation"
+        revoke_batch_moderator: "Revoke Batch Moderator"
+        grant_batch_moderator: "Grant Batch Moderator"
+        batch_moderator: "Batch Moderator"
         unsuspend: "Unsuspend"
         suspend: "Suspend"
         show_flags_received: "Show Flags Received"

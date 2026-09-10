@@ -48,6 +48,16 @@
     clear: both;
   }
 
+  // `align-items: center` on `.inline-form` centers the 24px toggle against
+  // its shared flex line's own (taller) box, which -- for reasons specific
+  // to how the text input/select-kit dropdowns it shares that line with
+  // report their own height -- ends up a few pixels lower than those
+  // siblings' visual centers. Nudged up to match.
+  .directory-staff-only-filter {
+    margin-top: -6px;
+    margin-right: 8px; // match the 8px gap between every other control in this row
+  }
+
   .directory-controls {
     display: flex;
     justify-content: space-between;

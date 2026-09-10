@@ -316,6 +316,16 @@ export default class AdminUserIndexController extends Controller {
   }
 
   @action
+  revokeBatchModerator() {
+    return this.model.revokeBatchModerator();
+  }
+
+  @action
+  grantBatchModerator() {
+    return this.model.grantBatchModerator();
+  }
+
+  @action
   saveTrustLevel() {
     return this.model
       .saveTrustLevel()

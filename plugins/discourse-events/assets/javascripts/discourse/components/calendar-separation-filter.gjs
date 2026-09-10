@@ -45,12 +45,12 @@ export default class CalendarSeparationFilter extends Component {
   <template>
     {{#if this.separationField}}
       <ComboBox
-        @content={{this.content}}
-        @valueProperty="id"
-        @nameProperty="name"
-        @value={{this.value}}
-        @onChange={{fn this.onChange}}
         class="calendar-separation-filter"
+        @content={{this.content}}
+        @nameProperty="name"
+        @onChange={{fn this.onChange}}
+        @value={{this.value}}
+        @valueProperty="id"
       />
     {{/if}}
   </template>

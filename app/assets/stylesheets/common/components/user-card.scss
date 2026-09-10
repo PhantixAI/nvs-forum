@@ -605,3 +605,16 @@
     }
   }
 }
+
+.batch-moderator-badge,
+.staff-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 2px;
+
+  .d-icon {
+    color: var(--tertiary);
+    width: 0.75em;
+    height: 0.75em;
+  }
+}

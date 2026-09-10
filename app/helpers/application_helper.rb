@@ -291,6 +291,17 @@ module ApplicationHelper
     current_user.try(:staff?)
   end
 
+  # Whether this user owns a batch-moderation cohort group -- used only to
+  # decide whether the client should load the admin Ember engine (so a Batch
+  # Moderator, who is not staff, can reach /admin/users/list/:filter).
+  # Deliberately not folded into `staff?` itself, which is read elsewhere for
+  # unrelated staff-only behavior.
+  def batch_moderator?
+    return @batch_moderator if defined?(@batch_moderator)
+    @batch_moderator =
+      current_user.present? && BatchModeration::GroupSync.owned_batch_groups(current_user).exists?
+  end
+
   def rtl?
     Rtl::LOCALES.include? I18n.locale.to_s
   end
@@ -1025,6 +1036,7 @@ module ApplicationHelper
       user_color_scheme_id: user_scheme_id || -1,
       user_dark_scheme_id: user_dark_scheme_id || -1,
       is_staff: staff?,
+      can_load_admin_engine: staff? || batch_moderator?,
     }
 
     if Rails.env.development?

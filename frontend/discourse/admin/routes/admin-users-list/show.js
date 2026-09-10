@@ -36,6 +36,11 @@ export default class AdminUsersListShowRoute extends DiscourseRoute {
             params.filter === "new"
               ? transition.to.queryParams.activation
               : null,
+          filters: transition.to.queryParams.filters ?? null,
+          staffOnly: transition.to.queryParams.staff_only === "true",
+          moderatorOnly: transition.to.queryParams.moderator_only === "true",
+          batchModeratorOnly:
+            transition.to.queryParams.batch_moderator_only === "true",
           refreshing: false,
           bulkSelectedUsersMap: {},
           bulkSelectedUserIdsSet: new Set(),

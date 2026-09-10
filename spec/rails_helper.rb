@@ -218,7 +218,17 @@ RSpec.configure do |config|
   config.before(:each) { TestSetup.test_setup }
 
   # Match the request hostname to the value in `database.yml`
-  config.before(:each, type: %i[request multisite system]) { host! "test.localhost" }
+  #
+  # NOTE: `type:` filters only match when the metadata value itself is an
+  # array (see `RSpec::Core::MetadataFilter#filter_applies_to_any_value?`),
+  # so a single `type: %i[request multisite system]` hook never actually
+  # matches these (single-valued) example types. Register one hook per type
+  # instead. Not every `:multisite` example is a request spec (some are plain
+  # model/service specs that only need multisite DB switching), so guard for
+  # `host!` actually being defined rather than assuming it always is.
+  %i[request multisite system].each do |spec_type|
+    config.before(:each, type: spec_type) { host! "test.localhost" if respond_to?(:host!) }
+  end
 
   config.before(:each, type: :system) do |example|
     SystemDrivers.preload_model_schemas!

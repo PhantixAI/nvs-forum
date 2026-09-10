@@ -27,6 +27,8 @@ class DirectoryItemsController < ApplicationController
           ascending: params[:asc].present?,
           name: params[:name],
           username: params[:username],
+          filters: params[:filters],
+          staff_only: ActiveModel::Type::Boolean.new.cast(params[:staff_only]),
           page:,
           limit:,
           prioritize_user: true,
@@ -35,7 +37,17 @@ class DirectoryItemsController < ApplicationController
       raise Discourse::InvalidParameters.new(:group)
     end
 
-    more_params = params.slice(:period, :order, :asc, :group, :user_field_ids, :name).permit!
+    more_params =
+      params.slice(
+        :period,
+        :order,
+        :asc,
+        :group,
+        :user_field_ids,
+        :name,
+        :filters,
+        :staff_only,
+      ).permit!
     more_params[:page] = page + 1
     load_more_uri = URI.parse(directory_items_path(more_params))
     load_more_directory_items_json = "#{load_more_uri.path}.json?#{load_more_uri.query}"
@@ -67,6 +79,15 @@ class DirectoryItemsController < ApplicationController
     serializer_opts[:searchable_fields] = UserField.where(searchable: true) if serializer_opts[
       :user_custom_field_map
     ].present?
+
+    if SiteSetting.enable_batch_moderation
+      serializer_opts[
+        :batch_moderator_user_ids
+      ] = BatchModeration::GroupSync.batch_moderator_user_ids(query_result.items.map(&:user_id))
+      serializer_opts[:staff_type_user_ids] = BatchModeration::GroupSync.staff_type_user_ids(
+        query_result.items.map(&:user_id),
+      )
+    end
 
     serialized = serialize_data(query_result.items, DirectoryItemSerializer, serializer_opts)
     render_json_dump(

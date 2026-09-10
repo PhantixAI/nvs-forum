@@ -1308,6 +1308,38 @@ groups:
     client: true
     default: false
     area: "group_permissions|categories"
+  enable_batch_moderation:
+    client: true
+    default: false
+    area: "group_permissions"
+  batch_moderation_auto_promote_count:
+    client: false
+    default: 10
+    min: 0
+    area: "group_permissions"
+  batch_moderation_batch_field_name:
+    client: false
+    default: "Batch"
+    area: "group_permissions"
+  batch_moderation_secondary_field_names:
+    client: false
+    default: "Branch"
+    type: list
+    area: "group_permissions"
+  batch_moderation_institution_field_names:
+    client: false
+    default: "College|Vidyalaya"
+    type: list
+    area: "group_permissions"
+  batch_moderation_member_type_field_name:
+    client: false
+    default: "I am"
+    area: "group_permissions"
+  batch_moderation_staff_type_values:
+    client: false
+    default: "Dean/Professor/Staff"
+    type: list
+    area: "group_permissions"
   max_automatic_membership_email_domains:
     default: 50
     hidden: true
