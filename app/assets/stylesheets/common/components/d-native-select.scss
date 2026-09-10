@@ -18,6 +18,11 @@
 
   @include ellipsis;
 
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   &:focus,
   &:focus-visible,
   &:focus:focus-visible,

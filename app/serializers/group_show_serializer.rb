@@ -7,7 +7,18 @@ class GroupShowSerializer < BasicGroupSerializer
              :mentionable,
              :messageable,
              :flair_icon,
-             :flair_type
+             :flair_type,
+             :is_batch_moderation_group
+
+  def is_batch_moderation_group
+    BatchModeration::GroupSync.batch_group?(object)
+  end
+
+  # See the comment on `is_group_owner` below -- same reasoning applies here.
+  def can_admin_group
+    return false if is_batch_moderation_group
+    super
+  end
 
   def self.admin_attributes(*attrs)
     attributes(*attrs)
@@ -71,7 +82,16 @@ class GroupShowSerializer < BasicGroupSerializer
     authenticated? && fetch_group_user&.owner
   end
 
+  # A batch group's ownership is managed exclusively via the admin-only
+  # grant/revoke Batch Moderator actions, not the stock group-page UI --
+  # forcing this (and `can_admin_group` below) false here, rather than
+  # relying on each frontend consumer to check `is_batch_moderation_group`
+  # itself, is what actually hides the Manage tab, "Add Users" button, and
+  # the member dropdown's owner-toggle for these groups, for admins and
+  # cohort owners alike (`can_edit_group?` alone only blocks the mutation
+  # endpoints server-side; it isn't what the frontend keys its UI off of).
   def is_group_owner
+    return false if is_batch_moderation_group
     true
   end
 

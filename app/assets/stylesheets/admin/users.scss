@@ -125,6 +125,37 @@
 }
 
 .admin-users-list {
+  // Push the search input onto its own row, with the cohort filter dropdowns
+  // + Staff Only toggle + Reset button sharing the row underneath -- default
+  // DFilterControls layout keeps all three side by side, which crowds the
+  // filter dropdowns into a narrow stacked column next to the search box.
+  .d-filter-controls {
+    flex-wrap: wrap;
+
+    &__inputs {
+      flex: 1 1 100%;
+    }
+
+    // Base component bottom-aligns this row (`align-items: end`) so a
+    // dropdown's helper/error text has room to sit under the control -- these
+    // filters never show that, so center-align instead, which is what
+    // actually centers the Staff Only toggle against the dropdowns' height.
+    &__additional-filters {
+      align-items: center;
+    }
+  }
+
+  // `.d-native-select` sets `width: 100%`, which (with the default
+  // `flex-basis: auto`) becomes each dropdown's flex-basis -- without a
+  // narrower one here, each cohort filter dropdown claims the full row width
+  // and wraps onto its own line instead of sitting alongside the others.
+  &__cohort-filter.d-native-select {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 9em;
+    max-width: 14em;
+  }
+
   .directory-table__cell {
     padding: 0.5em 0.25em;
 

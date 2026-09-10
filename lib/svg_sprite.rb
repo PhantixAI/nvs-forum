@@ -255,6 +255,7 @@ module SvgSprite
         screwdriver-wrench
         scroll
         share
+        shield
         shield-halved
         shuffle
         signal

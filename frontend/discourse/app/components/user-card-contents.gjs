@@ -3,6 +3,7 @@ import { array, fn, hash } from "@ember/helper";
 import { on } from "@ember/modifier";
 import EmberObject, { action, computed, set } from "@ember/object";
 import { LinkTo } from "@ember/routing";
+import { service } from "@ember/service";
 import { dasherize } from "@ember/string";
 import { trustHTML } from "@ember/template";
 import { compare, isEmpty } from "@ember/utils";
@@ -13,6 +14,8 @@ import {
 } from "@ember-decorators/component";
 import { observes, on as onEvent } from "@ember-decorators/object";
 import CardContentsBase from "discourse/components/card-contents-base";
+import BatchModerationPenalty from "discourse/components/modal/batch-moderation-penalty";
+import BatchModerationReport from "discourse/components/modal/batch-moderation-report";
 import PluginOutlet from "discourse/components/plugin-outlet";
 import UserBadge from "discourse/components/user-badge";
 import formatUsername from "discourse/helpers/format-username";
@@ -47,6 +50,8 @@ import { i18n } from "discourse-i18n";
 )
 @attributeBindings("ariaLabel:aria-label")
 export default class UserCardContents extends CardContentsBase {
+  @service modal;
+
   elementId = "user-card";
   avatarSelector = "[data-user-card]";
   avatarDataAttrKey = "userCard";
@@ -367,6 +372,22 @@ export default class UserCardContents extends CardContentsBase {
     user.checkEmail();
   }
 
+  @action
+  batchModerate(penaltyType) {
+    this.modal.show(BatchModerationPenalty, {
+      model: { penaltyType, user: this.user },
+    });
+    this._close();
+  }
+
+  @action
+  batchReport() {
+    this.modal.show(BatchModerationReport, {
+      model: { user: this.user },
+    });
+    this._close();
+  }
+
   @onEvent("didInsertElement")
   _inserted() {
     this.appEvents.on("dom:clean", this, this.cleanUp);
@@ -611,6 +632,34 @@ export default class UserCardContents extends CardContentsBase {
                     @action={{fn this.deleteUser this.user}}
                     @icon="triangle-exclamation"
                     @label="admin.user.delete"
+                  />
+                </li>
+              {{/if}}
+              {{#if this.user.can_batch_moderate}}
+                <li>
+                  <DButton
+                    class="btn-danger batch-moderation-suspend"
+                    @action={{fn this.batchModerate "suspend"}}
+                    @icon="ban"
+                    @label="batch_moderation.suspend"
+                  />
+                </li>
+                <li>
+                  <DButton
+                    class="btn-danger batch-moderation-silence"
+                    @action={{fn this.batchModerate "silence"}}
+                    @icon="microphone-slash"
+                    @label="batch_moderation.silence"
+                  />
+                </li>
+              {{/if}}
+              {{#if this.user.can_batch_report}}
+                <li>
+                  <DButton
+                    class="btn-default batch-moderation-report"
+                    @action={{this.batchReport}}
+                    @icon="flag"
+                    @label="batch_moderation.report"
                   />
                 </li>
               {{/if}}

@@ -344,8 +344,8 @@ export default <template>
             {{/if}}
             <div class="login-right-side">
               <LoginButtons
-                @externalLogin={{@controller.externalLogin}}
                 @context="invite"
+                @externalLogin={{@controller.externalLogin}}
               />
             </div>
           {{/if}}

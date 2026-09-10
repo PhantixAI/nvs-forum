@@ -8,6 +8,10 @@ import BulkUserSuspendConfirmation from "discourse/admin/components/bulk-user-su
 import { USER_ACCOUNT_TYPES } from "discourse/admin/lib/user-account-types";
 import AdminUser from "discourse/admin/models/admin-user";
 import CanCheckEmailsHelper from "discourse/lib/can-check-emails-helper";
+import {
+  buildCohortFilterFields,
+  parseCohortFilterValues,
+} from "discourse/lib/cohort-filter-fields";
 import discourseDebounce from "discourse/lib/debounce";
 import { bind } from "discourse/lib/decorators";
 import { INPUT_DELAY } from "discourse/lib/environment";
@@ -31,6 +35,10 @@ export default class AdminUsersListShowController extends Controller {
   @tracked refreshing = false;
   @tracked listFilter = null;
   @tracked initialFilter = null;
+  @tracked filters = null;
+  @tracked staffOnly = false;
+  @tracked moderatorOnly = false;
+  @tracked batchModeratorOnly = false;
 
   @tracked query = null;
   @tracked order = null;
@@ -89,6 +97,38 @@ export default class AdminUsersListShowController extends Controller {
     return this.query === "new";
   }
 
+  // Only staff see the cohort dropdowns / Staff Only toggle -- a Batch
+  // Moderator viewing this page only ever sees their own cohort (forced
+  // server-side), so there's nothing here for them to filter across.
+  @dependentKeyCompat
+  get showCohortFilters() {
+    return this.currentUser?.staff;
+  }
+
+  @computed("filters")
+  get _cohortFilterValues() {
+    return parseCohortFilterValues(this.filters);
+  }
+
+  @computed("_cohortFilterValues", "staffOnly", "site.user_fields")
+  get cohortFilterFields() {
+    return buildCohortFilterFields({
+      siteUserFields: this.site?.user_fields,
+      filterValues: this._cohortFilterValues,
+      staffOnly: this.staffOnly,
+    });
+  }
+
+  @computed("filters", "staffOnly", "moderatorOnly", "batchModeratorOnly")
+  get cohortFiltersActive() {
+    return (
+      Boolean(this.filters) ||
+      this.staffOnly ||
+      this.moderatorOnly ||
+      this.batchModeratorOnly
+    );
+  }
+
   get showEmptyState() {
     return (
       !this.refreshing &&
@@ -130,12 +170,20 @@ export default class AdminUsersListShowController extends Controller {
     this.listFilter = null;
     this.activation = null;
     this.accountType = USER_ACCOUNT_TYPES.HUMAN;
+    this.filters = null;
+    this.staffOnly = false;
+    this.moderatorOnly = false;
+    this.batchModeratorOnly = false;
     DiscourseURL.replaceState(
       applyQueryParams(this.router.currentURL, {
         username: null,
         filter: null,
         activation: null,
         account_type: null,
+        filters: null,
+        staff_only: null,
+        moderator_only: null,
+        batch_moderator_only: null,
       })
     );
     this.resetFilters();
@@ -169,6 +217,69 @@ export default class AdminUsersListShowController extends Controller {
   @action
   onAccountTypeChange(value) {
     this.accountType = value;
+    this.resetFilters();
+  }
+
+  @action
+  cohortFilterChanged(fieldId, value) {
+    const next = { ...this._cohortFilterValues };
+    if (value) {
+      next[fieldId] = value;
+    } else {
+      delete next[fieldId];
+    }
+
+    this.filters = Object.keys(next).length ? JSON.stringify(next) : null;
+
+    const url = new URL(window.location.href);
+    if (this.filters) {
+      url.searchParams.set("filters", this.filters);
+    } else {
+      url.searchParams.delete("filters");
+    }
+    DiscourseURL.replaceState(url.pathname + url.search);
+    this.resetFilters();
+  }
+
+  @action
+  toggleStaffOnly() {
+    this.staffOnly = !this.staffOnly;
+
+    const url = new URL(window.location.href);
+    if (this.staffOnly) {
+      url.searchParams.set("staff_only", "true");
+    } else {
+      url.searchParams.delete("staff_only");
+    }
+    DiscourseURL.replaceState(url.pathname + url.search);
+    this.resetFilters();
+  }
+
+  @action
+  toggleModeratorOnly() {
+    this.moderatorOnly = !this.moderatorOnly;
+
+    const url = new URL(window.location.href);
+    if (this.moderatorOnly) {
+      url.searchParams.set("moderator_only", "true");
+    } else {
+      url.searchParams.delete("moderator_only");
+    }
+    DiscourseURL.replaceState(url.pathname + url.search);
+    this.resetFilters();
+  }
+
+  @action
+  toggleBatchModeratorOnly() {
+    this.batchModeratorOnly = !this.batchModeratorOnly;
+
+    const url = new URL(window.location.href);
+    if (this.batchModeratorOnly) {
+      url.searchParams.set("batch_moderator_only", "true");
+    } else {
+      url.searchParams.delete("batch_moderator_only");
+    }
+    DiscourseURL.replaceState(url.pathname + url.search);
     this.resetFilters();
   }
 
@@ -328,6 +439,10 @@ export default class AdminUsersListShowController extends Controller {
       asc: this.asc,
       activation: this.activation,
       account_type: this.showAccountTypeFilter ? this.accountType : undefined,
+      filters: this.filters,
+      staff_only: this.staffOnly,
+      moderator_only: this.moderatorOnly,
+      batch_moderator_only: this.batchModeratorOnly,
       page,
     })
       .then((result) => {

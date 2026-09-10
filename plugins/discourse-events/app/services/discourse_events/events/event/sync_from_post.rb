@@ -73,7 +73,18 @@ module DiscourseEvents
         end
         attributes[:custom_fields] = custom_fields
 
-        event.update_with_params(attributes)
+        # Event#apply_params_for_status's non-raising branch (`update`) returns
+        # `self` on a rejected save exactly like it does on success, relying on
+        # `update` having populated `errors` for callers to notice. A save
+        # rejected by something that *doesn't* add to `errors` (e.g. a halted
+        # callback) would then come back looking like a valid, saved model. Use
+        # the raising form instead so any rejected save surfaces loudly -- as an
+        # invalid-model result when validations populated errors (rescued below,
+        # same outcome as before), or as an uncaught exception otherwise, rather
+        # than a silent no-op.
+        event.update_with_params!(attributes)
+      rescue ActiveRecord::RecordInvalid => e
+        e.record
       end
 
       def schedule_topic_bump(event:)
