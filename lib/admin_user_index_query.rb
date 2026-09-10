@@ -94,7 +94,7 @@ class AdminUserIndexQuery
   def filter_by_query_classification
     case params[:query]
     when "staff"
-      @query.where("admin or moderator")
+      CohortFilter.institute_staff_only(@query, true)
     when "admins"
       @query.where(admin: true)
     when "moderators"
@@ -190,6 +190,26 @@ class AdminUserIndexQuery
     @query.where.not(id: params[:exclude]) if params[:exclude].present?
   end
 
+  def filter_by_cohort
+    return if params[:filters].blank?
+    CohortFilter.apply(@query, params[:filters], guardian: guardian)
+  end
+
+  def filter_staff_only
+    return unless ActiveModel::Type::Boolean.new.cast(params[:staff_only])
+    CohortFilter.institute_staff_only(@query, true)
+  end
+
+  def filter_moderator_only
+    return unless ActiveModel::Type::Boolean.new.cast(params[:moderator_only])
+    @query.where(moderator: true)
+  end
+
+  def filter_batch_moderator_only
+    return unless ActiveModel::Type::Boolean.new.cast(params[:batch_moderator_only])
+    @query.where(id: BatchModeration::GroupSync.all_batch_moderator_user_ids)
+  end
+
   def append(active_relation)
     @query = active_relation if active_relation
   end
@@ -248,6 +268,10 @@ class AdminUserIndexQuery
     append filter_by_same_ip_user
     append filter_exclude
     append filter_by_search
+    append filter_by_cohort
+    append filter_staff_only
+    append filter_moderator_only
+    append filter_batch_moderator_only
 
     if sorting_by?("silence_reason")
       append with_penalty_reason(:silence_user, :silenced_till, "silence_reason")

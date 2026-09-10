@@ -10,6 +10,8 @@ class Admin::UsersController < Admin::StaffController
                   revoke_admin
                   revoke_moderation
                   grant_moderation
+                  revoke_batch_moderator
+                  grant_batch_moderator
                   approve
                   activate
                   deactivate
@@ -29,24 +31,20 @@ class Admin::UsersController < Admin::StaffController
                   delete_associated_accounts
                 ]
 
+  # `index` is reachable by a non-staff Batch Moderator too (see the
+  # standalone `/admin/users/list` routes in config/routes.rb, gated by
+  # StaffOrBatchModeratorConstraint instead of the namespace's blanket
+  # StaffConstraint) -- every other action here stays staff-only via the
+  # inherited `ensure_staff`.
+  skip_before_action :ensure_staff, only: :index
+  before_action :ensure_staff_or_batch_moderator, only: :index
+
   def index
-    query = ::AdminUserIndexQuery.new(params, guardian:)
-    users = query.find_users
-
-    opts = {
-      include_can_be_deleted: true,
-      include_can_be_suspended: true,
-      include_silence_reason: true,
-      include_suspend_reason: true,
-      silence_reasons: query.penalty_reasons(users.select(&:silenced?), :silence_user),
-      suspend_reasons: query.penalty_reasons(users.select(&:suspended?), :suspend_user),
-    }
-    if params[:show_emails] == "true"
-      StaffActionLogger.new(current_user).log_show_emails(users, context: request.path)
-      opts[:emails_desired] = true
+    if guardian.is_staff?
+      index_for_staff
+    else
+      index_for_batch_moderator
     end
-
-    render_serialized(users, AdminUserListSerializer, opts)
   end
 
   def show
@@ -221,6 +219,49 @@ class Admin::UsersController < Admin::StaffController
     guardian.ensure_can_grant_moderation!(@user)
     @user.grant_moderation!
     StaffActionLogger.new(current_user).log_grant_moderation(@user)
+    render_serialized(@user, AdminDetailedUserSerializer, root: false)
+  end
+
+  def revoke_batch_moderator
+    guardian.ensure_can_revoke_batch_moderator!(@user)
+    group = BatchModeration::GroupSync.batch_group_for(@user)
+    # `can_revoke_batch_moderator?` already established this above, but the
+    # user's cohort could have been resynced in between -- fail with a plain
+    # 404 rather than a NoMethodError on `nil`.
+    raise Discourse::NotFound if group.nil?
+    group.group_users.where(user_id: @user.id).update_all(owner: false)
+    StaffActionLogger.new(current_user).log_custom(
+      "revoke_batch_moderator",
+      target_user_id: @user.id,
+      target_user_username: @user.username,
+      group_id: group.id,
+    )
+    BatchModeration::Notifier.notify_moderator_status_change(
+      actor: current_user,
+      user: @user,
+      group: group,
+      granted: false,
+    )
+    render_serialized(@user, AdminDetailedUserSerializer, root: false)
+  end
+
+  def grant_batch_moderator
+    guardian.ensure_can_grant_batch_moderator!(@user)
+    group = BatchModeration::GroupSync.batch_group_for(@user)
+    raise Discourse::NotFound if group.nil?
+    group.add_owner(@user)
+    StaffActionLogger.new(current_user).log_custom(
+      "grant_batch_moderator",
+      target_user_id: @user.id,
+      target_user_username: @user.username,
+      group_id: group.id,
+    )
+    BatchModeration::Notifier.notify_moderator_status_change(
+      actor: current_user,
+      user: @user,
+      group: group,
+      granted: true,
+    )
     render_serialized(@user, AdminDetailedUserSerializer, root: false)
   end
 
@@ -618,6 +659,61 @@ class Admin::UsersController < Admin::StaffController
   end
 
   private
+
+  def ensure_staff_or_batch_moderator
+    return if guardian.is_staff?
+    return if BatchModeration::GroupSync.owned_batch_groups(current_user).exists?
+    raise Discourse::InvalidAccess
+  end
+
+  def index_for_staff
+    query = ::AdminUserIndexQuery.new(params, guardian:)
+    users = query.find_users
+
+    opts = {
+      include_can_be_deleted: true,
+      include_can_be_suspended: true,
+      include_silence_reason: true,
+      include_suspend_reason: true,
+      silence_reasons: query.penalty_reasons(users.select(&:silenced?), :silence_user),
+      suspend_reasons: query.penalty_reasons(users.select(&:suspended?), :suspend_user),
+    }
+    if params[:show_emails] == "true"
+      StaffActionLogger.new(current_user).log_show_emails(users, context: request.path)
+      opts[:emails_desired] = true
+    end
+
+    if SiteSetting.enable_batch_moderation
+      opts[:batch_moderator_user_ids] = BatchModeration::GroupSync.batch_moderator_user_ids(
+        users.map(&:id),
+      )
+      opts[:staff_type_user_ids] = BatchModeration::GroupSync.staff_type_user_ids(users.map(&:id))
+    end
+
+    render_serialized(users, AdminUserListSerializer, opts)
+  end
+
+  # The query is force-scoped server-side to the Batch Moderator's own
+  # cohort group -- any `filters`/`query` params the client sends are
+  # ignored entirely here, since those must never let a Batch Moderator
+  # widen their own view. Rendered through a restricted, directory-like
+  # serializer rather than AdminUserListSerializer, so there's no risk of a
+  # staff-only field (IP data, suspend/silence reasons, etc.) leaking
+  # through even by accident.
+  def index_for_batch_moderator
+    group_ids = BatchModeration::GroupSync.owned_batch_groups(current_user).select(:id)
+    member_ids = GroupUser.where(group_id: group_ids).select(:user_id)
+
+    page = params[:page].to_i - 1
+    page = 0 if page < 0
+    users = User.where(id: member_ids).order(:username).limit(100).offset(page * 100)
+
+    opts = {
+      batch_moderator_user_ids:
+        BatchModeration::GroupSync.batch_moderator_user_ids(users.map(&:id)),
+    }
+    render_serialized(users, BatchModeratorUserListSerializer, opts)
+  end
 
   def fetch_user
     @user = User.find_by(id: params[:user_id])
