@@ -2790,6 +2790,11 @@ en:
     enable_user_directory: "Provide a directory of users for browsing"
     enable_group_directory: "Provide a directory of groups for browsing"
     enable_category_group_moderation: "Allow groups to moderate content in specific categories"
+    batch_moderation_batch_field_name: "Name of the signup UserField that identifies a user's cohort (e.g. graduation year) for batch moderation."
+    batch_moderation_secondary_field_names: "Names of additional signup UserFields batch moderation can use to further scope a cohort for Student-type members, alongside the batch field (e.g. Branch). The first one that exists on this site is used."
+    batch_moderation_institution_field_names: "Names of the signup UserFields batch moderation uses to identify a member's institution (e.g. College, Vidyalaya). Always part of a cohort's key, for both Student and Staff-type members. The first one that exists on this site is used."
+    batch_moderation_member_type_field_name: "Name of the signup UserField that distinguishes Student from Staff-type members for batch moderation cohort grouping (e.g. \"I am\"). If this field doesn't exist on a site, everyone is treated as a Student."
+    batch_moderation_staff_type_values: "Values of {{setting:batch_moderation_member_type_field_name}} that mean a member is Staff-type (their cohort is keyed on the institution field alone, without batch/secondary fields)."
     group_in_subject: "Set %%{optional_pm} in email subject to name of first group in PM, see: <a href='https://meta.discourse.org/t/customize-specific-email-templates/88323' target='_blank'>Customize subject format for standard emails</a>"
     allow_anonymous_mode: "Enable the option for users to switch to anonymous mode for posting. When activated, users can opt for their identities to be hidden when creating posts or topics throughout the site. See also {{setting:allow_likes_in_anonymous_mode}}."
     allow_likes_in_anonymous_mode: "Enable this setting to allow users who are browsing your site anonymously to like posts. When activated, users can opt for their identities to be hidden when liking posts or topics throughout the site. This setting requires the {{setting:allow_anonymous_mode}} setting to be enabled."
@@ -3827,6 +3832,43 @@ en:
       (If you *didn't* request this download, you should be seriously concerned -- someone has admin access to your site.)
     no_token: |
       Sorry, this backup download link has already been used or has expired.
+
+  batch_moderation:
+    system_actor: "the system"
+    actions:
+      suspend: "suspended"
+      silence: "silenced"
+      report: "reported"
+      cohort_joined: "joined a cohort"
+      cohort_left: "left a cohort"
+      moderator_granted: "granted Batch Moderator status to"
+      moderator_revoked: "revoked Batch Moderator status from"
+
+  batch_moderation_action_mailer:
+    title: "Batch Moderation Action"
+    subject_template: "[%{email_prefix}] %{action_title} by %{actor_username}"
+    text_body_template: |
+      **%{actor_username}** %{action_title} **%{target_username}**.
+
+      Reason given: %{reason}
+
+      [View %{target_username}'s profile](%{target_url})
+
+  batch_moderation_cohort_change_mailer:
+    title: "Batch Moderation Cohort Change"
+    subject_template: "[%{email_prefix}] %{user_username} %{action_title} (%{group_name})"
+    text_body_template: |
+      **%{user_username}** %{action_title}: **%{group_name}**.
+
+      [View %{user_username}'s profile](%{target_url})
+
+  batch_moderation_status_change_mailer:
+    title: "Batch Moderation Status Change"
+    subject_template: "[%{email_prefix}] %{actor_username} %{action_title} %{user_username} (%{group_name})"
+    text_body_template: |
+      **%{actor_username}** %{action_title} **%{user_username}** for **%{group_name}**.
+
+      [View %{user_username}'s profile](%{target_url})
 
   admin_confirmation_mailer:
     title: "Admin Confirmation"
@@ -6396,6 +6438,14 @@ en:
         watched_word: "This post included a Watched Word. Check the %{link} for more."
 
     actions:
+      agree_report:
+        title: "Agree"
+        description: "Confirm this report is valid."
+        complete: "Report confirmed."
+      disagree_report:
+        title: "Disagree"
+        description: "Dismiss this report."
+        complete: "Report dismissed."
       agree:
         title: "Yes"
       agree_and_keep:

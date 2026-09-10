@@ -105,11 +105,13 @@ RSpec.describe UserApiKeysController do
         expect(response.parsed_body["redirect_uri"]).to eq("over.the")
       end
 
-      it "shows redirect URI without trailing colon for custom scheme URLs" do
+      it "shows a friendly redirect target for non-http(s) custom scheme URLs" do
         SiteSetting.allowed_user_api_auth_redirects = "myapp://callback"
 
         get "/user-api-key/new.json", params: args.merge(auth_redirect: "myapp://callback")
-        expect(response.parsed_body["redirect_uri"]).to eq("callback")
+        expect(response.parsed_body["redirect_uri"]).to eq(
+          I18n.t("user_api_key.redirect_target_mobile_app"),
+        )
       end
 
       it "rejects auth_redirect to a disallowed domain" do

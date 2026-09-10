@@ -21,6 +21,8 @@ class DirectoryItemsQuery
     ascending: false,
     name: nil,
     username: nil,
+    filters: nil,
+    staff_only: false,
     page: 0,
     limit: PAGE_SIZE,
     prioritize_user: false
@@ -29,6 +31,8 @@ class DirectoryItemsQuery
     items = filter_group(items, group_name) if group_name.present?
     items, excluded_user_ids = exclude_groups(items, exclude_group_names)
     items = exclude_usernames(items, exclude_usernames)
+    items = filter_by_cohort(items, filters)
+    items = filter_staff_only(items, staff_only)
     items = filter_name(items, name, prioritize_user:)
     items = filter_username(items, username)
     items = order_items(items, order, ascending)
@@ -99,6 +103,19 @@ class DirectoryItemsQuery
 
     user_ids << user.id if prioritize_user && user && items.where(user_id: user_ids).exists?
     items.where(user_id: user_ids)
+  end
+
+  # `filters_json` is a JSON object of `{ user_field_id => value }`,
+  # e.g. `{"1":"NIT Trichy","3":"2024"}`, built by the cohort filter
+  # dropdowns (College/Branch/Batch/Vidyalaya) on the users directory page.
+  def filter_by_cohort(items, filters_json)
+    return items if filters_json.blank?
+    CohortFilter.apply(items.references(:user), filters_json, guardian: guardian)
+  end
+
+  def filter_staff_only(items, staff_only)
+    return items unless staff_only
+    CohortFilter.institute_staff_only(items.references(:user), staff_only)
   end
 
   def filter_username(items, username)

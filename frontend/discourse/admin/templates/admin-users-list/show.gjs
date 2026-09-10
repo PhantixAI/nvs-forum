@@ -14,9 +14,11 @@ import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-s
 import DDropdownMenu from "discourse/ui-kit/d-dropdown-menu";
 import DFilterControls from "discourse/ui-kit/d-filter-controls";
 import DLoadMore from "discourse/ui-kit/d-load-more";
+import DNativeSelect from "discourse/ui-kit/d-native-select";
 import DPageSubheader from "discourse/ui-kit/d-page-subheader";
 import DResponsiveTable from "discourse/ui-kit/d-responsive-table";
 import DTableHeaderToggle from "discourse/ui-kit/d-table-header-toggle";
+import DToggleSwitch from "discourse/ui-kit/d-toggle-switch";
 import dAvatar from "discourse/ui-kit/helpers/d-avatar";
 import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
 import dFormatDuration from "discourse/ui-kit/helpers/d-format-duration";
@@ -60,6 +62,7 @@ export default <template>
   <PluginOutlet @name="admin-users-list-show-before" />
 
   <DFilterControls
+    @additionalFiltersActive={{@controller.cohortFiltersActive}}
     @array={{@controller.users}}
     @dropdownOptions={{if
       @controller.showActivationFilter
@@ -75,6 +78,42 @@ export default <template>
     @onTextFilterChange={{@controller.onListFilterChange}}
     @textFilterQueryParam="filter"
   >
+    <:additionalFilters>
+      {{#if @controller.showCohortFilters}}
+        {{#each @controller.cohortFilterFields as |field|}}
+          <DNativeSelect
+            class="admin-users-list__cohort-filter"
+            disabled={{field.disabled}}
+            @nonePlaceholder={{field.noneLabel}}
+            @onChange={{fn @controller.cohortFilterChanged field.id}}
+            @value={{field.value}}
+            as |s|
+          >
+            {{#each field.content as |option|}}
+              <s.Option @value={{option.id}}>{{option.name}}</s.Option>
+            {{/each}}
+          </DNativeSelect>
+        {{/each}}
+        <DToggleSwitch
+          @icon="shield-halved"
+          @state={{@controller.moderatorOnly}}
+          @translatedLabel={{i18n "admin.users.site_moderator_only"}}
+          {{on "click" @controller.toggleModeratorOnly}}
+        />
+        <DToggleSwitch
+          @icon="shield"
+          @state={{@controller.batchModeratorOnly}}
+          @translatedLabel={{i18n "admin.users.batch_moderator_only"}}
+          {{on "click" @controller.toggleBatchModeratorOnly}}
+        />
+        <DToggleSwitch
+          @icon="user-tie"
+          @state={{@controller.staffOnly}}
+          @translatedLabel={{i18n "directory.staff_badge_title"}}
+          {{on "click" @controller.toggleStaffOnly}}
+        />
+      {{/if}}
+    </:additionalFilters>
     <:actions>
       {{#if @controller.displayBulkActions}}
         <div class="bulk-actions-dropdown">
@@ -471,7 +510,11 @@ export default <template>
                     (if
                       (not
                         (or
-                          user.admin user.moderator user.second_factor_enabled
+                          user.admin
+                          user.moderator
+                          user.is_batch_moderator
+                          user.is_staff_type
+                          user.second_factor_enabled
                         )
                       )
                       "--empty"
@@ -482,11 +525,17 @@ export default <template>
                     <span>{{i18n "admin.users.status"}}</span>
                   </span>
                   <span class="directory-table__value">
+                    {{#if user.is_staff_type}}
+                      {{dIcon "user-tie" title="directory.staff_badge_title"}}
+                    {{/if}}
                     {{#if user.admin}}
                       {{dIcon "shield-halved" title="admin.title"}}
                     {{/if}}
                     {{#if user.moderator}}
                       {{dIcon "shield-halved" title="admin.moderator"}}
+                    {{/if}}
+                    {{#if user.is_batch_moderator}}
+                      {{dIcon "shield" title="batch_moderation.badge_title"}}
                     {{/if}}
                     {{#if user.second_factor_enabled}}
                       {{dIcon "lock" title="admin.user.second_factor_enabled"}}

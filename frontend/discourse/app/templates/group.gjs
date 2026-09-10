@@ -6,7 +6,7 @@ import PluginOutlet from "discourse/components/plugin-outlet";
 import DTooltip from "discourse/float-kit/components/d-tooltip";
 import lazyHash from "discourse/helpers/lazy-hash";
 import routeAction from "discourse/helpers/route-action";
-import { and, or } from "discourse/truth-helpers";
+import { and, not, or } from "discourse/truth-helpers";
 import DAvatarFlair from "discourse/ui-kit/d-avatar-flair";
 import DButton from "discourse/ui-kit/d-button";
 import dIcon from "discourse/ui-kit/helpers/d-icon";
@@ -72,7 +72,12 @@ export default <template>
             @showLogin={{routeAction "showLogin"}}
           />
 
-          {{#if @controller.currentUser.admin}}
+          {{#if
+            (and
+              @controller.currentUser.admin
+              (not @controller.model.is_batch_moderation_group)
+            )
+          }}
             {{#if @controller.model.automatic}}
               <DButton
                 class="btn-default"

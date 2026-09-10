@@ -14,7 +14,11 @@ import App, { loadAdmin, loadThemesAndPlugins } from "discourse/app";
 
   performance.mark("discourse-init");
 
-  if (document.querySelector('#data-discourse-setup[data-is-staff="true"]')) {
+  if (
+    document.querySelector(
+      '#data-discourse-setup[data-can-load-admin-engine="true"]'
+    )
+  ) {
     await loadAdmin();
   }
 

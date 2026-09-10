@@ -27,6 +27,38 @@ RSpec.describe GroupShowSerializer do
     end
   end
 
+  context "with a batch-moderation group" do
+    fab!(:owner, :user)
+    fab!(:group)
+
+    before do
+      group.custom_fields[BatchModeration::GroupSync::CUSTOM_FIELD_FLAG] = true
+      group.save_custom_fields
+      group.add_owner(owner)
+    end
+
+    it "reports the viewer as neither able to admin nor own the group, even for an admin or the group's own owner" do
+      admin_json = GroupShowSerializer.new(group, scope: Fabricate(:admin).guardian).as_json
+      expect(admin_json[:group_show][:can_admin_group]).to eq(false)
+
+      owner_json = GroupShowSerializer.new(group, scope: owner.guardian).as_json
+      # A regular (non-staff) owner never satisfies the base `can_admin_group?`
+      # check to begin with, so the field is omitted entirely here (falsy,
+      # same as `false`) rather than explicitly overridden.
+      expect(owner_json[:group_show][:can_admin_group]).to eq(nil)
+      expect(owner_json[:group_show][:is_group_owner]).to eq(false)
+      # `is_group_owner_display` is a separate, informational-only field (not
+      # a permission gate) and should keep reflecting real ownership.
+      expect(owner_json[:group_show][:is_group_owner_display]).to eq(true)
+    end
+
+    it "reports false (not omitted) for a moderator who can normally manage groups" do
+      SiteSetting.moderators_manage_groups = true
+      moderator_json = GroupShowSerializer.new(group, scope: Fabricate(:moderator).guardian).as_json
+      expect(moderator_json[:group_show][:can_admin_group]).to eq(false)
+    end
+  end
+
   describe "#mentionable" do
     fab!(:group) { Fabricate(:group, mentionable_level: Group::ALIAS_LEVELS[:everyone]) }
 

@@ -25,7 +25,7 @@
         include_official: allow_plugins?,
         include_unofficial: allow_third_party_plugins?,
         request: request,
-        include_admin_asset: staff?
+        include_admin_asset: staff? || batch_moderator?
       })
      %>
 
@@ -52,7 +52,7 @@
     <%- if ExtraLocalesController.client_overrides_exist? %>
       <%= preload_script_url ExtraLocalesController.url("overrides"), type_module: true %>
     <%- end %>
-    <%- if staff? %>
+    <%- if staff? || batch_moderator? %>
       <%= preload_script_url ExtraLocalesController.url("admin"), type_module: true %>
     <%- end %>
     <%- if admin? %>
@@ -68,7 +68,7 @@
 
     <%= preload_script "vendor", type_module: true %>
 
-    <%= module_preloads_for "discourse", (staff? ? "admin/compat-modules" : nil) %>
+    <%= module_preloads_for "discourse", ((staff? || batch_moderator?) ? "admin/compat-modules" : nil) %>
 
     <%- unless customization_disabled? %>
       <%- theme_js_assets.each do |asset| %>
