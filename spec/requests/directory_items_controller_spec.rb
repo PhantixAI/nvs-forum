@@ -548,6 +548,222 @@ RSpec.describe DirectoryItemsController do
     end
   end
 
+  context "with cohort filters" do
+    before { DirectoryItem.refresh! }
+
+    it "filters users by a single cohort field value" do
+      college_field = Fabricate(:user_field, name: "College", show_on_profile: true)
+      UserCustomField.create!(
+        user_id: evil_trout.id,
+        name: "user_field_#{college_field.id}",
+        value: "NIT Trichy",
+      )
+      UserCustomField.create!(
+        user_id: walter_white.id,
+        name: "user_field_#{college_field.id}",
+        value: "NIT Warangal",
+      )
+
+      get "/directory_items.json",
+          params: {
+            period: "all",
+            filters: { college_field.id => "NIT Trichy" }.to_json,
+          }
+      expect(response.status).to eq(200)
+
+      usernames = response.parsed_body["directory_items"].map { |item| item["user"]["username"] }
+      expect(usernames).to contain_exactly("eviltrout")
+    end
+
+    it "filters users by multiple cohort fields simultaneously" do
+      batch_field = Fabricate(:user_field, name: "Batch", show_on_profile: true)
+      branch_field = Fabricate(:user_field, name: "Branch", show_on_profile: true)
+
+      UserCustomField.create!(
+        user_id: evil_trout.id,
+        name: "user_field_#{batch_field.id}",
+        value: "2024",
+      )
+      UserCustomField.create!(
+        user_id: evil_trout.id,
+        name: "user_field_#{branch_field.id}",
+        value: "CSE",
+      )
+      # walter_white matches Batch but not Branch, so should be excluded.
+      UserCustomField.create!(
+        user_id: walter_white.id,
+        name: "user_field_#{batch_field.id}",
+        value: "2024",
+      )
+      UserCustomField.create!(
+        user_id: walter_white.id,
+        name: "user_field_#{branch_field.id}",
+        value: "ECE",
+      )
+
+      get "/directory_items.json",
+          params: {
+            period: "all",
+            filters: { batch_field.id => "2024", branch_field.id => "CSE" }.to_json,
+          }
+      expect(response.status).to eq(200)
+
+      usernames = response.parsed_body["directory_items"].map { |item| item["user"]["username"] }
+      expect(usernames).to contain_exactly("eviltrout")
+    end
+
+    it "does not allow non-staff users to filter by a private cohort field" do
+      private_batch_field =
+        Fabricate(:user_field, name: "Batch", show_on_profile: false, show_on_user_card: false)
+      UserCustomField.create!(
+        user_id: evil_trout.id,
+        name: "user_field_#{private_batch_field.id}",
+        value: "2024",
+      )
+
+      get "/directory_items.json",
+          params: {
+            period: "all",
+            filters: { private_batch_field.id => "2024" }.to_json,
+          }
+      expect(response.status).to eq(200)
+
+      usernames = response.parsed_body["directory_items"].map { |item| item["user"]["username"] }
+      expect(usernames).to include("eviltrout", "heisenberg", "stage_user")
+    end
+
+    it "allows staff users to filter by a private cohort field" do
+      sign_in(Fabricate(:admin))
+      private_batch_field =
+        Fabricate(:user_field, name: "Batch", show_on_profile: false, show_on_user_card: false)
+      UserCustomField.create!(
+        user_id: evil_trout.id,
+        name: "user_field_#{private_batch_field.id}",
+        value: "2024",
+      )
+
+      get "/directory_items.json",
+          params: {
+            period: "all",
+            filters: { private_batch_field.id => "2024" }.to_json,
+          }
+      expect(response.status).to eq(200)
+
+      usernames = response.parsed_body["directory_items"].map { |item| item["user"]["username"] }
+      expect(usernames).to contain_exactly("eviltrout")
+    end
+
+    it "ignores filters for a field name outside the cohort filter whitelist" do
+      other_field = Fabricate(:user_field, name: "Favorite Color", show_on_profile: true)
+      UserCustomField.create!(
+        user_id: evil_trout.id,
+        name: "user_field_#{other_field.id}",
+        value: "Blue",
+      )
+
+      get "/directory_items.json",
+          params: {
+            period: "all",
+            filters: { other_field.id => "Blue" }.to_json,
+          }
+      expect(response.status).to eq(200)
+
+      usernames = response.parsed_body["directory_items"].map { |item| item["user"]["username"] }
+      expect(usernames).to include("eviltrout", "heisenberg", "stage_user")
+    end
+
+    it "handles malformed filters JSON gracefully" do
+      get "/directory_items.json", params: { period: "all", filters: "not json" }
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["directory_items"].length).to eq(4)
+    end
+
+    it "handles a non-hash filters JSON value gracefully" do
+      get "/directory_items.json", params: { period: "all", filters: [1, 2, 3].to_json }
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["directory_items"].length).to eq(4)
+    end
+
+    it "restricts results to the cohort staff member-type when staff_only is true" do
+      type_field = Fabricate(:user_field, name: "I am", requirement: "optional")
+      evil_trout.custom_fields[
+        "#{User::USER_FIELD_PREFIX}#{type_field.id}"
+      ] = "Dean/Professor/Staff"
+      evil_trout.save_custom_fields(true, run_validations: false)
+
+      get "/directory_items.json", params: { period: "all", staff_only: true }
+      expect(response.status).to eq(200)
+
+      usernames = response.parsed_body["directory_items"].map { |item| item["user"]["username"] }
+      expect(usernames).to contain_exactly("eviltrout")
+    end
+
+    it "does not restrict results when staff_only is false" do
+      get "/directory_items.json", params: { period: "all", staff_only: false }
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["directory_items"].length).to eq(4)
+    end
+
+    it "preserves filters and staff_only in load_more_directory_items" do
+      college_field = Fabricate(:user_field, name: "College", show_on_profile: true)
+      filters_json = { college_field.id => "NIT Trichy" }.to_json
+
+      get "/directory_items.json",
+          params: {
+            period: "all",
+            filters: filters_json,
+            staff_only: true,
+          }
+      expect(response.status).to eq(200)
+      json = response.parsed_body
+
+      expect(json["meta"]["load_more_directory_items"]).to include(
+        "filters=#{CGI.escape(filters_json)}",
+      )
+      expect(json["meta"]["load_more_directory_items"]).to include("staff_only=true")
+    end
+
+    it "marks batch moderators via is_batch_moderator" do
+      college_field = Fabricate(:user_field, name: "College", requirement: "optional")
+      branch_field = Fabricate(:user_field, name: "Branch", requirement: "optional")
+      batch_field = Fabricate(:user_field, name: "Batch", requirement: "optional")
+      SiteSetting.enable_batch_moderation = true
+      SiteSetting.batch_moderation_auto_promote_count = 0
+
+      [evil_trout, walter_white].each do |member|
+        member.custom_fields["#{User::USER_FIELD_PREFIX}#{college_field.id}"] = "MNIT Jaipur"
+        member.custom_fields["#{User::USER_FIELD_PREFIX}#{branch_field.id}"] = "CSE"
+        member.custom_fields["#{User::USER_FIELD_PREFIX}#{batch_field.id}"] = "2024"
+        member.save_custom_fields(true, run_validations: false)
+        BatchModeration::GroupSync.sync(member)
+      end
+      Group.last.add_owner(evil_trout)
+
+      get "/directory_items.json", params: { period: "all" }
+      expect(response.status).to eq(200)
+
+      items = response.parsed_body["directory_items"].index_by { |item| item["user"]["username"] }
+      expect(items["eviltrout"]["user"]["is_batch_moderator"]).to eq(true)
+      expect(items["heisenberg"]["user"]["is_batch_moderator"]).to eq(false)
+    end
+
+    it "marks staff-type members via is_staff_type" do
+      type_field = Fabricate(:user_field, name: "I am", requirement: "optional")
+      SiteSetting.enable_batch_moderation = true
+      evil_trout.custom_fields[
+        "#{User::USER_FIELD_PREFIX}#{type_field.id}"
+      ] = "Dean/Professor/Staff"
+      evil_trout.save_custom_fields(true, run_validations: false)
+
+      get "/directory_items.json", params: { period: "all" }
+      expect(response.status).to eq(200)
+
+      items = response.parsed_body["directory_items"].index_by { |item| item["user"]["username"] }
+      expect(items["eviltrout"]["user"]["is_staff_type"]).to eq(true)
+      expect(items["heisenberg"]["user"]["is_staff_type"]).to eq(false)
+    end
+  end
+
   context "when searching by name" do
     it "searches users by custom field 'Music' ignoring the default 20 user limit" do
       field = Fabricate(:user_field, searchable: true, show_on_profile: true)

@@ -92,6 +92,41 @@
     }
   }
 
+  // Shown at all times (see the component), so it must never sit under the
+  // knob in either state -- default (off, knob on the left) puts it on the
+  // right; the `[aria-checked="true"]` rule below flips it to the left to
+  // clear the knob once it's slid to the right instead.
+  &__inside-label {
+    position: absolute;
+    top: 50%;
+    right: calc(var(--toggle-switch-height) * 0.291);
+    transform: translateY(-50%);
+    color: var(--secondary);
+    font-size: var(--font-down-2);
+    font-weight: 700;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  &__checkbox[aria-checked="true"]
+    + .d-toggle-switch__checkbox-slider
+    .d-toggle-switch__inside-label {
+    right: auto;
+    left: calc(var(--toggle-switch-height) * 0.291);
+  }
+
+  // Always visible (unlike &__checkbox-label's text, which only renders
+  // when provided) -- color communicates state instead of a word.
+  &__icon-label {
+    display: inline-flex;
+    color: var(--primary-low-mid);
+    transition: color 0.25s;
+
+    &.--active {
+      color: var(--primary);
+    }
+  }
+
   &__checkbox-slider::before,
   &__checkbox-slider::after {
     content: "";

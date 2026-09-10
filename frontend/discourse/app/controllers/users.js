@@ -4,9 +4,13 @@ import { action, computed } from "@ember/object";
 import { dependentKeyCompat } from "@ember/object/compat";
 import { service } from "@ember/service";
 import EditUserDirectoryColumnsModal from "discourse/components/modal/edit-user-directory-columns";
+import {
+  buildCohortFilterFields,
+  clearHiddenCohortFilterValues,
+  parseCohortFilterValues,
+} from "discourse/lib/cohort-filter-fields";
 import discourseDebounce from "discourse/lib/debounce";
 import { longDate } from "discourse/lib/formatter";
-import Group from "discourse/models/group";
 
 export default class UsersController extends Controller {
   @service modal;
@@ -18,7 +22,8 @@ export default class UsersController extends Controller {
     "order",
     "asc",
     "name",
-    "group",
+    "filters",
+    "staff_only",
     "exclude_usernames",
     "exclude_groups",
   ];
@@ -26,23 +31,32 @@ export default class UsersController extends Controller {
   order = "";
   asc = null;
   name = "";
-  group = null;
+  filters = null;
+  staff_only = false;
   nameInput = null;
   exclude_usernames = null;
   exclude_groups = null;
   isLoading = false;
   columns = null;
-  groupOptions = null;
   params = null;
-
-  @computed("currentUser", "groupOptions")
-  get showGroupFilter() {
-    return this.currentUser && this.groupOptions;
-  }
 
   @dependentKeyCompat
   get showTimeRead() {
     return this.period === "all";
+  }
+
+  @computed("filters")
+  get _cohortFilterValues() {
+    return parseCohortFilterValues(this.filters);
+  }
+
+  @computed("_cohortFilterValues", "staff_only", "site.user_fields")
+  get cohortFilterFields() {
+    return buildCohortFilterFields({
+      siteUserFields: this.site?.user_fields,
+      filterValues: this._cohortFilterValues,
+      staffOnly: this.staff_only,
+    });
   }
 
   loadUsers(params = null) {
@@ -86,26 +100,37 @@ export default class UsersController extends Controller {
       });
   }
 
-  loadGroups() {
-    if (this.currentUser) {
-      return Group.findAll({ ignore_automatic: true }).then((groups) => {
-        const groupOptions = groups
-          .filter((group) => group.can_see_members)
-          .map((group) => {
-            return {
-              name: group.full_name || group.name,
-              id: group.name,
-            };
-          });
-        this.set("groupOptions", groupOptions);
-      });
+  @action
+  cohortFilterChanged(fieldId, _, valueAttrs) {
+    const next = { ...this._cohortFilterValues };
+    if (valueAttrs?.id) {
+      next[fieldId] = valueAttrs.id;
+    } else {
+      delete next[fieldId];
     }
+
+    this.set("filters", Object.keys(next).length ? JSON.stringify(next) : null);
   }
 
   @action
-  groupChanged(_, groupAttrs) {
-    // First param is the group name, which include none or 'all groups'. Ignore this and look at second param.
-    this.set("group", groupAttrs?.id);
+  toggleStaffOnly() {
+    const staffOnly = !this.staff_only;
+    const updates = { staff_only: staffOnly };
+
+    if (staffOnly) {
+      const next = clearHiddenCohortFilterValues({
+        siteUserFields: this.site?.user_fields,
+        filterValues: this._cohortFilterValues,
+      });
+
+      if (next) {
+        updates.filters = Object.keys(next).length
+          ? JSON.stringify(next)
+          : null;
+      }
+    }
+
+    this.setProperties(updates);
   }
 
   @action
