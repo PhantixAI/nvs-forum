@@ -5,13 +5,18 @@ import { service } from "@ember/service";
 import ComboBox from "discourse/select-kit/components/combo-box";
 import { i18n } from "discourse-i18n";
 
-// Matches DiscourseEvents::CalendarSeparation::SEPARATION_FIELD_NAME
-export const SEPARATION_FIELD_NAME = "College";
 export const ALL_VALUE = "__all__";
 
 // Shared with UpcomingEventsCalendar so the lookup lives in exactly one place.
+// The institution field name (College, Vidyalaya, ...) is resolved server-side --
+// see DiscourseEvents::CalendarEventScope.institution_field -- and served via the
+// `:site` serializer, so this never drifts from the actual configured site setting.
 export function findSeparationField(site) {
-  return site.user_fields?.find((f) => f.name === SEPARATION_FIELD_NAME);
+  const fieldName = site.calendar_event_scope_fields?.institution_field_name;
+  if (!fieldName) {
+    return null;
+  }
+  return site.user_fields?.find((f) => f.name === fieldName);
 }
 
 export default class CalendarSeparationFilter extends Component {

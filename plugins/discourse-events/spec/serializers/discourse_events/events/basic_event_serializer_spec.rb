@@ -20,16 +20,30 @@ describe DiscourseEvents::Events::BasicEventSerializer do
     expect(json[:custom_fields]["team"]).to eq("rocket")
   end
 
-  it "reports forum_event as true when the reserved custom field is absent" do
+  it "infers event_scope as forum for a legacy event with no scope/separation key at all" do
     json = described_class.new(event, scope: Guardian.new, root: false).as_json
-    expect(json[:forum_event]).to eq(true)
+    expect(json[:event_scope]).to eq("forum")
   end
 
-  it "reports forum_event as false when the reserved custom field is present" do
+  it "infers event_scope as college for a legacy event with a separation value but no scope key" do
     event.update!(custom_fields: { "team" => "rocket", "_calendar_separation_value" => "MIT" })
 
     json = described_class.new(event, scope: Guardian.new, root: false).as_json
-    expect(json[:forum_event]).to eq(false)
+    expect(json[:event_scope]).to eq("college")
+  end
+
+  it "reports the explicit event_scope when the new reserved key is present" do
+    event.update!(
+      custom_fields: {
+        "team" => "rocket",
+        "_calendar_separation_value" => "MIT",
+        "_calendar_batch_cohort_digest" => "abc123",
+        "_calendar_event_scope" => "batch",
+      },
+    )
+
+    json = described_class.new(event, scope: Guardian.new, root: false).as_json
+    expect(json[:event_scope]).to eq("batch")
   end
 
   it "returns the topic's category_id" do

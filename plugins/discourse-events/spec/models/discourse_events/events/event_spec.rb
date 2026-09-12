@@ -418,6 +418,21 @@ RSpec.describe DiscourseEvents::Events::Event do
 
       expect(event).to be_valid
     end
+
+    it "is valid when the reserved calendar event scope keys are present, even though they're never admin-allowed" do
+      event =
+        Fabricate.build(
+          :event,
+          post: post,
+          original_starts_at: Time.now,
+          custom_fields: {
+            "_calendar_event_scope" => "batch",
+            "_calendar_batch_cohort_digest" => "abc123",
+          },
+        )
+
+      expect(event).to be_valid
+    end
   end
 
   describe "topic custom fields callback" do

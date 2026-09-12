@@ -16,11 +16,16 @@ import {
 } from "discourse/lib/time-utils";
 import DButton from "discourse/ui-kit/d-button";
 import DExpandingTextArea from "discourse/ui-kit/d-expanding-text-area";
+import DNativeSelect from "discourse/ui-kit/d-native-select";
 import DToggleSwitch from "discourse/ui-kit/d-toggle-switch";
 import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
 import dIcon from "discourse/ui-kit/helpers/d-icon";
 import { i18n } from "discourse-i18n";
 import PostEventBuilder from "discourse/plugins/discourse-events/discourse/components/modal/post-event-builder";
+import {
+  showBatchEventOption as shouldShowBatchEventOption,
+  showEventScope as shouldShowEventScope,
+} from "discourse/plugins/discourse-events/discourse/lib/calendar-event-scope";
 import {
   allDayTransition,
   attendanceTransition,
@@ -36,6 +41,7 @@ export default class CompactEventEditor extends Component {
   @service composer;
   @service currentUser;
   @service modal;
+  @service site;
   @service siteSettings;
 
   @tracked name;
@@ -60,7 +66,7 @@ export default class CompactEventEditor extends Component {
   @tracked hosts;
   @tracked closed;
   @tracked customFields;
-  @tracked forumEvent;
+  @tracked eventScope;
   @tracked linkify;
   #startedWithUrl = false;
   #previousRsvpStatus = "public";
@@ -99,7 +105,7 @@ export default class CompactEventEditor extends Component {
       hosts: this.hosts,
       closed: this.closed,
       customFields: this.customFields,
-      forumEvent: this.forumEvent,
+      eventScope: this.eventScope,
     };
   }
 
@@ -233,6 +239,14 @@ export default class CompactEventEditor extends Component {
 
   get livestreamDisabled() {
     return !this.siteSettings.chat_enabled;
+  }
+
+  get showEventScope() {
+    return shouldShowEventScope(this.site);
+  }
+
+  get showBatchEventOption() {
+    return shouldShowBatchEventOption(this.site);
   }
 
   get rsvpsDisabled() {
@@ -400,6 +414,12 @@ export default class CompactEventEditor extends Component {
   }
 
   @action
+  onEventScopeChange(value) {
+    this.eventScope = value;
+    this.#emitChange();
+  }
+
+  @action
   onMaxAttendeesInput(event) {
     const raw = event.target.value;
     this._maxAttendeesOverride = raw;
@@ -506,7 +526,7 @@ export default class CompactEventEditor extends Component {
       raw_invitees: this.allowedGroups?.split(",") || [],
       hosts: this.hosts?.split(",").map((username) => ({ username })) || [],
       custom_fields: { ...this.customFields },
-      forum_event: this.forumEvent,
+      event_scope: this.eventScope,
       starts_at: this.startsAt,
       ends_at: this.endsAt,
       url: this.url,
@@ -551,7 +571,7 @@ export default class CompactEventEditor extends Component {
             ? updatedEvent.imageUpload.short_url
             : updatedEvent.imageUpload?.url || null;
           this.customFields = { ...(updatedEvent.customFields || {}) };
-          this.forumEvent = !!updatedEvent.forumEvent;
+          this.eventScope = updatedEvent.eventScope || "batch";
 
           if (this.status && this.status !== "standalone") {
             this.#previousRsvpStatus = this.status;
@@ -592,7 +612,7 @@ export default class CompactEventEditor extends Component {
     this.hosts = s.hosts;
     this.closed = s.closed;
     this.customFields = { ...s.customFields };
-    this.forumEvent = s.forumEvent;
+    this.eventScope = s.eventScope;
 
     if (this.status && this.status !== "standalone") {
       this.#previousRsvpStatus = this.status;
@@ -736,13 +756,59 @@ export default class CompactEventEditor extends Component {
           (unless this.allDay "composer-event__date-range--has-time")
         }}
       >
-        <div class="composer-event__all-day-toggle">
-          <DToggleSwitch
-            class="composer-event__all-day-switch"
-            @label="discourse_post_event.composer.all_day"
-            @state={{this.allDay}}
-            {{on "click" this.toggleAllDay}}
-          />
+        <div class="composer-event__all-day-row">
+          <div class="composer-event__all-day-toggle">
+            <DToggleSwitch
+              class="composer-event__all-day-switch"
+              @label="discourse_post_event.composer.all_day"
+              @state={{this.allDay}}
+              {{on "click" this.toggleAllDay}}
+            />
+          </div>
+
+          {{#if this.showEventScope}}
+            <div class="composer-event__event-scope">
+              <DTooltip class="composer-event__event-scope-icon">
+                <:trigger>{{dIcon "people-group"}}</:trigger>
+                <:content>
+                  {{i18n
+                    "discourse_post_event.builder_modal.event_scope.label"
+                  }}
+                </:content>
+              </DTooltip>
+              <div class="composer-event__event-scope-control">
+                <DNativeSelect
+                  class="composer-event__event-scope-select"
+                  @includeNone={{false}}
+                  @onChange={{this.onEventScopeChange}}
+                  @value={{this.eventScope}}
+                  as |select|
+                >
+                  {{#if this.showBatchEventOption}}
+                    <select.Option @value="batch">
+                      {{i18n
+                        "discourse_post_event.builder_modal.event_scope.batch"
+                      }}
+                    </select.Option>
+                  {{/if}}
+                  <select.Option @value="college">
+                    {{i18n
+                      "discourse_post_event.builder_modal.event_scope.college"
+                    }}
+                  </select.Option>
+                  <select.Option @value="forum">
+                    {{i18n
+                      "discourse_post_event.builder_modal.event_scope.forum"
+                    }}
+                  </select.Option>
+                </DNativeSelect>
+                {{dIcon
+                  "chevron-down"
+                  class="composer-event__event-scope-caret"
+                }}
+              </div>
+            </div>
+          {{/if}}
         </div>
 
         <div
