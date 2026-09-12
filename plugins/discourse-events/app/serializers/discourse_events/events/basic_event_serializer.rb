@@ -18,14 +18,14 @@ module DiscourseEvents
                  :occurrences,
                  :all_day,
                  :custom_fields,
-                 :forum_event
+                 :event_scope
 
       def category_id
         object.post&.topic&.category_id
       end
 
-      def forum_event
-        custom_fields.exclude?(DiscourseEvents::CalendarSeparation::RESERVED_CUSTOM_FIELD_KEY)
+      def event_scope
+        DiscourseEvents::CalendarEventScope.scope_for(custom_fields)
       end
 
       def post

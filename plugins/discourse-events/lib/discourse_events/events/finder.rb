@@ -12,6 +12,7 @@ module DiscourseEvents
           .then { |query| filter_by_attending_user(query, params, guardian, user) }
           .then { |query| filter_by_dates(query, params) }
           .then { |query| filter_by_category(query, params) }
+          .then { |query| filter_by_calendar_event_scope(query, user) }
           .then { |query| filter_by_calendar_separation_value(query, params) }
           .then { |query| filter_by_tags(query, params, guardian) }
           .then { |query| filter_by_search(query, params) }
@@ -208,6 +209,50 @@ module DiscourseEvents
         events.where(topics: { category_id: category_ids })
       end
 
+      # Real (mandatory) enforcement of the Batch/College/Forum Event scope, applied to
+      # every list/feed query regardless of params -- unlike the voluntary narrowing
+      # filter below. See DiscourseEvents::CalendarEventScope for the scope semantics
+      # and the legacy-row inference rule this SQL mirrors (DiscourseEvents::CalendarEventScope.scope_for).
+      def self.filter_by_calendar_event_scope(events, user)
+        scope_key = DiscourseEvents::CalendarEventScope::SCOPE_CUSTOM_FIELD_KEY
+        separation_key = DiscourseEvents::CalendarSeparation::RESERVED_CUSTOM_FIELD_KEY
+        digest_key = DiscourseEvents::CalendarEventScope::COHORT_DIGEST_CUSTOM_FIELD_KEY
+        institution_value = DiscourseEvents::CalendarEventScope.institution_value_for(user)
+        cohort_digest = DiscourseEvents::CalendarEventScope.cohort_digest_for(user)
+
+        events.where(
+          <<~SQL,
+            (discourse_post_event_events.custom_fields ->> :scope_key) = 'forum'
+            OR (
+              (discourse_post_event_events.custom_fields ->> :scope_key) IS NULL
+              AND (discourse_post_event_events.custom_fields ->> :separation_key) IS NULL
+            )
+            OR (
+              (discourse_post_event_events.custom_fields ->> :scope_key) = 'college'
+              AND (
+                (discourse_post_event_events.custom_fields ->> :separation_key) IS NULL
+                OR (discourse_post_event_events.custom_fields ->> :separation_key) = :institution_value
+              )
+            )
+            OR (
+              (discourse_post_event_events.custom_fields ->> :scope_key) = 'batch'
+              AND (
+                (discourse_post_event_events.custom_fields ->> :digest_key) IS NULL
+                OR (discourse_post_event_events.custom_fields ->> :digest_key) = :cohort_digest
+              )
+            )
+            OR (
+              (discourse_post_event_events.custom_fields ->> :scope_key) IS NULL
+              AND (discourse_post_event_events.custom_fields ->> :separation_key) = :institution_value
+            )
+          SQL
+          { scope_key:, separation_key:, digest_key:, institution_value:, cohort_digest: },
+        )
+      end
+
+      # Voluntary further-narrowing filter for the calendar page's own "view just one
+      # college" dropdown -- applied on top of (never wider than) the mandatory
+      # `filter_by_calendar_event_scope` above, since it only ever restricts further.
       def self.filter_by_calendar_separation_value(events, params)
         return events if params[:calendar_separation_value].blank?
 
