@@ -97,4 +97,18 @@
   .d-date-time-input {
     width: 100%;
   }
+
+  // Replaces the field's usual text title (suppressed via @showTitle={{false}})
+  // with an icon whose tooltip carries the same label -- keeps the row compact
+  // next to the "All day" toggle instead of a long text caption above the select.
+  .post-event-builder__event-scope {
+    display: flex;
+    align-items: center;
+    gap: var(--space-half);
+  }
+
+  .post-event-builder__event-scope-icon {
+    color: var(--primary-medium);
+    flex-shrink: 0;
+  }
 }
