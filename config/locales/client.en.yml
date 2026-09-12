@@ -6623,7 +6623,7 @@ en:
               title: "List of all users"
             my_posts:
               content: "My posts"
-              content_drafts: "My drafts"
+              content_drafts: "Drafts"
               title: "My recent topic activity"
               title_drafts: "My unposted drafts"
               draft_count:
@@ -6639,7 +6639,7 @@ en:
               content: "Invite"
               title: "Invite new members"
             my_messages:
-              content: "My messages"
+              content: "Messages"
               title: "My personal messages"
         global_section: "Global section, visible to everyone"
       panels:
