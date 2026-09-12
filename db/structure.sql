@@ -19139,6 +19139,20 @@ CREATE UNIQUE INDEX idx_discourse_calendar_post_event_dates_event_id_starts_at_u
 
 
 --
+-- Name: idx_discourse_post_event_events_calendar_batch_cohort_digest; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_discourse_post_event_events_calendar_batch_cohort_digest ON public.discourse_post_event_events USING btree (((custom_fields ->> '_calendar_batch_cohort_digest'::text))) WHERE ((custom_fields ->> '_calendar_batch_cohort_digest'::text) IS NOT NULL);
+
+
+--
+-- Name: idx_discourse_post_event_events_calendar_event_scope; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_discourse_post_event_events_calendar_event_scope ON public.discourse_post_event_events USING btree (((custom_fields ->> '_calendar_event_scope'::text)));
+
+
+--
 -- Name: idx_discourse_post_event_events_calendar_separation_value; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -25075,6 +25089,7 @@ ALTER TABLE ONLY public.ad_plugin_house_ads_groups
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20260912113721'),
 ('20260908160656'),
 ('20260908153158'),
 ('20260908112615'),

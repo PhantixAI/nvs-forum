@@ -21,6 +21,13 @@ module DiscourseEvents
       NOTIFICATION_REMINDER = "notification"
       BUMP_TOPIC_REMINDER = "bumpTopic"
       REMINDER_TYPES = [NOTIFICATION_REMINDER, BUMP_TOPIC_REMINDER]
+      # System-managed custom-field keys, never client-settable (see each key's own
+      # leading-underscore rationale) -- exempt from the `allowed_custom_fields` allowlist check.
+      RESERVED_CUSTOM_FIELD_KEYS = [
+        DiscourseEvents::CalendarSeparation::RESERVED_CUSTOM_FIELD_KEY,
+        DiscourseEvents::CalendarEventScope::SCOPE_CUSTOM_FIELD_KEY,
+        DiscourseEvents::CalendarEventScope::COHORT_DIGEST_CUSTOM_FIELD_KEY,
+      ].freeze
 
       self.table_name = "discourse_post_event_events"
       self.ignored_columns = %w[starts_at ends_at]
@@ -325,7 +332,7 @@ module DiscourseEvents
       def allowed_custom_fields
         allowed_custom_fields = SiteSetting.discourse_post_event_allowed_custom_fields.split("|")
         custom_fields.each do |key, value|
-          next if key == DiscourseEvents::CalendarSeparation::RESERVED_CUSTOM_FIELD_KEY
+          next if RESERVED_CUSTOM_FIELD_KEYS.include?(key)
           if !allowed_custom_fields.include?(key)
             errors.add(
               :base,

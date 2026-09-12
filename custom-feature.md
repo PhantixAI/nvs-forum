@@ -334,57 +334,112 @@ default `"College|Vidyalaya"`, new), `batch_moderation_member_type_field_name`
 
 ---
 
-## 2. Calendar College Filter (Forum Event / Calendar Separation)
+## 2. Calendar Event Scope: Batch / College / Forum Event
 
-*(originally: `feat : Calendar College Filter`)*
+*(originally: `feat : Calendar College Filter`; redesigned 2026-09-12 from a
+boolean "Forum event" toggle into a 3-way scope with real enforcement — see
+"v2 redesign" below.)*
 
 ### Requirement
 
-The `discourse-events` plugin's calendar needed to let events be scoped to a
-single cohort ("only my college's events") while still allowing an organizer
-to mark an event as visible to everyone regardless of college — a "Forum
-event" toggle — plus a filter control on the calendar itself to narrow the view
-to one cohort.
+The `discourse-events` plugin's calendar needed three visibility tiers for an
+event, chosen by its creator via a dropdown next to the "All day" toggle,
+defaulting to the narrowest:
+- **Batch Event** (default): visible only to users sharing the creator's
+  institution (College/Vidyalaya) **and** batch **and** branch.
+- **College Event**: visible only to users of that institution.
+- **Forum Event**: visible to everyone (in practice, all NITians/IITians
+  colleges — Navodians is out of scope for this feature the same way it's out
+  of scope for `enable_batch_moderation`'s "Batch"/"Branch" fields).
+
+Unlike the original boolean, this needed to be **real enforcement** (a viewer
+in the wrong cohort genuinely cannot see the event), not just an opt-in
+narrowing filter on the calendar's own display.
 
 ### Implementation
 
-- `plugins/discourse-events/lib/discourse_events/calendar_separation.rb`
-  defines `RESERVED_CUSTOM_FIELD_KEY` (`_calendar_separation_value`) and
-  `value_for_user(user)` (reads the user's College/Vidyalaya-equivalent field).
-- `Event::SyncFromPost#upsert_event`
-  (`plugins/discourse-events/app/services/discourse_events/events/event/sync_from_post.rb`)
-  stamps this reserved custom field on every event sync:
-  - If the raw `[event]` BBCode block has `forum-event="true"`, the reserved
-    field is **deleted** — the event is visible to everyone.
-  - Otherwise, it's set from `existing_separation_value.presence ||
-    CalendarSeparation.value_for_user(post.last_editor)` — a brand-new event
-    gets the creator's value; a legacy event with no value yet gets the
-    *current editor's* value (not the original author's) the first time
-    someone touches it; an event that already has a value keeps it even if a
-    different editor with a different college saves the post again.
-  - The reserved key is exempted from `Event#allowed_custom_fields` validation
-    (`plugins/discourse-events/app/models/discourse_events/events/event.rb`),
-    since it's system-managed, not something a client is allowed to send
-    directly.
+- `plugins/discourse-events/lib/discourse_events/calendar_event_scope.rb` —
+  new module, the single source of truth for scope semantics:
+  - `SCOPE_CUSTOM_FIELD_KEY` (`_calendar_event_scope`, values `"batch"` /
+    `"college"` / `"forum"`) and `COHORT_DIGEST_CUSTOM_FIELD_KEY`
+    (`_calendar_batch_cohort_digest`) — two new reserved, system-managed
+    custom-field keys alongside the pre-existing `_calendar_separation_value`.
+  - `cohort_digest_for(user)` — a 12-char SHA1 digest of the user's full
+    institution+batch+branch cohort, computed directly from
+    `BatchModeration::GroupSync.cohort_key_for(user)` using the exact same
+    digest scheme `GroupSync.deterministic_name` uses for batch-group naming
+    — deliberately **independent of `SiteSetting.enable_batch_moderation`**
+    (which only gates Group auto-provisioning, not cohort-key computation) and
+    of Group membership existing at all. Returns `nil` for a `nil` user, a
+    user with an incomplete cohort (e.g. no Batch value), **or a staff-type
+    user** — a staff cohort key is institution-only (see
+    `GroupSync.cohort_key_for`), which carries no batch/branch distinction at
+    all, so it's never treated as a valid "batch cohort" (indistinguishable
+    from every other staff member's key at that institution otherwise).
+  - `scope_for(custom_fields)` — infers scope for events saved before
+    `_calendar_event_scope` existed: absent scope key + absent separation
+    value → `"forum"` (the old boolean's "everyone" state); absent scope key +
+    present separation value → `"college"` (the old boolean's "college-scoped"
+    state). No data migration needed for pre-existing events.
+  - `visible_to?(event, user)` — the actual per-viewer predicate, mirrored
+    (not literally shared, for performance) by the Finder SQL below.
+- `Event::SyncFromPost#upsert_event` stamps all three reserved keys from a new
+  raw attribute `event-scope` (replacing `forum-event`), defaulting to
+  `"batch"` when absent/unrecognized:
+  - `forum` → deletes both the separation value and the cohort digest.
+  - `batch` → resolves/stamps the separation value (sticky: keeps the
+    existing value across re-edits rather than re-deriving it, same as
+    before) and the cohort digest (same sticky rule, new). If the creator's
+    digest can't be resolved (incomplete cohort, or staff-type), **collapses
+    to `college` scope** instead — an event nobody but its author could ever
+    find is a worse failure mode than one slightly too broad.
+  - `college` → resolves/stamps the separation value only, sticky, no digest.
+- `plugins/discourse-events/lib/discourse_events/calendar_separation.rb`'s
+  `configured_field` now delegates to `BatchModeration::GroupSync.find_institution_field`
+  (respects `SiteSetting.batch_moderation_institution_field_names`, so it
+  resolves "Vidyalaya" too) instead of a hardcoded `"College"` constant.
 - `plugins/discourse-events/lib/discourse_events/events/finder.rb` adds
-  `filter_by_calendar_separation_value`: given `params[:calendar_separation_value]`,
-  matches events whose reserved field equals that value **or is null** (a
-  forum event, with the field cleared, always shows regardless of which
-  cohort filter is active).
-- `calendar-separation-filter.gjs` — new dropdown component on the calendar
-  (`full-calendar.gjs`/`upcoming-events-calendar.gjs`) listing the values seen
-  on the current site; `findSeparationField(site)` (used by the "Forum event"
-  checkbox's visibility too) hides the whole feature entirely on sites where
-  no separation field is configured at all.
-- `post-event-builder.gjs`'s Advanced settings modal gets a "Forum event"
-  checkbox ("Show this event to everyone, regardless of college"), wired via
-  the existing generic `syncFieldToEvent` action — no new dedicated handler
-  needed. `compact-event-editor.gjs` threads `forumEvent` through its
-  tracked state/`currentState`/`openAdvanced` round-trip alongside the
-  existing fields.
-- `basic_event_serializer.rb` exposes `forum_event` (mirrored in the
-  `events_index_response.json`/`events_index_detailed_response.json` API
-  schema fixtures).
+  `filter_by_calendar_event_scope(events, user)`, applied **unconditionally**
+  (not opt-in) in `Finder.search`'s chain — real access control, matching each
+  scope against the viewer's own institution value / cohort digest via a
+  single OR'd SQL clause; a legacy row with a separation value but no scope
+  key is matched as `college`, per `scope_for`'s inference. The old
+  `filter_by_calendar_separation_value` (param-driven) survives as a
+  **voluntary further-narrowing** filter layered on top — it now only ever
+  restricts further, never re-opens access the mandatory filter excluded.
+- The Event visibility control is a **mandatory** 3-option `eventScope`
+  select (replacing the optional "Forum event" checkbox; `@validation="required"`
+  on the FormKit field means FormKit never adds its usual blank/"None" option
+  here — see `frontend/discourse/app/form-kit/components/fk/control/select.gjs`'s
+  `includeNone` logic), always defaulting to Batch Event. It's rendered on
+  **two independent surfaces**, both driven by the shared
+  `lib/calendar-event-scope.js` (`showEventScope`/`showBatchEventOption`
+  helpers, so the two never drift on when the control shows or which options
+  it offers):
+  - `post-event-builder.gjs`'s Advanced settings modal — a FormKit
+    `form.Row`/`row.Col` (size 6/6, collapsing to 12 when the select itself
+    is hidden) puts it beside "All day".
+  - `compact-event-editor.gjs` — the **inline** editor shown directly under
+    the composer right after inserting an event (before ever opening
+    Advanced settings). This one isn't FormKit-based; it's a `DNativeSelect`
+    (`@includeNone={{false}}`) in a new `.composer-event__all-day-row` flex
+    wrapper alongside the existing `DToggleSwitch`, wired through the same
+    `#emitChange()` pattern every other field in that component uses.
+  Both surfaces read/write the same `eventScope` value end-to-end through
+  `discourse-post-event-event.js`, `raw-event-helper.js`, `event-node-view.gjs`,
+  and the rich-editor's node schema — the same plumbing `forumEvent` used to
+  thread through, generalized to a string enum.
+  `plugin.rb` adds `calendar_event_scope_fields` to the `:site` serializer
+  (`{ institution:, institution_field_name:, batch: }`) so neither frontend
+  surface duplicates the (server-only, `client: false`) batch-moderation
+  field-name site settings — `calendar-separation-filter.gjs`'s
+  institution-field lookup was similarly generalized off its old hardcoded
+  `"College"` constant.
+- `basic_event_serializer.rb` exposes `event_scope` (string enum, replacing
+  the `forum_event` boolean; mirrored in the API schema fixtures).
+- New indexes on `(custom_fields ->> '_calendar_event_scope')` and
+  `(custom_fields ->> '_calendar_batch_cohort_digest')` — required, not just
+  nice-to-have, since the Finder filter now runs on every list/feed query.
 
 ### Edge cases
 
@@ -397,17 +452,66 @@ to one cohort.
   The fix: use `update_with_params!` and rescue `ActiveRecord::RecordInvalid`,
   returning `e.record` (same object, same populated `.errors` as before for
   ordinary validation failures) — but anything that fails *without* populating
-  errors now raises loudly instead of silently no-op'ing. Verified live: a
-  "Forum event" post persists `custom_fields: {}`; a normal post persists
-  `custom_fields: {"_calendar_separation_value": "<value>"}`.
+  errors now raises loudly instead of silently no-op'ing.
 - **Legacy events with no separation value**: the *editor*, not the original
-  author, determines the value the first time the reserved field gets set —
+  author, determines the value the first time the reserved fields get set —
   intentional (the person actually setting it should be the one whose cohort
   it reflects), but means re-saving an old post can retroactively cohort-scope
-  it to whoever happens to edit it next.
-- **A site with no configured secondary field** (neither Branch nor Vidyalaya
-  present) sees no "Forum event" checkbox and no calendar filter at all —
-  the whole feature is a no-op rather than showing a broken/empty control.
+  it to whoever happens to edit it next. The batch cohort digest follows the
+  same sticky-first-value rule once set, for the same reason.
+- **A site with no configured institution field** (neither College nor
+  Vidyalaya present) sees no scope dropdown and no calendar filter at all —
+  the whole feature is a no-op rather than showing a broken/empty control. A
+  site with an institution field but no Batch field still gets the dropdown,
+  just without the "Batch Event" option.
+- **A staff-type creator or viewer never participates in batch scope**: their
+  cohort key is institution-only, so `cohort_digest_for` is always `nil` for
+  them — a staff creator's default "Batch Event" collapses to College scope
+  at save time, and a staff viewer can never see anyone else's batch-scoped
+  event (even at their own institution), since there's no batch value to
+  match against either direction.
+- **Direct topic links bypass scope** (pre-existing gap, not introduced by
+  this change): `EventsController#show` and the in-topic event card only
+  check ordinary topic/category permissions, not `CalendarEventScope`. Closing
+  this (via `CalendarEventScope.visible_to?` in the guardian/serializer
+  inclusion condition) was deliberately left as a fast-follow, not part of
+  this ship, since the literal ask was calendar-list visibility.
+- **A no-op edit must never narrow an existing event's scope**: `upsert_event`
+  only defaults the raw `event-scope` attribute to `"batch"` for a brand-new
+  event (`event.new_record?`); for an existing event it falls back to that
+  event's own currently-persisted (or legacy-inferred) scope instead. This
+  matters because two of the three editing surfaces —
+  `pre-initializers/rich-editor-extension.js`'s node schema and
+  `raw-event-helper.js`'s `parseEventAttrs` — default a *missing* attribute to
+  `null`, not `"batch"` (unlike `defaultEventState()`, which still defaults a
+  genuinely-new event's initial state to `"batch"`), and `buildParams` only
+  writes the `eventScope` param when it's actually set (mirroring every other
+  optional param in that file) rather than unconditionally forcing `"batch"`
+  the way the old boolean's comment used to justify. Without both halves of
+  this fix, editing a legacy event through the rich editor or the raw
+  composer — even a change unrelated to the event, with the Event visibility
+  control never touched — would silently write an explicit `event-scope="batch"`
+  attribute into the raw markdown and narrow that event's audience.
+  `post-event-builder.gjs`'s own Advanced-settings path was never affected by
+  this (it always sources `eventScope` from the server-computed
+  `event_scope`, never from raw-text re-parsing), but a narrower version of
+  the same risk remains where `compact-event-editor.gjs`'s `openAdvanced()`
+  hands a raw-text-derived (possibly-unknown) scope to a fresh
+  `DiscoursePostEventEvent` for the modal — that model's own hydration has no
+  way to distinguish "brand new" from "existing but client doesn't know yet",
+  so it still defaults to `"batch"` for display. This narrower gap requires a
+  user to explicitly open Advanced settings on a legacy event and save without
+  correcting the pre-selected value; deliberately left unaddressed as
+  disproportionate to fix given the architecture.
+- **Raw attribute naming**: the raw `[event ...]` BBCode-ish attribute is
+  written as `eventScope` (camelCase, matching the JS model property) — it
+  does *not* get dasherized until the markdown-it cook step
+  (`discourse-markdown/discourse-post-event-block.js`'s `dasherize()`, called
+  from its `wrap()` token rule), which is what actually produces the
+  `data-event-scope` HTML attribute `Parser::VALID_OPTIONS`'s `:"event-scope"`
+  entry matches against. Skimming only the raw markdown source (e.g. in the
+  composer's split view) will show `eventScope=...`, not `event-scope=...`;
+  that's expected, not a bug.
 
 ---
 

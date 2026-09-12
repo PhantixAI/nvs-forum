@@ -112,7 +112,7 @@ RSpec.describe DiscourseEvents::Events::Event::SyncFromPost do
       end
     end
 
-    context "with calendar separation" do
+    context "with calendar event scope" do
       fab!(:college_field) { Fabricate(:user_field, name: "College") }
 
       before do
@@ -120,14 +120,150 @@ RSpec.describe DiscourseEvents::Events::Event::SyncFromPost do
         author.save_custom_fields
       end
 
-      context "when the raw has an event and the post has none" do
-        it "auto-populates the reserved custom field from the creator's profile value" do
+      context "when the raw has an event and the post has none (default scope, no Batch field)" do
+        it "auto-populates the reserved separation field from the creator's profile value" do
           result
           expect(post.reload.event.custom_fields["_calendar_separation_value"]).to eq("MIT")
+        end
+
+        it "defaults to batch scope, collapsing to college since no Batch field is configured" do
+          result
+          event = post.reload.event
+          expect(event.custom_fields["_calendar_event_scope"]).to eq("college")
+          expect(event.custom_fields).not_to have_key("_calendar_batch_cohort_digest")
+        end
+      end
+
+      context "when a Batch field is also configured for the creator" do
+        fab!(:batch_field) { Fabricate(:user_field, name: "Batch") }
+
+        before do
+          author.custom_fields["user_field_#{batch_field.id}"] = "2024"
+          author.save_custom_fields
+        end
+
+        it "defaults to batch scope and stamps a cohort digest" do
+          result
+          event = post.reload.event
+          expect(event.custom_fields["_calendar_event_scope"]).to eq("batch")
+          expect(event.custom_fields["_calendar_batch_cohort_digest"]).to be_present
+          expect(event.custom_fields["_calendar_separation_value"]).to eq("MIT")
+        end
+
+        context "when a batch-scoped event already has a cohort digest and is edited again" do
+          fab!(:event) do
+            Fabricate(
+              :event,
+              post:,
+              original_starts_at: "2020-01-01 10:00",
+              custom_fields: {
+                "_calendar_event_scope" => "batch",
+                "_calendar_separation_value" => "MIT",
+                "_calendar_batch_cohort_digest" => "existingdigest",
+              },
+            )
+          end
+
+          before do
+            author.custom_fields["user_field_#{batch_field.id}"] = "2025"
+            author.save_custom_fields
+          end
+
+          it "preserves the existing digest rather than re-deriving it from the creator" do
+            result
+            expect(post.reload.event.custom_fields["_calendar_batch_cohort_digest"]).to eq(
+              "existingdigest",
+            )
+          end
+        end
+      end
+
+      context "when the creator is staff-type (institution-only cohort key)" do
+        fab!(:batch_field) { Fabricate(:user_field, name: "Batch") }
+        fab!(:member_type_field) { Fabricate(:user_field, name: "I am") }
+
+        before do
+          author.custom_fields["user_field_#{member_type_field.id}"] = "Dean/Professor/Staff"
+          author.save_custom_fields
+        end
+
+        it "collapses a default/batch-requested scope to college, since staff have no batch cohort" do
+          result
+          event = post.reload.event
+          expect(event.custom_fields["_calendar_event_scope"]).to eq("college")
+          expect(event.custom_fields["_calendar_separation_value"]).to eq("MIT")
+          expect(event.custom_fields).not_to have_key("_calendar_batch_cohort_digest")
+        end
+      end
+
+      context "when the raw event explicitly requests college scope" do
+        let(:raw_event) { super().merge("event-scope": "college") }
+
+        it "stores the creator's separation value and college scope, with no batch digest" do
+          result
+          event = post.reload.event
+          expect(event.custom_fields["_calendar_event_scope"]).to eq("college")
+          expect(event.custom_fields["_calendar_separation_value"]).to eq("MIT")
+          expect(event.custom_fields).not_to have_key("_calendar_batch_cohort_digest")
+        end
+      end
+
+      context "when an existing event with no explicit event-scope attribute is re-saved (e.g. via the rich editor or raw composer, which don't thread the attribute through)" do
+        fab!(:batch_field) { Fabricate(:user_field, name: "Batch") }
+
+        it "preserves a legacy forum-scoped event's scope, rather than defaulting to batch" do
+          event =
+            Fabricate(:event, post:, original_starts_at: "2020-01-01 10:00", custom_fields: {})
+
+          result
+
+          expect(post.reload.event.id).to eq(event.id)
+          expect(post.reload.event.custom_fields["_calendar_event_scope"]).to eq("forum")
+          expect(post.reload.event.custom_fields).not_to have_key("_calendar_batch_cohort_digest")
+        end
+
+        it "preserves a legacy college-scoped event's scope, rather than defaulting to batch" do
+          Fabricate(
+            :event,
+            post:,
+            original_starts_at: "2020-01-01 10:00",
+            custom_fields: {
+              "_calendar_separation_value" => "MIT",
+            },
+          )
+
+          result
+
+          expect(post.reload.event.custom_fields["_calendar_event_scope"]).to eq("college")
+          expect(post.reload.event.custom_fields).not_to have_key("_calendar_batch_cohort_digest")
+        end
+
+        it "preserves an already-explicit batch-scoped event's scope on a no-op re-save" do
+          author.custom_fields["user_field_#{batch_field.id}"] = "2024"
+          author.save_custom_fields
+          Fabricate(
+            :event,
+            post:,
+            original_starts_at: "2020-01-01 10:00",
+            custom_fields: {
+              "_calendar_event_scope" => "batch",
+              "_calendar_separation_value" => "MIT",
+              "_calendar_batch_cohort_digest" => "existingdigest",
+            },
+          )
+
+          result
+
+          expect(post.reload.event.custom_fields["_calendar_event_scope"]).to eq("batch")
+          expect(post.reload.event.custom_fields["_calendar_batch_cohort_digest"]).to eq(
+            "existingdigest",
+          )
         end
       end
 
       context "when the event already has a separation value and is edited again" do
+        let(:raw_event) { super().merge("event-scope": "college") }
+
         fab!(:event) do
           Fabricate(
             :event,
@@ -151,6 +287,8 @@ RSpec.describe DiscourseEvents::Events::Event::SyncFromPost do
       end
 
       context "when a legacy event with no separation value is edited by someone other than the author" do
+        let(:raw_event) { super().merge("event-scope": "college") }
+
         fab!(:editor) { Fabricate(:user, admin: true, refresh_auto_groups: true) }
         fab!(:event) { Fabricate(:event, post:, original_starts_at: "2020-01-01 10:00") }
 
@@ -167,11 +305,14 @@ RSpec.describe DiscourseEvents::Events::Event::SyncFromPost do
       end
 
       context "when the raw event is marked as a forum event" do
-        let(:raw_event) { super().merge("forum-event": "true") }
+        let(:raw_event) { super().merge("event-scope": "forum") }
 
-        it "omits the reserved custom field" do
+        it "omits the separation value and digest, storing forum scope" do
           result
-          expect(post.reload.event.custom_fields).not_to have_key("_calendar_separation_value")
+          event = post.reload.event
+          expect(event.custom_fields["_calendar_event_scope"]).to eq("forum")
+          expect(event.custom_fields).not_to have_key("_calendar_separation_value")
+          expect(event.custom_fields).not_to have_key("_calendar_batch_cohort_digest")
         end
 
         context "when the event previously had a separation value" do

@@ -366,6 +366,18 @@ after_initialize do
     DiscourseEvents::CalendarSeparation.value_for_user(object)
   end
 
+  # Server-computed capability flags for the event-scope dropdown, so the frontend never
+  # hardcodes/duplicates the (server-only) batch-moderation field-name site settings -- see
+  # DiscourseEvents::CalendarEventScope and post-event-builder.gjs's `showEventScope`/`showBatchEventOption`.
+  add_to_serializer(:site, :calendar_event_scope_fields) do
+    institution_field = DiscourseEvents::CalendarEventScope.institution_field
+    {
+      institution: institution_field.present?,
+      institution_field_name: institution_field&.name,
+      batch: DiscourseEvents::CalendarEventScope.batch_field.present?,
+    }
+  end
+
   add_class_method(:group, :discourse_post_event_allowed_groups) do
     where(id: SiteSetting.discourse_post_event_allowed_on_groups_map)
   end

@@ -550,9 +550,11 @@ en:
         all_day:
           label: "All day event"
           description: "An all day event will not have specific times, just a date. The event will run from the start of the day to the end of the day."
-        forum_event:
-          label: "Forum event"
-          checkbox_label: "Show this event to everyone, regardless of college"
+        event_scope:
+          label: "Event visibility"
+          batch: "Batch Event"
+          college: "College Event"
+          forum: "Forum Event"
         reminders:
           label: "Reminders"
           types:
