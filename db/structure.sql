@@ -19389,6 +19389,20 @@ CREATE UNIQUE INDEX idx_discourse_calendar_post_event_dates_event_id_starts_at_u
 
 
 --
+-- Name: idx_discourse_post_event_events_calendar_batch_cohort_digest; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_discourse_post_event_events_calendar_batch_cohort_digest ON public.discourse_post_event_events USING btree (((custom_fields ->> '_calendar_batch_cohort_digest'::text))) WHERE ((custom_fields ->> '_calendar_batch_cohort_digest'::text) IS NOT NULL);
+
+
+--
+-- Name: idx_discourse_post_event_events_calendar_event_scope; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_discourse_post_event_events_calendar_event_scope ON public.discourse_post_event_events USING btree (((custom_fields ->> '_calendar_event_scope'::text)));
+
+
+--
 -- Name: idx_discourse_post_event_events_calendar_separation_value; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -25397,6 +25411,7 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20260914172757'),
 ('20260914140746'),
 ('20260914032737'),
+('20260912113721'),
 ('20260910110851'),
 ('20260910033302'),
 ('20260910030427'),

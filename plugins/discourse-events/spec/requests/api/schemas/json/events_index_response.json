@@ -69,9 +69,6 @@
           "all_day": {
             "type": "boolean"
           },
-          "forum_event": {
-            "type": "boolean"
-          },
           "custom_fields": {
             "type": ["object", "null"]
           },
@@ -155,6 +152,14 @@
                 "ends_at"
               ]
             }
+          },
+          "event_scope": {
+            "type": "string",
+            "enum": [
+              "batch",
+              "college",
+              "forum"
+            ]
           }
         },
         "required": [

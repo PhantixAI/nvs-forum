@@ -24,7 +24,7 @@ module DiscourseEvents
         :"all-day",
         :image,
         :hosts,
-        :"forum-event",
+        :"event-scope",
       ]
 
       LEGACY_ESCAPED_ATTRS = %w[data-location]

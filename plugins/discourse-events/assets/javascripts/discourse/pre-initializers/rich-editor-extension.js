@@ -30,7 +30,11 @@ export const EVENT_ATTRIBUTES = {
   chatEnabled: { default: null },
   livestream: { default: null },
   allDay: { default: null },
-  forumEvent: { default: null },
+  // `null` (not "batch") when the raw markdown carries no explicit event-scope attribute at
+  // all -- e.g. a legacy event edited via the rich editor -- so `buildParams`'s own "batch"
+  // fallback only ever kicks in for a genuinely brand-new event, never silently re-narrowing
+  // an existing event's scope. See raw-event-helper.js's `buildParams`/`parseEventAttrs`.
+  eventScope: { default: null },
   image: { default: null },
   hosts: { default: null },
 };

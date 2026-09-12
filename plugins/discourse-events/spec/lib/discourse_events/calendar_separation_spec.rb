@@ -13,6 +13,12 @@ describe DiscourseEvents::CalendarSeparation do
 
       expect(described_class.enabled?).to eq(true)
     end
+
+    it "is true when a UserField named 'Vidyalaya' exists (generalized institution field resolution)" do
+      Fabricate(:user_field, name: "Vidyalaya")
+
+      expect(described_class.enabled?).to eq(true)
+    end
   end
 
   describe ".value_for_user" do

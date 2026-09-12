@@ -1,5 +1,6 @@
 import { camelize } from "@ember/string";
 import { buildBBCodeAttrs, parseBBCodeTag } from "discourse/lib/text";
+import { EVENT_SCOPES } from "./calendar-event-scope";
 
 let lastSetting;
 let lastHosts;
@@ -287,9 +288,14 @@ export function buildParams(startsAt, endsAt, event, siteSettings) {
     params.allDay = "true";
   }
 
-  // Unlike the other booleans here, forumEvent is always written (never omitted when false) so
-  // it's always faithfully recoverable when the modal reopens an event for editing.
-  params.forumEvent = event.forumEvent ? "true" : "false";
+  // Only written when actually known/chosen -- omitted (not forced to "batch") when
+  // unset, so a legacy event with no event-scope attribute in its raw text stays that
+  // way on a no-op re-save, letting the backend's own scope inference apply rather than
+  // this helper silently narrowing it. A genuinely new event still defaults to Batch
+  // Event server-side (see Event::SyncFromPost#upsert_event).
+  if (event.eventScope) {
+    params.eventScope = event.eventScope;
+  }
 
   if (endsAt) {
     params.end = event.allDay
@@ -420,7 +426,7 @@ export function defaultEventState() {
     closed: false,
     customFields: {},
     hosts: null,
-    forumEvent: false,
+    eventScope: "batch",
   };
 }
 
@@ -460,7 +466,13 @@ export function parseEventAttrs(
     closed: attrs.closed === "true",
     customFields,
     hosts: attrs.hosts || null,
-    forumEvent: attrs.forumEvent === "true",
+    // `null` (not "batch") when absent/unrecognized -- an already-saved event with no
+    // explicit event-scope attribute (e.g. a legacy event) must round-trip as "no explicit
+    // scope requested" rather than look like the user deliberately picked Batch Event; see
+    // `buildParams`'s "batch" fallback, which only applies at actual save time.
+    eventScope: EVENT_SCOPES.includes(attrs.eventScope)
+      ? attrs.eventScope
+      : null,
   };
 }
 
@@ -485,7 +497,7 @@ export function stateToEventInput(state) {
     imageUpload: state.image ? { url: state.image } : null,
     customFields: state.customFields,
     hosts: state.hosts ? state.hosts.split(",") : [],
-    forumEvent: state.forumEvent,
+    eventScope: state.eventScope,
   };
 }
 
