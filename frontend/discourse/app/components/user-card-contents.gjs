@@ -25,10 +25,10 @@ import CanCheckEmailsHelper from "discourse/lib/can-check-emails-helper";
 import { durationTiny } from "discourse/lib/formatter";
 import { getURLWithCDN } from "discourse/lib/get-url";
 import { wantsNewWindow } from "discourse/lib/intercept-click";
-import { prioritizeNameInUx } from "discourse/lib/settings";
 import { emojiUnescape } from "discourse/lib/text";
 import { escapeExpression } from "discourse/lib/utilities";
 import User from "discourse/models/user";
+import { or } from "discourse/truth-helpers";
 import DButton from "discourse/ui-kit/d-button";
 import DHtmlWithLinks from "discourse/ui-kit/d-html-with-links";
 import DUserAvatarFlair from "discourse/ui-kit/d-user-avatar-flair";
@@ -174,6 +174,11 @@ export default class UserCardContents extends CardContentsBase {
     return this.user.path;
   }
 
+  @computed("user.id", "user.username")
+  get adminUserPath() {
+    return `/admin/users/${this.user.id}/${this.user.username}`;
+  }
+
   @computed("model.id", "currentUser.id")
   get canCheckEmails() {
     return new CanCheckEmailsHelper(
@@ -206,11 +211,6 @@ export default class UserCardContents extends CardContentsBase {
   @computed("user.trust_level")
   get newUser() {
     return this.user?.trust_level === 0 ? "new-user" : "";
-  }
-
-  @computed("user.name")
-  get nameFirst() {
-    return prioritizeNameInUx(this.user?.name);
   }
 
   @computed("user")
@@ -466,130 +466,386 @@ export default class UserCardContents extends CardContentsBase {
             <div class="animated-placeholder placeholder-animation"></div>
           </div>
         {{else}}
-          <div class="card-row first-row">
-            <PluginOutlet
-              @name="user-card-main-info"
-              @outletArgs={{lazyHash
-                user=this.user
-                post=this.post
-                contentHidden=this.contentHidden
-                handleShowUser=this.handleShowUser
-              }}
-            >
-              <div aria-hidden="true" class="user-card-avatar">
-                {{#if this.contentHidden}}
-                  <span class="card-huge-avatar">{{dBoundAvatar
-                      this.user
-                      "huge"
-                    }}</span>
-                {{else}}
-                  <a
-                    class="card-huge-avatar"
-                    href={{this.avatarUrl}}
-                    tabindex="-1"
-                  >
-                    {{dBoundAvatar this.user "huge"}}
-                    {{#if this.isOwnCard}}
-                      <span class="own-avatar-pencil">
-                        <span class="own-avatar-pencil--icon">
-                          {{dIcon "pencil"}}
-                        </span>
-                      </span>
-                    {{/if}}
-                  </a>
-                {{/if}}
-
-                <DUserAvatarFlair @user={{this.user}} />
-
-                <div>
-                  <PluginOutlet
-                    @connectorTagName="div"
-                    @name="user-card-avatar-flair"
-                    @outletArgs={{lazyHash user=this.user}}
-                  />
-                </div>
-              </div>
-              <div class="names">
-                <div
-                  class="names__primary
-                    {{this.staff}}
-                    {{this.newUser}}
-                    {{if this.nameFirst 'full-name' 'username'}}"
-                >
+          <div class="card-content__info">
+            <div class="card-row first-row">
+              <PluginOutlet
+                @name="user-card-main-info"
+                @outletArgs={{lazyHash
+                  user=this.user
+                  post=this.post
+                  contentHidden=this.contentHidden
+                  handleShowUser=this.handleShowUser
+                }}
+              >
+                <div aria-hidden="true" class="user-card-avatar">
                   {{#if this.contentHidden}}
-                    <span class="name-username-wrapper">
-                      {{if
-                        this.nameFirst
-                        this.user.name
-                        (formatUsername this.user.username)
-                      }}
-                    </span>
+                    <span class="card-huge-avatar">{{dBoundAvatar
+                        this.user
+                        "huge"
+                      }}</span>
                   {{else}}
                     <a
-                      aria-label={{i18n
-                        "user.profile_link"
-                        username=this.user.username
-                      }}
-                      class="user-profile-link"
-                      href={{this.user.path}}
-                      {{on "click" this.handleShowUser}}
+                      class="card-huge-avatar"
+                      href={{this.avatarUrl}}
+                      tabindex="-1"
                     >
+                      {{dBoundAvatar this.user "huge"}}
+                      {{#if this.isOwnCard}}
+                        <span class="own-avatar-pencil">
+                          <span class="own-avatar-pencil--icon">
+                            {{dIcon "pencil"}}
+                          </span>
+                        </span>
+                      {{/if}}
+                    </a>
+                  {{/if}}
+
+                  <DUserAvatarFlair @user={{this.user}} />
+
+                  <div>
+                    <PluginOutlet
+                      @connectorTagName="div"
+                      @name="user-card-avatar-flair"
+                      @outletArgs={{lazyHash user=this.user}}
+                    />
+                  </div>
+                </div>
+                <div class="names">
+                  <div
+                    class="names__primary
+                      {{this.staff}}
+                      {{this.newUser}}
+                      {{if this.user.name 'full-name' 'username'}}"
+                  >
+                    {{#if this.contentHidden}}
                       <span class="name-username-wrapper">
-                        {{if
-                          this.nameFirst
+                        {{or
                           this.user.name
                           (formatUsername this.user.username)
                         }}
                       </span>
-                      {{userStatus this.user currentUser=this.currentUser}}
-                    </a>
-                  {{/if}}
-                </div>
-                <PluginOutlet
-                  @connectorTagName="div"
-                  @name="user-card-after-username"
-                  @outletArgs={{lazyHash
-                    user=this.user
-                    showUser=this.handleShowUser
-                  }}
-                />
-                {{#if this.nameFirst}}
-                  <div
-                    class="names__secondary username"
-                  >{{this.user.username}}</div>
-                {{else}}
-                  {{#if this.user.name}}
-                    <div
-                      class="names__secondary full-name"
-                    >{{this.user.name}}</div>
-                  {{/if}}
-                {{/if}}
-                {{#if this.user.title}}
-                  <div class="names__secondary">{{this.user.title}}</div>
-                {{/if}}
-                {{#if this.user.staged}}
-                  <div class="names__secondary staged">{{i18n
-                      "user.staged"
-                    }}</div>
-                {{/if}}
-                {{#if this.hasStatus}}
-                  <div class="user-status">
-                    {{trustHTML this.userStatusEmoji}}
-                    <span class="user-status__description">
-                      {{this.user.status.description}}
-                    </span>
-                    {{dFormatDate this.user.status.ends_at format="tiny"}}
+                    {{else}}
+                      <a
+                        aria-label={{i18n
+                          "user.profile_link"
+                          username=this.user.username
+                        }}
+                        class="user-profile-link"
+                        href={{this.user.path}}
+                        {{on "click" this.handleShowUser}}
+                      >
+                        <span class="name-username-wrapper">
+                          {{if
+                            this.user.name
+                            this.user.name
+                            (formatUsername this.user.username)
+                          }}
+                        </span>
+                        {{userStatus this.user currentUser=this.currentUser}}
+                      </a>
+                    {{/if}}
                   </div>
-                {{/if}}
-                <div>
                   <PluginOutlet
                     @connectorTagName="div"
-                    @name="user-card-post-names"
+                    @name="user-card-after-username"
+                    @outletArgs={{lazyHash
+                      user=this.user
+                      showUser=this.handleShowUser
+                    }}
+                  />
+                  {{#if this.user.title}}
+                    <div class="names__secondary">{{this.user.title}}</div>
+                  {{/if}}
+                  {{#if this.user.staged}}
+                    <div class="names__secondary staged">{{i18n
+                        "user.staged"
+                      }}</div>
+                  {{/if}}
+                  {{#if this.hasStatus}}
+                    <div class="user-status">
+                      {{trustHTML this.userStatusEmoji}}
+                      <span class="user-status__description">
+                        {{this.user.status.description}}
+                      </span>
+                      {{dFormatDate this.user.status.ends_at format="tiny"}}
+                    </div>
+                  {{/if}}
+                  <div>
+                    <PluginOutlet
+                      @connectorTagName="div"
+                      @name="user-card-post-names"
+                      @outletArgs={{lazyHash user=this.user}}
+                    />
+                  </div>
+                </div>
+              </PluginOutlet>
+            </div>
+
+            {{#if this.user.profile_hidden}}
+              <div class="card-row second-row">
+                <div class="profile-hidden">
+                  <span role="alert">{{i18n "user.profile_hidden"}}</span>
+                </div>
+              </div>
+            {{else if this.user.inactive}}
+              <div class="card-row second-row">
+                <div class="inactive-user">
+                  <span role="alert">{{i18n "user.inactive_user"}}</span>
+                </div>
+              </div>
+            {{/if}}
+
+            {{#if this.isRestrictedOrHasBio}}
+              <div class="card-row second-row">
+                {{#if this.user.suspend_reason}}
+                  <div class="suspended">
+                    <div class="suspension-date">
+                      {{dIcon "ban"}}
+                      {{#if this.user.suspendedForever}}
+                        {{i18n "user.suspended_permanently"}}
+                      {{else}}
+                        {{i18n
+                          "user.suspended_notice"
+                          date=this.user.suspendedTillDate
+                        }}
+                      {{/if}}
+                    </div>
+                    <div class="suspension-reason">
+                      <span class="suspension-reason-title">{{i18n
+                          "user.suspended_reason"
+                        }}</span>
+                      <span class="suspension-reason-description">{{trustHTML
+                          this.user.suspend_reason
+                        }}</span>
+                    </div>
+                  </div>
+                {{/if}}
+                {{#if this.user.silence_reason}}
+                  <div class="silenced">
+                    <div class="silence-date">
+                      {{dIcon "microphone-slash"}}
+                      {{#if this.user.silencedForever}}
+                        {{i18n "user.silenced_permanently"}}
+                      {{else}}
+                        {{i18n
+                          "user.silenced_notice"
+                          date=this.user.silencedTillDate
+                        }}
+                      {{/if}}
+                    </div>
+                    <div class="silence-reason">
+                      <span class="silence-reason-title">{{i18n
+                          "user.silenced_reason"
+                        }}</span>
+                      <span class="silence-reason-description">{{trustHTML
+                          this.user.silence_reason
+                        }}</span>
+                    </div>
+                  </div>
+                {{/if}}
+                {{#unless this.isRestricted}}
+                  <div class="bio">
+                    <DHtmlWithLinks>
+                      {{trustHTML this.user.bio_excerpt}}
+                    </DHtmlWithLinks>
+                  </div>
+                {{/unless}}
+              </div>
+            {{/if}}
+
+            {{#if this.showFeaturedTopic}}
+              <div class="card-row">
+                <div class="featured-topic">
+                  <span class="desc">{{i18n "user.featured_topic"}}</span>
+                  <LinkTo
+                    @models={{array
+                      this.user.featured_topic.slug
+                      this.user.featured_topic.id
+                    }}
+                    @route="topic"
+                  >{{dReplaceEmoji
+                      (trustHTML this.user.featured_topic.fancy_title)
+                    }}</LinkTo>
+                </div>
+              </div>
+            {{/if}}
+
+            {{#if this.hasLocaleOrWebsite}}
+              <div class="card-row">
+                <div class="location-and-website">
+                  {{#if this.user.website_name}}
+                    <span class="website-name">
+                      {{dIcon "globe"}}
+                      {{#if this.linkWebsite}}
+                        {{! eslint-disable ember/template-link-rel-noopener }}
+                        <a
+                          href={{this.user.website}}
+                          rel="noopener {{unless
+                            this.removeNoFollow
+                            'nofollow ugc'
+                          }}"
+                          target="_blank"
+                        >{{this.user.website_name}}</a>
+                        {{! eslint-enable ember/template-link-rel-noopener }}
+                      {{else}}
+                        <span
+                          title={{this.user.website}}
+                        >{{this.user.website_name}}</span>
+                      {{/if}}
+                    </span>
+                  {{/if}}
+                  {{#if this.user.location}}
+                    <span class="location">
+                      {{dIcon "location-dot"}}
+                      <span>{{this.user.location}}</span>
+                    </span>
+                  {{/if}}
+                  {{#if this.showUserLocalTime}}
+                    <span class="local-time" title={{i18n "local_time"}}>
+                      {{dIcon "far-clock"}}
+                      <span>{{this.formattedUserLocalTime}}</span>
+                    </span>
+                  {{/if}}
+                  <span>
+                    <PluginOutlet
+                      @connectorTagName="div"
+                      @name="user-card-location-and-website"
+                      @outletArgs={{lazyHash user=this.user}}
+                    />
+                  </span>
+                </div>
+              </div>
+            {{/if}}
+
+            <div class="card-row metadata-row">
+              {{#unless this.contentHidden}}
+                <div class="metadata">
+                  {{#if this.user.last_posted_at}}
+                    <div class="metadata__last-posted">
+                      <span class="desc">{{i18n "last_post"}}</span>
+                      {{dFormatDate
+                        this.user.last_posted_at
+                        leaveAgo="true"
+                      }}</div>
+                  {{/if}}
+                  <div class="metadata__user-created">
+                    <span class="desc">{{i18n "joined"}}</span>
+                    {{dFormatDate this.user.created_at leaveAgo="true"}}</div>
+                  {{#if this.user.time_read}}
+                    <div
+                      class="metadata__time-read"
+                      title={{this.timeReadTooltip}}
+                    >
+                      <span class="desc">{{i18n "time_read"}}</span>
+                      {{dFormatDuration this.user.time_read}}
+                      {{#if this.showRecentTimeRead}}
+                        <span>
+                          ({{i18n
+                            "time_read_recently"
+                            time_read=this.recentTimeRead
+                          }})
+                        </span>
+                      {{/if}}
+                    </div>
+                  {{/if}}
+                  {{#if this.showCheckEmail}}
+                    <div class="metadata__email">
+                      {{dIcon "envelope" title="user.email.title"}}
+                      {{#if this.user.email}}
+                        {{this.user.email}}
+                      {{else}}
+                        <DButton
+                          class="btn-primary"
+                          @action={{fn this.checkEmail this.user}}
+                          @icon="envelope"
+                          @label="admin.users.check_email.text"
+                        />
+                      {{/if}}
+                    </div>
+                  {{/if}}
+                  <PluginOutlet
+                    @connectorTagName="div"
+                    @name="user-card-metadata"
                     @outletArgs={{lazyHash user=this.user}}
                   />
                 </div>
+              {{/unless}}
+              <PluginOutlet
+                @connectorTagName="div"
+                @name="user-card-after-metadata"
+                @outletArgs={{lazyHash user=this.user}}
+              />
+            </div>
+
+            {{#if this.publicUserFields}}
+              <div class="card-row">
+                <div class="public-user-fields">
+                  {{#each this.publicUserFields as |uf|}}
+                    {{#if uf.value}}
+                      <div
+                        class="public-user-field public-user-field__{{uf.field.dasherized_name}}"
+                      >
+                        <span class="user-field-name">{{uf.field.name}}:</span>
+                        <span class="user-field-value">
+                          {{#each uf.value as |v|}}
+                            {{! some values are arrays }}
+                            <span class="user-field-value-list-item">
+                              {{#if uf.field.searchable}}
+                                <LinkTo
+                                  @query={{hash name=v}}
+                                  @route="users"
+                                  {{on "click" (fn this.refreshRoute v)}}
+                                >{{v}}</LinkTo>
+                              {{else}}
+                                {{v}}
+                              {{/if}}
+                            </span>
+                          {{else}}
+                            {{uf.value}}
+                          {{/each}}
+                        </span>
+                      </div>
+                    {{/if}}
+                  {{/each}}
+                </div>
               </div>
-            </PluginOutlet>
+            {{/if}}
+
+            <PluginOutlet
+              @connectorTagName="div"
+              @name="user-card-before-badges"
+              @outletArgs={{lazyHash user=this.user}}
+            />
+
+            {{#if this.showBadges}}
+              <div class="card-row">
+                <PluginOutlet
+                  @name="user-card-badges"
+                  @outletArgs={{lazyHash user=this.user post=this.post}}
+                >
+                  {{#if this.user.featured_user_badges}}
+                    <div class="badge-section">
+                      {{#each this.user.featured_user_badges as |ub|}}
+                        <UserBadge @badge={{ub.badge}} @user={{this.user}} />
+                      {{/each}}
+                      {{#if this.showMoreBadges}}
+                        <span class="more-user-badges">
+                          <LinkTo @model={{this.user}} @route="user.badges">
+                            {{i18n
+                              "badges.more_badges"
+                              count=this.moreBadgesCount
+                            }}
+                          </LinkTo>
+                        </span>
+                      {{/if}}
+                    </div>
+                  {{/if}}
+                </PluginOutlet>
+              </div>
+            {{/if}}
+          </div>
+
+          <div class="card-content__controls">
             <ul class="usercard-controls">
               {{#if this.user.can_send_private_message_to_user}}
                 <li class="compose-pm">
@@ -663,6 +919,16 @@ export default class UserCardContents extends CardContentsBase {
                   />
                 </li>
               {{/if}}
+              {{#if this.currentUser.admin}}
+                <li>
+                  <DButton
+                    class="btn-default"
+                    @href={{this.adminUserPath}}
+                    @icon="wrench"
+                    @label="admin_title"
+                  />
+                </li>
+              {{/if}}
               <PluginOutlet
                 @connectorTagName="li"
                 @name="user-card-additional-buttons"
@@ -679,269 +945,6 @@ export default class UserCardContents extends CardContentsBase {
               }}
             />
           </div>
-
-          {{#if this.user.profile_hidden}}
-            <div class="card-row second-row">
-              <div class="profile-hidden">
-                <span role="alert">{{i18n "user.profile_hidden"}}</span>
-              </div>
-            </div>
-          {{else if this.user.inactive}}
-            <div class="card-row second-row">
-              <div class="inactive-user">
-                <span role="alert">{{i18n "user.inactive_user"}}</span>
-              </div>
-            </div>
-          {{/if}}
-
-          {{#if this.isRestrictedOrHasBio}}
-            <div class="card-row second-row">
-              {{#if this.user.suspend_reason}}
-                <div class="suspended">
-                  <div class="suspension-date">
-                    {{dIcon "ban"}}
-                    {{#if this.user.suspendedForever}}
-                      {{i18n "user.suspended_permanently"}}
-                    {{else}}
-                      {{i18n
-                        "user.suspended_notice"
-                        date=this.user.suspendedTillDate
-                      }}
-                    {{/if}}
-                  </div>
-                  <div class="suspension-reason">
-                    <span class="suspension-reason-title">{{i18n
-                        "user.suspended_reason"
-                      }}</span>
-                    <span class="suspension-reason-description">{{trustHTML
-                        this.user.suspend_reason
-                      }}</span>
-                  </div>
-                </div>
-              {{/if}}
-              {{#if this.user.silence_reason}}
-                <div class="silenced">
-                  <div class="silence-date">
-                    {{dIcon "microphone-slash"}}
-                    {{#if this.user.silencedForever}}
-                      {{i18n "user.silenced_permanently"}}
-                    {{else}}
-                      {{i18n
-                        "user.silenced_notice"
-                        date=this.user.silencedTillDate
-                      }}
-                    {{/if}}
-                  </div>
-                  <div class="silence-reason">
-                    <span class="silence-reason-title">{{i18n
-                        "user.silenced_reason"
-                      }}</span>
-                    <span class="silence-reason-description">{{trustHTML
-                        this.user.silence_reason
-                      }}</span>
-                  </div>
-                </div>
-              {{/if}}
-              {{#unless this.isRestricted}}
-                <div class="bio">
-                  <DHtmlWithLinks>
-                    {{trustHTML this.user.bio_excerpt}}
-                  </DHtmlWithLinks>
-                </div>
-              {{/unless}}
-            </div>
-          {{/if}}
-
-          {{#if this.showFeaturedTopic}}
-            <div class="card-row">
-              <div class="featured-topic">
-                <span class="desc">{{i18n "user.featured_topic"}}</span>
-                <LinkTo
-                  @models={{array
-                    this.user.featured_topic.slug
-                    this.user.featured_topic.id
-                  }}
-                  @route="topic"
-                >{{dReplaceEmoji
-                    (trustHTML this.user.featured_topic.fancy_title)
-                  }}</LinkTo>
-              </div>
-            </div>
-          {{/if}}
-
-          {{#if this.hasLocaleOrWebsite}}
-            <div class="card-row">
-              <div class="location-and-website">
-                {{#if this.user.website_name}}
-                  <span class="website-name">
-                    {{dIcon "globe"}}
-                    {{#if this.linkWebsite}}
-                      {{! eslint-disable ember/template-link-rel-noopener }}
-                      <a
-                        href={{this.user.website}}
-                        rel="noopener {{unless
-                          this.removeNoFollow
-                          'nofollow ugc'
-                        }}"
-                        target="_blank"
-                      >{{this.user.website_name}}</a>
-                      {{! eslint-enable ember/template-link-rel-noopener }}
-                    {{else}}
-                      <span
-                        title={{this.user.website}}
-                      >{{this.user.website_name}}</span>
-                    {{/if}}
-                  </span>
-                {{/if}}
-                {{#if this.user.location}}
-                  <span class="location">
-                    {{dIcon "location-dot"}}
-                    <span>{{this.user.location}}</span>
-                  </span>
-                {{/if}}
-                {{#if this.showUserLocalTime}}
-                  <span class="local-time" title={{i18n "local_time"}}>
-                    {{dIcon "far-clock"}}
-                    <span>{{this.formattedUserLocalTime}}</span>
-                  </span>
-                {{/if}}
-                <span>
-                  <PluginOutlet
-                    @connectorTagName="div"
-                    @name="user-card-location-and-website"
-                    @outletArgs={{lazyHash user=this.user}}
-                  />
-                </span>
-              </div>
-            </div>
-          {{/if}}
-
-          <div class="card-row metadata-row">
-            {{#unless this.contentHidden}}
-              <div class="metadata">
-                {{#if this.user.last_posted_at}}
-                  <div class="metadata__last-posted">
-                    <span class="desc">{{i18n "last_post"}}</span>
-                    {{dFormatDate
-                      this.user.last_posted_at
-                      leaveAgo="true"
-                    }}</div>
-                {{/if}}
-                <div class="metadata__user-created">
-                  <span class="desc">{{i18n "joined"}}</span>
-                  {{dFormatDate this.user.created_at leaveAgo="true"}}</div>
-                {{#if this.user.time_read}}
-                  <div
-                    class="metadata__time-read"
-                    title={{this.timeReadTooltip}}
-                  >
-                    <span class="desc">{{i18n "time_read"}}</span>
-                    {{dFormatDuration this.user.time_read}}
-                    {{#if this.showRecentTimeRead}}
-                      <span>
-                        ({{i18n
-                          "time_read_recently"
-                          time_read=this.recentTimeRead
-                        }})
-                      </span>
-                    {{/if}}
-                  </div>
-                {{/if}}
-                {{#if this.showCheckEmail}}
-                  <div class="metadata__email">
-                    {{dIcon "envelope" title="user.email.title"}}
-                    {{#if this.user.email}}
-                      {{this.user.email}}
-                    {{else}}
-                      <DButton
-                        class="btn-primary"
-                        @action={{fn this.checkEmail this.user}}
-                        @icon="envelope"
-                        @label="admin.users.check_email.text"
-                      />
-                    {{/if}}
-                  </div>
-                {{/if}}
-                <PluginOutlet
-                  @connectorTagName="div"
-                  @name="user-card-metadata"
-                  @outletArgs={{lazyHash user=this.user}}
-                />
-              </div>
-            {{/unless}}
-            <PluginOutlet
-              @connectorTagName="div"
-              @name="user-card-after-metadata"
-              @outletArgs={{lazyHash user=this.user}}
-            />
-          </div>
-
-          {{#if this.publicUserFields}}
-            <div class="card-row">
-              <div class="public-user-fields">
-                {{#each this.publicUserFields as |uf|}}
-                  {{#if uf.value}}
-                    <div
-                      class="public-user-field public-user-field__{{uf.field.dasherized_name}}"
-                    >
-                      <span class="user-field-name">{{uf.field.name}}:</span>
-                      <span class="user-field-value">
-                        {{#each uf.value as |v|}}
-                          {{! some values are arrays }}
-                          <span class="user-field-value-list-item">
-                            {{#if uf.field.searchable}}
-                              <LinkTo
-                                @query={{hash name=v}}
-                                @route="users"
-                                {{on "click" (fn this.refreshRoute v)}}
-                              >{{v}}</LinkTo>
-                            {{else}}
-                              {{v}}
-                            {{/if}}
-                          </span>
-                        {{else}}
-                          {{uf.value}}
-                        {{/each}}
-                      </span>
-                    </div>
-                  {{/if}}
-                {{/each}}
-              </div>
-            </div>
-          {{/if}}
-
-          <PluginOutlet
-            @connectorTagName="div"
-            @name="user-card-before-badges"
-            @outletArgs={{lazyHash user=this.user}}
-          />
-
-          {{#if this.showBadges}}
-            <div class="card-row">
-              <PluginOutlet
-                @name="user-card-badges"
-                @outletArgs={{lazyHash user=this.user post=this.post}}
-              >
-                {{#if this.user.featured_user_badges}}
-                  <div class="badge-section">
-                    {{#each this.user.featured_user_badges as |ub|}}
-                      <UserBadge @badge={{ub.badge}} @user={{this.user}} />
-                    {{/each}}
-                    {{#if this.showMoreBadges}}
-                      <span class="more-user-badges">
-                        <LinkTo @model={{this.user}} @route="user.badges">
-                          {{i18n
-                            "badges.more_badges"
-                            count=this.moreBadgesCount
-                          }}
-                        </LinkTo>
-                      </span>
-                    {{/if}}
-                  </div>
-                {{/if}}
-              </PluginOutlet>
-            </div>
-          {{/if}}
         {{/if}}
       </div>
     {{/if}}
