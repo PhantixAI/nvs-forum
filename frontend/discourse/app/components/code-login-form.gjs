@@ -552,6 +552,19 @@ export default class CodeLoginForm extends Component {
       }
     }
 
+    // Always signals the server this account's username is now settled, so
+    // any signup-time side effect deferred until then (e.g. the batch-
+    // moderator cohort sync, which otherwise fires against the machine-
+    // generated placeholder username shown before this screen) can run
+    // against the real one. Best-effort: a failure here isn't worth blocking
+    // the user's redirect over, since a later profile update naturally
+    // re-triggers the same sync.
+    try {
+      await ajax("/session/login-code/finalize", { type: "PUT" });
+    } catch {
+      // ignored -- see comment above
+    }
+
     // Leave the button disabled and spinning through the redirect so it doesn't
     // flash back to its idle state before the page navigates away.
     this.redirectAfterLogin(this.#postSignupRedirectUrl);
@@ -1001,6 +1014,16 @@ export default class CodeLoginForm extends Component {
               </div>
             {{/each}}
           </div>
+
+          <PluginOutlet
+            @name="create-account-after-user-fields"
+            @outletArgs={{lazyHash
+              accountName=this.name
+              accountUsername=this.username
+              accountPassword=null
+              userFields=this.userFields
+            }}
+          />
 
           <div aria-live="polite" class="code-login-form__error" role="alert">
             {{this.codeError}}

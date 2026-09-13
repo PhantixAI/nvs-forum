@@ -1,4 +1,4 @@
-import { concat, fn, get } from "@ember/helper";
+import { concat, fn, get, hash } from "@ember/helper";
 import { on } from "@ember/modifier";
 import { LinkTo } from "@ember/routing";
 import { trustHTML } from "@ember/template";
@@ -8,13 +8,13 @@ import DTooltip from "discourse/float-kit/components/d-tooltip";
 import i18nYesNo from "discourse/helpers/i18n-yes-no";
 import lazyHash from "discourse/helpers/lazy-hash";
 import rawDate from "discourse/helpers/raw-date";
+import ComboBox from "discourse/select-kit/components/combo-box";
 import { not, or } from "discourse/truth-helpers";
 import DButton from "discourse/ui-kit/d-button";
 import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
 import DDropdownMenu from "discourse/ui-kit/d-dropdown-menu";
 import DFilterControls from "discourse/ui-kit/d-filter-controls";
 import DLoadMore from "discourse/ui-kit/d-load-more";
-import DNativeSelect from "discourse/ui-kit/d-native-select";
 import DPageSubheader from "discourse/ui-kit/d-page-subheader";
 import DResponsiveTable from "discourse/ui-kit/d-responsive-table";
 import DTableHeaderToggle from "discourse/ui-kit/d-table-header-toggle";
@@ -81,18 +81,16 @@ export default <template>
     <:additionalFilters>
       {{#if @controller.showCohortFilters}}
         {{#each @controller.cohortFilterFields as |field|}}
-          <DNativeSelect
+          <ComboBox
             class="admin-users-list__cohort-filter"
-            disabled={{field.disabled}}
-            @nonePlaceholder={{field.noneLabel}}
+            @content={{field.content}}
             @onChange={{fn @controller.cohortFilterChanged field.id}}
+            @options={{hash
+              translatedNone=field.noneLabel
+              disabled=field.disabled
+            }}
             @value={{field.value}}
-            as |s|
-          >
-            {{#each field.content as |option|}}
-              <s.Option @value={{option.id}}>{{option.name}}</s.Option>
-            {{/each}}
-          </DNativeSelect>
+          />
         {{/each}}
         <DToggleSwitch
           @icon="shield-halved"

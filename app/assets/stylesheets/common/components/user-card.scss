@@ -55,7 +55,11 @@
   --avatar-width: 8em;
   --avatar-margin: -3.3em; // extends the avatar above the card
   min-width: 0;
-  width: var(--card-width);
+
+  // Caps at --card-width (as before) but shrinks for a sparse profile (no
+  // bio, few custom fields) instead of always reserving the full width --
+  // that used to leave a large blank area next to short content.
+  width: min(var(--card-width), max-content);
   color: var(--primary);
   background: var(--secondary) center center;
   background-size: cover;
@@ -142,41 +146,39 @@
     .usercard-controls {
       list-style-type: none;
       margin: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5em;
 
       @include viewport.until(sm) {
         width: 100%; // always wraps to next line
-        display: flex;
-        flex-wrap: wrap;
         margin-top: 1em;
-        gap: 0.5em;
-
-        li {
-          flex: 1 0 45%;
-          min-width: 8em;
-
-          &:empty {
-            display: none;
-          }
-
-          button {
-            margin: 0;
-
-            .d-button-label {
-              @include ellipsis;
-            }
-          }
-        }
       }
 
+      // Two buttons per row (rather than one) once there are more than a
+      // couple of them (Message/Chat/Suspend/Silence/Report/Follow can all
+      // coexist) -- stacking every button one-per-line made this list much
+      // taller than the avatar/name column beside it, leaving a large dead
+      // gap where that shorter column had nothing left to fill.
       @include viewport.from(sm) {
-        max-width: 225px;
+        max-width: 270px;
+      }
+
+      li {
+        flex: 1 0 45%;
+        min-width: 7.5em;
+
+        &:empty {
+          display: none;
+        }
       }
 
       button {
         width: 100%;
+        margin: 0;
 
-        @include viewport.from(sm) {
-          min-width: 150px;
+        .d-button-label {
+          @include ellipsis;
         }
       }
     }
@@ -252,7 +254,55 @@
     outline: none;
   }
 
-  // avatar - names - controls
+  .card-content {
+    display: flex;
+    gap: 1em;
+
+    @include viewport.until(sm) {
+      flex-direction: column;
+    }
+  }
+
+  // holds every row except the button list, so the button list (a sibling)
+  // spans the height of all of it -- Joined/College/Batch/etc included, not
+  // just the avatar/name row.
+  .card-content__info {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .card-content__controls {
+    flex: 0 0 auto;
+
+    @include viewport.until(sm) {
+      width: 100%;
+    }
+  }
+
+  .usercard-controls {
+    list-style-type: none;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+    min-width: 7.5em;
+
+    li:empty {
+      display: none;
+    }
+
+    .btn {
+      width: 100%;
+      margin: 0;
+      box-sizing: border-box;
+
+      .d-button-label {
+        @include ellipsis;
+      }
+    }
+  }
+
+  // avatar - names
   .first-row {
     display: flex;
 
@@ -617,4 +667,10 @@
     width: 0.75em;
     height: 0.75em;
   }
+}
+
+.user-card-batch-moderator-badge {
+  display: block;
+  color: var(--primary-medium);
+  font-size: var(--font-0);
 }

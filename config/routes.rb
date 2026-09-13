@@ -612,6 +612,7 @@ Discourse::Application.routes.draw do
     post "session/email-login/:token" => "session#email_login"
     post "session/login-code" => "session#create_login_code"
     post "session/login-code/verify" => "session#verify_login_code"
+    put "session/login-code/finalize" => "session#finalize_login_code_signup"
     get "session/otp/:token" => "session#one_time_password", :constraints => { token: /[0-9a-f]+/ }
     post "session/otp/:token" => "session#one_time_password", :constraints => { token: /[0-9a-f]+/ }
     get "session/2fa" => "session#second_factor_auth_show"
