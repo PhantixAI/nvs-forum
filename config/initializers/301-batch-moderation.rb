@@ -12,6 +12,12 @@ Rails.application.config.to_prepare do
   end
 end
 
-DiscourseEvent.on(:user_created) { |user| BatchModeration::GroupSync.sync(user) }
+DiscourseEvent.on(:user_created) do |user|
+  next if Thread.current[BatchModeration::GroupSync::DEFER_SYNC_ON_SIGNUP_THREAD_KEY]
+  BatchModeration::GroupSync.sync(user)
+end
 
-DiscourseEvent.on(:user_updated) { |user, _changed_columns| BatchModeration::GroupSync.sync(user) }
+DiscourseEvent.on(:user_updated) do |user, _changed_columns|
+  next if Thread.current[BatchModeration::GroupSync::DEFER_SYNC_ON_SIGNUP_THREAD_KEY]
+  BatchModeration::GroupSync.sync(user)
+end

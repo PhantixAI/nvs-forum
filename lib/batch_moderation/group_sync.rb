@@ -7,6 +7,21 @@ module BatchModeration
     FULL_NAME_MAX_LENGTH = 100
     STAFF_TYPE_SUFFIX = "Staff"
 
+    # Set (via Thread.current) around the entirety of EmailLoginCode::Redeem's
+    # call -- which both creates AND activates a brand-new passwordless-
+    # signup account, each a separate save that would otherwise fire its own
+    # user_created/user_updated sync below -- so both are skipped for it. At
+    # that point the account still carries its machine-generated placeholder
+    # username; a cohort-join/moderator-grant notification fired now would
+    # bake that placeholder into its stored data permanently, even after the
+    # user picks their real username moments later on the next signup
+    # screen. The real sync instead runs from
+    # SessionController#finalize_login_code_signup once the username is
+    # settled. Unset in every other request, so a later, genuinely separate
+    # profile update still self-heals the sync if this deferred call is
+    # somehow never reached (e.g. an abandoned signup).
+    DEFER_SYNC_ON_SIGNUP_THREAD_KEY = :batch_moderation_defer_sync_on_signup
+
     # `notify:` is set to `false` by the one-time `batch_moderation:resync_cohorts`
     # rake task (see lib/tasks/batch_moderation.rake) -- re-keying every
     # existing user under a new cohort-key algorithm would otherwise fire a

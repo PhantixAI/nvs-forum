@@ -3,6 +3,25 @@
 class EmailLoginCode::Redeem
   include Service::Base
 
+  class << self
+    # A brand-new account created by this call still has its machine-
+    # generated placeholder username right through account creation AND
+    # activation (both happen inside this one call) -- the real username
+    # isn't picked until the signup flow's next screen. Deferring the
+    # batch-moderator cohort sync that user_created/user_updated would
+    # otherwise fire as a side effect of either step avoids baking that
+    # placeholder into a cohort-change notification. See
+    # BatchModeration::GroupSync::DEFER_SYNC_ON_SIGNUP_THREAD_KEY and
+    # SessionController#finalize_login_code_signup, which runs the real,
+    # deferred sync once the username is settled.
+    def call(context = {}, &block)
+      Thread.current[BatchModeration::GroupSync::DEFER_SYNC_ON_SIGNUP_THREAD_KEY] = true
+      super
+    ensure
+      Thread.current[BatchModeration::GroupSync::DEFER_SYNC_ON_SIGNUP_THREAD_KEY] = nil
+    end
+  end
+
   params base_class: EmailLoginCode::Verify::Contract do
     attribute :user_fields
     attribute :name, :string
@@ -115,14 +134,23 @@ class EmailLoginCode::Redeem
     values = params.user_fields.presence || {}
     # Only the fields shown at signup can be collected here (the UI and
     # CreateFromVerifiedEmail both use show_on_signup); requiring a hidden field
-    # would make passwordless signup impossible to complete.
+    # would make passwordless signup impossible to complete. Each field's
+    # required-ness is also run through the same user_field_required_for_signup
+    # modifier UsersController#create uses, so a field hidden by another
+    # field's custom validation (e.g. Batch/Branch behind "I am") is exempted
+    # here too rather than only on the client.
     UserField
-      .required
       .where(show_on_signup: true)
-      .pluck(:id)
-      .all? do |field_id|
-        value = values[field_id.to_s]
-        value.present? && value != "false"
+      .all? do |field|
+        value = values[field.id.to_s]
+        next true if value.present? && value != "false"
+
+        !DiscoursePluginRegistry.apply_modifier(
+          :user_field_required_for_signup,
+          field.required?,
+          field,
+          values,
+        )
       end
   end
 
