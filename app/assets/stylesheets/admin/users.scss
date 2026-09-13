@@ -145,15 +145,14 @@
     }
   }
 
-  // `.d-native-select` sets `width: 100%`, which (with the default
-  // `flex-basis: auto`) becomes each dropdown's flex-basis -- without a
-  // narrower one here, each cohort filter dropdown claims the full row width
-  // and wraps onto its own line instead of sitting alongside the others.
-  &__cohort-filter.d-native-select {
+  // The combo-box's default width is wide enough that three of them alone
+  // exceed a normal admin content width -- cap it so the dropdowns and the
+  // toggles beside them share one row instead of each wrapping onto its own.
+  &__cohort-filter {
     flex: 1 1 auto;
     width: auto;
     min-width: 9em;
-    max-width: 14em;
+    max-width: 12em;
   }
 
   .directory-table__cell {
