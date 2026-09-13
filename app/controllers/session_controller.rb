@@ -14,6 +14,7 @@ class SessionController < ApplicationController
   before_action :rate_limit_login_code_request, only: %i[create_login_code]
   before_action :rate_limit_login_code_verify,
                 only: %i[verify_login_code redeem_password_reset_code]
+  before_action :ensure_logged_in, only: %i[finalize_login_code_signup]
   skip_before_action :redirect_to_login_if_required
   skip_before_action :redirect_to_profile_if_required
   skip_before_action :preload_json,
@@ -551,6 +552,18 @@ class SessionController < ApplicationController
       end
       on_failure { render json: invalid_login_code }
     end
+  end
+
+  # Called once, unconditionally, from the passwordless signup flow's final
+  # "pick your username" screen -- after any username change on that screen
+  # has already completed -- to run the batch-moderator cohort sync that
+  # EmailLoginCode::Redeem deliberately deferred across account creation and
+  # activation (see BatchModeration::GroupSync::DEFER_SYNC_ON_SIGNUP_THREAD_KEY).
+  # Safe to call more than once: GroupSync.sync only notifies on an actual
+  # cohort change, so a user who already has a synced cohort is a no-op here.
+  def finalize_login_code_signup
+    BatchModeration::GroupSync.sync(current_user)
+    render json: success_json
   end
 
   def one_time_password
