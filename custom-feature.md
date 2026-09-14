@@ -705,6 +705,60 @@ individual invites — an inconsistent permission boundary.
   is a pure widen-the-gate change reusing an already-existing capability
   (`invite_allowed_groups`) rather than introducing new logic.
 
+### Extension: Batch Moderator bulk invite via Review Queue + optional LinkedIn gate
+
+The above widened bulk invite to site moderators (`is_staff?`). Batch
+Moderators (section 1) are deliberately weaker — non-staff — so they don't
+get the same immediate-processing path. Instead:
+
+- `BatchModeration::GuardianExtension#can_bulk_invite_to_forum?`
+  (`lib/batch_moderation/guardian_extension.rb`) grants a Batch Moderator
+  access to the same "Create Bulk Invites" UI as staff, but
+  `InvitesController#upload_csv` branches on `guardian.is_staff?`: staff are
+  unchanged (immediate `Jobs.enqueue(:bulk_invite, ...)`), a Batch
+  Moderator's upload instead creates a `ReviewableBulkInvite` and is held
+  for admin/moderator approval in the standard Review Queue (`/review`) —
+  the review step *is* the access control, no separate toggle needed.
+- The reviewable stores **both** the parsed `invites` array **and** the raw
+  uploaded CSV bytes (`raw_csv`). This is deliberate: Discourse's stock CSV
+  parser silently drops any column that's blank on every row (e.g. an empty
+  `groups` column), so reconstructing "what was uploaded" from the parsed
+  array alone loses data — the review UI
+  (`frontend/discourse/app/components/reviewable/bulk-invite.gjs`) renders
+  and downloads `raw_csv` verbatim instead. `upload_csv` also caps the raw
+  file at `MAX_BULK_INVITE_CSV_BYTES` (5MB) before persisting it, since
+  unlike the parsed array it isn't otherwise bounded by `max_bulk_invites`.
+- On approve, the existing `Jobs::BulkInvite` flow runs as normal (including
+  its own pre-existing `bulk_invite_succeeded`/`bulk_invite_failed` PM to
+  the submitter). On reject, a new `reviewable_bulk_invite_rejected` system
+  PM notifies the submitter — previously rejection sent no notification at
+  all.
+- `Jobs::BulkInvite#get_topic` gained a `@guardian.can_invite_to?(topic)`
+  check (it previously had none), consistent with how `get_groups` already
+  silently drops unauthorized groups rather than trusting a CSV column
+  unconditionally. Matters more now that a lower-trust role's invites can
+  reach this job post-approval.
+- Optional, site-setting-gated layer on top: `batch_moderator_linkedin_auth`
+  (default off) additionally requires a Batch Moderator to have a connected
+  LinkedIn account (`UserAssociatedAccount` row for `linkedin_oidc`) before
+  `can_bulk_invite_to_forum?` returns true for them — folded into the same
+  guardian method, so no separate enforcement path exists to fall out of
+  sync. `bulk_invite_needs_linkedin_connection?` mirrors the same condition
+  purely for frontend messaging (a "connect your LinkedIn account" prompt
+  linking to `/my/preferences/account`, shown in place of the upload button
+  on `/u/<username>/invited`). Staff always bypass this via `super` before
+  any LinkedIn check runs, same as the core permission itself.
+
+### Edge cases (Batch Moderator extension)
+
+- No retroactive enforcement — the LinkedIn requirement only applies to new
+  CSV upload attempts; existing pending/historical bulk invites are
+  unaffected.
+- No automated spec coverage yet for `ReviewableBulkInvite`'s
+  submit/approve/reject flow or the new guardian methods — verified
+  manually this round (console scripts + live browser testing against a
+  restored local DB), not via committed specs. Worth closing.
+
 ---
 
 ## 6. Auth Custom Field Validation — Plugin Modifier Hooks
@@ -794,3 +848,41 @@ overriding `DISCOURSE_MULTISITE_CONFIG_PATH` to `config/multisite.local.yml`
 (or `spec/fixtures/multisite/two_dbs.yml` for the test suite) will hang
 trying to connect to production RDS at boot (site-settings refresh iterates
 every configured site's DB unconditionally once multisite mode is active).
+
+---
+
+## 9. LinkedIn OIDC Login Fix — `client_secret` Missing
+
+### Requirement
+
+LinkedIn login (`linkedin_oidc`, used both for user sign-in and as the
+identity check for section 5's Batch Moderator LinkedIn gate) was failing
+on production with `OAuth2::Error, invalid_request: A required parameter
+"client_secret" is missing` during the token-exchange callback step.
+
+### Root cause
+
+Not a config issue — the `oauth2` Ruby gem (pinned at 2.0.25 in
+`Gemfile.lock`) changed its default `auth_scheme` from `:request_body` to
+`:basic_auth` in its 2.0 release. LinkedIn's token endpoint
+(`/oauth/v2/accessToken`) only accepts `client_secret` in the POST body, not
+an `Authorization: Basic` header, so it never received the secret at all.
+Confirmed this is an unpatched gap in upstream Discourse core too (not
+something this fork fell behind on).
+
+### Implementation
+
+- `lib/auth/linkedin_oidc_authenticator.rb`: added `auth_scheme:
+  :request_body` to the `LinkedInOidc` strategy's `client_options`, pinning
+  back the pre-2.0 behavior. Scoped only to this authenticator's own
+  `client_options` — mirrors the identical, pre-existing pattern already
+  used for GitHub and Facebook in this codebase; does not touch the shared
+  `oauth2` gem config or any other authenticator.
+
+### Edge cases
+
+- A separate, earlier production issue on the same login flow
+  (`invalid_scope_error`) was a LinkedIn Developer Portal config gap, not
+  code — the app needed the "Sign In with LinkedIn using OpenID Connect"
+  product added under its Products tab. Worth remembering these are two
+  independent failure modes that can both block the same login attempt.

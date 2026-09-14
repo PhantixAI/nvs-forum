@@ -7,6 +7,12 @@ class InvitesController < ApplicationController
   # what it does.
   ALLOWED_BULK_INVITE_COLUMNS = %w[email groups topic_id locale allow_any_email]
 
+  # Bounds the raw file bytes persisted verbatim into ReviewableBulkInvite's
+  # payload (see upload_csv) -- unlike the parsed `invites` array, that isn't
+  # otherwise capped by max_bulk_invites, since a file can carry a lot of
+  # padding/garbage without producing many valid rows.
+  MAX_BULK_INVITE_CSV_BYTES = 5.megabytes
+
   requires_login only: %i[
                    create
                    create_multiple
@@ -539,6 +545,21 @@ class InvitesController < ApplicationController
     hijack do
       file = params[:file] || params[:files].first
 
+      if file.tempfile.size > MAX_BULK_INVITE_CSV_BYTES
+        return(
+          render json: failed_json.merge(errors: [I18n.t("bulk_invite.file_too_large")]),
+                 status: :unprocessable_entity
+        )
+      end
+
+      # Read independently of the CSV.foreach below (a separate handle via
+      # path, not file.tempfile's own IO position) -- kept verbatim rather
+      # than reconstructed from `invites`, since that array drops any
+      # column whose value is blank on every row (see the `filter` below),
+      # which would otherwise make a Batch Moderator's held-for-review
+      # upload look different from what they actually uploaded.
+      raw_csv = File.read(file.tempfile.path)
+
       csv_header = nil
       invites = []
       valid_columns = nil
@@ -578,7 +599,16 @@ class InvitesController < ApplicationController
           )
         end
 
-        Jobs.enqueue(:bulk_invite, invites: invites, current_user_id: current_user.id)
+        pending_review = !guardian.is_staff?
+        if pending_review
+          # Batch Moderators can reach this action (see
+          # BatchModeration::GuardianExtension#can_bulk_invite_to_forum?),
+          # but their invites are held for staff approval instead of being
+          # processed immediately -- the review step is the access control.
+          ReviewableBulkInvite.submit!(actor: current_user, invites: invites, raw_csv: raw_csv)
+        else
+          Jobs.enqueue(:bulk_invite, invites: invites, current_user_id: current_user.id)
+        end
 
         if invites.count >= SiteSetting.max_bulk_invites
           render json:
@@ -592,7 +622,7 @@ class InvitesController < ApplicationController
                    ),
                  status: :unprocessable_entity
         else
-          render json: success_json
+          render json: success_json.merge(pending_review: pending_review)
         end
       else
         render json: failed_json.merge(errors: [I18n.t("bulk_invite.error")]),
