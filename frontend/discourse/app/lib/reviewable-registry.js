@@ -1,5 +1,6 @@
 import { dasherize } from "@ember/string";
 import ReviewableBatchModerationReport from "discourse/components/reviewable/batch-moderation-report";
+import ReviewableBulkInvite from "discourse/components/reviewable/bulk-invite";
 import ReviewableFlaggedPost from "discourse/components/reviewable/flagged-post";
 import ReviewablePost from "discourse/components/reviewable/post";
 import ReviewableQueuedPost from "discourse/components/reviewable/queued-post";
@@ -9,6 +10,7 @@ import { applyValueTransformer } from "discourse/lib/transformer";
 
 const coreLoaders = {
   ReviewableBatchModerationReport: () => ReviewableBatchModerationReport,
+  ReviewableBulkInvite: () => ReviewableBulkInvite,
   ReviewableFlaggedPost: () => ReviewableFlaggedPost,
   ReviewablePost: () => ReviewablePost,
   ReviewableQueuedPost: () => ReviewableQueuedPost,

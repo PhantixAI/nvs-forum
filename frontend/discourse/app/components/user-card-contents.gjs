@@ -25,10 +25,10 @@ import CanCheckEmailsHelper from "discourse/lib/can-check-emails-helper";
 import { durationTiny } from "discourse/lib/formatter";
 import { getURLWithCDN } from "discourse/lib/get-url";
 import { wantsNewWindow } from "discourse/lib/intercept-click";
+import { prioritizeNameInUx } from "discourse/lib/settings";
 import { emojiUnescape } from "discourse/lib/text";
 import { escapeExpression } from "discourse/lib/utilities";
 import User from "discourse/models/user";
-import { or } from "discourse/truth-helpers";
 import DButton from "discourse/ui-kit/d-button";
 import DHtmlWithLinks from "discourse/ui-kit/d-html-with-links";
 import DUserAvatarFlair from "discourse/ui-kit/d-user-avatar-flair";
@@ -211,6 +211,11 @@ export default class UserCardContents extends CardContentsBase {
   @computed("user.trust_level")
   get newUser() {
     return this.user?.trust_level === 0 ? "new-user" : "";
+  }
+
+  @computed("user.name")
+  get nameFirst() {
+    return prioritizeNameInUx(this.user?.name);
   }
 
   @computed("user")
@@ -515,11 +520,12 @@ export default class UserCardContents extends CardContentsBase {
                     class="names__primary
                       {{this.staff}}
                       {{this.newUser}}
-                      {{if this.user.name 'full-name' 'username'}}"
+                      {{if this.nameFirst 'full-name' 'username'}}"
                   >
                     {{#if this.contentHidden}}
                       <span class="name-username-wrapper">
-                        {{or
+                        {{if
+                          this.nameFirst
                           this.user.name
                           (formatUsername this.user.username)
                         }}
@@ -536,7 +542,7 @@ export default class UserCardContents extends CardContentsBase {
                       >
                         <span class="name-username-wrapper">
                           {{if
-                            this.user.name
+                            this.nameFirst
                             this.user.name
                             (formatUsername this.user.username)
                           }}

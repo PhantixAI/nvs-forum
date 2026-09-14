@@ -93,6 +93,19 @@ RSpec.describe Jobs::BulkInvite do
       expect(invite.invited_groups.pluck(:group_id)).to contain_exactly(group1.id)
     end
 
+    it "does not assign a topic the user cannot invite to" do
+      restricted_category = Fabricate(:private_category, group: Fabricate(:group))
+      restricted_topic = Fabricate(:topic, category: restricted_category)
+      invites_with_restricted_topic = [
+        { email: "test@discourse.org", topic_id: restricted_topic.id },
+      ]
+
+      described_class.new.execute(current_user_id: user.id, invites: invites_with_restricted_topic)
+
+      invite = Invite.find_by(email: "test@discourse.org")
+      expect(invite.topic_invites).to be_empty
+    end
+
     it "adds existing users to valid groups" do
       existing_user = Fabricate(:user, email: "test@discourse.org")
 

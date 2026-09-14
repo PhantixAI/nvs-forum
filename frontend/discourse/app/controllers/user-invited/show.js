@@ -85,6 +85,19 @@ export default class UserInvitedShowController extends Controller {
     );
   }
 
+  @computed(
+    "currentUser.bulk_invite_needs_linkedin_connection",
+    "siteSettings.allow_bulk_invite",
+    "viewingSelf"
+  )
+  get needsLinkedinForBulkInvite() {
+    return (
+      this.currentUser?.bulk_invite_needs_linkedin_connection &&
+      this.siteSettings?.allow_bulk_invite &&
+      this.viewingSelf
+    );
+  }
+
   @computed("model")
   get hasEmailInvites() {
     // An allow_any_email invite has no bound email, but is still resendable via its
