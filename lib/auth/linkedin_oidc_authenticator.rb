@@ -9,6 +9,10 @@ class Auth::LinkedInOidcAuthenticator < Auth::ManagedAuthenticator
              site: "https://api.linkedin.com",
              authorize_url: "https://www.linkedin.com/oauth/v2/authorization?response_type=code",
              token_url: "https://www.linkedin.com/oauth/v2/accessToken",
+             # oauth2 gem v2.0 changed its default auth_scheme from :request_body to
+             # :basic_auth; LinkedIn's token endpoint only accepts client_secret in the
+             # POST body, so it must be pinned back explicitly.
+             auth_scheme: :request_body,
            }
 
     option :scope, "openid profile email"

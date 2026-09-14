@@ -1205,6 +1205,12 @@ en:
         reviewable_post_voting_comment:
           title: "Flagged Comment"
           noun: "comment"
+        reviewable_batch_moderation_report:
+          title: "Batch Moderation Report"
+          noun: "report"
+        reviewable_bulk_invite:
+          title: "Bulk Invite"
+          noun: "bulk invite"
       flagged_as: "Flagged as"
       post_flagged_as: "Post flagged as"
       chat_flagged_as: "Chat flagged as"
@@ -1755,6 +1761,12 @@ en:
       reviewable:
         reported_by: "Reported by"
         reported_user: "Reported user"
+      reviewable_bulk_invite:
+        submitted_by: "Submitted by"
+        invite_count:
+          one: "%{count} invite"
+          other: "%{count} invites"
+        download: "Download CSV"
       badge_title: "Batch Moderator"
       system_actor: "the system"
 
@@ -2743,7 +2755,10 @@ en:
 
           progress: "Uploaded %{progress}%…"
           success: "File uploaded successfully. You will be notified via message when the process is complete."
+          pending_review: "File uploaded successfully. It has been submitted for staff review and won't be processed until approved."
           error: "Sorry, file should be CSV format."
+          needs_linkedin: "Connect your LinkedIn account to enable bulk invites."
+          connect_linkedin: "Connect LinkedIn"
 
       confirm_access:
         title: "Confirm access"

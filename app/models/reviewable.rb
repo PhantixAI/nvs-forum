@@ -91,6 +91,7 @@ class Reviewable < ActiveRecord::Base
       ReviewableUser,
       ReviewablePost,
       ReviewableBatchModerationReport,
+      ReviewableBulkInvite,
     ]
   end
 
