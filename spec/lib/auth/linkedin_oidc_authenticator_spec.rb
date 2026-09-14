@@ -40,4 +40,15 @@ RSpec.describe Auth::LinkedInOidcAuthenticator do
       expect(result.email).to eq("coding@horror.com")
     end
   end
+
+  describe "client_options" do
+    it "sends client credentials in the token request body, not a Basic Auth header" do
+      # The `oauth2` gem defaults to :basic_auth since v2.0, but LinkedIn's
+      # token endpoint only accepts client_secret in the POST body.
+      client_options =
+        Auth::LinkedInOidcAuthenticator::LinkedInOidc.default_options[:client_options]
+
+      expect(client_options[:auth_scheme]).to eq(:request_body)
+    end
+  end
 end

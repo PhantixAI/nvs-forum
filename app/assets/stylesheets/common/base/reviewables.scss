@@ -724,3 +724,20 @@
     width: 100%;
   }
 }
+
+.reviewable-bulk-invite {
+  &__download {
+    margin-inline-start: 0.5em;
+  }
+
+  &__raw-csv {
+    max-height: 20em;
+    overflow: auto;
+    padding: 0.5em;
+    margin-top: 0.5em;
+    background: var(--primary-very-low);
+    border-radius: var(--d-border-radius);
+    font-size: var(--font-down-1);
+    white-space: pre;
+  }
+}

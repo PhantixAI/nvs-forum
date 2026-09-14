@@ -2214,9 +2214,11 @@ RSpec.describe InvitesController do
     end
 
     context "while logged in" do
-      fab!(:user) { sign_in(Fabricate(:user)) }
+      fab!(:user)
       fab!(:invite) { Fabricate(:invite, invited_by: user) }
       fab!(:another_invite) { Fabricate(:invite, email: "last_name@example.com") }
+
+      before { sign_in(user) }
 
       it "raises an error when the email is missing" do
         post "/invites/reinvite.json"
@@ -2374,6 +2376,23 @@ RSpec.describe InvitesController do
         post "/invites/upload_csv.json", params: { file: file, name: "discourse.csv" }
         expect(response.status).to eq(200)
         expect(Jobs::BulkInvite.jobs.size).to eq(1)
+      end
+
+      it "holds a batch moderator's upload for review instead of enqueuing it directly" do
+        SiteSetting.enable_batch_moderation = true
+        batch_moderator = Fabricate(:user)
+        group = Fabricate(:group)
+        group.custom_fields[BatchModeration::GroupSync::CUSTOM_FIELD_FLAG] = "t"
+        group.save_custom_fields
+        group.add_owner(batch_moderator)
+
+        sign_in(batch_moderator)
+        post "/invites/upload_csv.json", params: { file: file, name: "discourse.csv" }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["pending_review"]).to eq(true)
+        expect(Jobs::BulkInvite.jobs).to be_empty
+        expect(ReviewableBulkInvite.where(created_by_id: batch_moderator.id)).to be_present
       end
 
       it "allows admin to bulk invite when DiscourseConnect enabled" do
