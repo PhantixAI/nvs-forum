@@ -14,7 +14,11 @@ const CreateInviteBulk = <template>
     >
       <:body>
         {{#if uploader.uploaded}}
-          {{i18n "user.invited.bulk_invite.success"}}
+          {{#if uploader.pendingReview}}
+            {{i18n "user.invited.bulk_invite.pending_review"}}
+          {{else}}
+            {{i18n "user.invited.bulk_invite.success"}}
+          {{/if}}
         {{else}}
           {{trustHTML (i18n "user.invited.bulk_invite.instructions")}}
           <input
