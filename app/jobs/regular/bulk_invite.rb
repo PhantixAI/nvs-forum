@@ -17,6 +17,7 @@ module Jobs
       @groups = {}
       @user_fields = {}
       @valid_groups = {}
+      @valid_topics = {}
     end
 
     def execute(args)
@@ -99,10 +100,30 @@ module Jobs
         if topic.nil?
           save_log "Invalid Topic ID '#{topic_id}' for '#{email}'"
           @warnings += 1
+        elsif !can_invite_to?(topic)
+          save_log "Invalid Topic ID '#{topic_id}' for '#{email}'"
+          @warnings += 1
+          topic = nil
         end
       end
 
       topic
+    end
+
+    # Mirrors #can_edit_group?'s caching wrapper. Without this, a CSV row's
+    # topic_id skipped the same guardian check every other invite path
+    # (e.g. InvitesController#create) already enforces via
+    # guardian.ensure_can_invite_to!, letting an invite reach a topic the
+    # inviter otherwise couldn't invite anyone to.
+    def can_invite_to?(topic)
+      result = @valid_topics[topic.id]
+
+      if result.nil?
+        result = @guardian.can_invite_to?(topic)
+        @valid_topics[topic.id] = result
+      end
+
+      result
     end
 
     def get_user_fields(fields, email)

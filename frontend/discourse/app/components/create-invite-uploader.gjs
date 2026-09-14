@@ -18,8 +18,9 @@ export default class CreateInviteUploader extends Component {
       bypassNewUserRestriction: true,
       csvOnly: true,
     },
-    uploadDone: () => {
+    uploadDone: (response) => {
       this.set("uploaded", true);
+      this.set("pendingReview", response?.pending_review);
     },
   });
 
@@ -41,6 +42,7 @@ export default class CreateInviteUploader extends Component {
           uploading=this.uploading
           uploadProgress=this.uploadProgress
           uploaded=this.uploaded
+          pendingReview=this.pendingReview
           submitDisabled=this.submitDisabled
           startUpload=this.startUpload
         )
