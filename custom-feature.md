@@ -886,3 +886,160 @@ something this fork fell behind on).
   code — the app needed the "Sign In with LinkedIn using OpenID Connect"
   product added under its Products tab. Worth remembering these are two
   independent failure modes that can both block the same login attempt.
+
+## 10. AI-Personalized, Paced Bulk Invite Emails
+
+### Requirement
+
+Bulk-invite CSV uploads of thousands of college student emails (`.ac.in`
+domains) were being flagged as spam — every invite email came from the same
+fixed locale-template text, and large batches were fired in bursts of up to
+200 at once (see section 3's throttle, `Jobs::ProcessBulkInviteEmails`).
+Needed: (1) each recipient's email body text made textually distinct via an
+AI language model, following a strict anti-spam style, and (2) every send
+spaced out by a random, admin-configurable delay (default 5-15s) regardless
+of total CSV size, instead of bursting.
+
+### Implementation (`lib/bulk_invite_personalization/`,
+`app/jobs/regular/process_bulk_invite_emails.rb`,
+`app/jobs/regular/bulk_invite.rb`)
+
+- New `BulkInvitePersonalization::Generator.personalize(invite)`
+  (`lib/bulk_invite_personalization/generator.rb`): builds a
+  `DiscourseAi::Completions::Prompt` embedding the anti-spam rules (plain
+  text only, under 75 words, no links/markdown/attachments in the generated
+  portion, peer-to-peer tone, no jargon/`!`/ALL CAPS/`$`, ends with a
+  low-friction question, vary phrasing per call, reference the recipient's
+  college only via their email domain — never invent a name) plus the
+  admin's `bulk_invite_ai_personalization_template` site setting and the
+  recipient's email domain, and calls the site's configured
+  `SiteSetting.ai_default_llm_model` (falling back to `LlmModel.last`).
+  Fails safe (returns `nil`) at every prerequisite check — plugin/feature
+  disabled, blank template, no LLM configured — and rescues any LLM error,
+  so a failed generation never blocks the invite from sending via the plain
+  template.
+- `BulkInvitePersonalization::ResponseValidator.clean(text)`
+  (`lib/bulk_invite_personalization/response_validator.rb`): defense-in-depth
+  post-processing — strips HTML, hard-rejects (not strip-and-continue) any
+  URL/domain, markdown, `!`/`$`/ALL-CAPS content, and enforces the 75-word
+  cap by truncating to the last sentence boundary or rejecting outright if
+  no clean boundary exists under the limit.
+- Generation happens in `Jobs::ProcessBulkInviteEmails`, one invite at a
+  time, immediately before send — never in `Jobs::BulkInvite`, which can
+  process an entire 10K-row CSV in a single job run; calling the LLM there
+  would mean thousands of blocking calls with no pacing. Writing the result
+  into `Invite#custom_message` routes through the pre-existing
+  `custom_invite_forum_mailer` template (`InviteMailer#send_invite` already
+  branches on `custom_message.present?`) with **zero changes** to the
+  mailer, `Jobs::InviteEmail`, or any locale template — the join link
+  (`%{invite_link}`) is untouched and still always sent.
+- `Jobs::ProcessBulkInviteEmails#execute` was rewritten from a
+  200-per-minute batch throttle (pull up to `Invite::BULK_INVITE_EMAIL_LIMIT`
+  pending invites, fire all their `Jobs::InviteEmail` enqueues at once,
+  reschedule after a fixed 1 minute) into a one-at-a-time loop: pick a
+  single `bulk_pending` invite via `FOR UPDATE SKIP LOCKED` (safe under
+  concurrent executions — a Sidekiq retry, or two overlapping
+  `Jobs::BulkInvite` runs — without a separate lock), personalize it, send
+  it, then reschedule itself after
+  `rand(bulk_invite_email_delay_min_seconds..bulk_invite_email_delay_max_seconds).seconds`
+  (both new site settings, default 5/15, cross-validated min ≤ max via
+  `BulkInviteEmailDelayMinSecondsValidator`/`...MaxSecondsValidator`).
+- `Jobs::BulkInvite#send_invite`: bound invites now always get
+  `emailed_status: :bulk_pending` (previously only when the CSV had more
+  than `Invite::BULK_INVITE_EMAIL_LIMIT` rows), so pacing and personalization
+  apply uniformly regardless of batch size. `allow_any_email` unbound rows
+  keep their original `> BULK_INVITE_EMAIL_LIMIT`-gated behavior and
+  `to_override` immediate-delivery path untouched — out of scope for this
+  feature. `Jobs::BulkInvite#execute` now always enqueues
+  `Jobs::ProcessBulkInviteEmails` after processing (a no-op when nothing
+  ended up `bulk_pending`).
+- `Invite::BULK_INVITE_EMAIL_LIMIT` narrows in scope: it's no longer a batch
+  size (replaced by `.limit(1)` in the rewritten job) and no longer governs
+  bound-invite throttling at all — it now only gates the `allow_any_email`
+  immediate-vs-throttled threshold.
+- New site settings (`config/site_settings.yml`, `users` area):
+  `bulk_invite_ai_personalization_enabled` (bool, default off — zero
+  behavior change for existing sites until an admin opts in and has an LLM
+  configured), `bulk_invite_ai_personalization_template` (textarea, hidden
+  until personalization is enabled), `bulk_invite_email_delay_min_seconds`
+  / `bulk_invite_email_delay_max_seconds` (integers, default 5/15, apply to
+  every bulk invite independent of personalization).
+
+### Edge cases
+
+- No LLM configured (empty `LlmModel` table, or the `discourse-ai` plugin
+  disabled) is an expected, permanently-supported state, not an error —
+  personalization silently no-ops and invites send through the pre-existing
+  plain template.
+- `allow_any_email` invites are explicitly out of scope: neither
+  personalized nor re-paced beyond their pre-existing
+  `> BULK_INVITE_EMAIL_LIMIT`-row `bulk_pending` threshold.
+- Overlapping `Jobs::BulkInvite` runs (e.g. two CSV uploads close together)
+  can produce more than one concurrently-active `ProcessBulkInviteEmails`
+  self-rescheduling chain; `FOR UPDATE SKIP LOCKED` prevents any row from
+  being double-sent, but pacing guarantees only hold per-chain, not
+  globally, under that overlap — accepted as a rare, non-corrupting edge
+  case rather than adding a distributed lock.
+- A `Jobs::ProcessBulkInviteEmails` crash between marking an invite
+  `:sending` and its `enqueue_in` reschedule leaves that one row stuck at
+  `:sending` forever — a pre-existing risk in the batch version too,
+  unchanged by this work.
+- `Jobs.enqueue_in` retains Sidekiq's default retry behavior for this job
+  (deliberately not disabled, unlike `Jobs::BulkInvite`'s
+  `sidekiq_options retry: false`) — safe because `FOR UPDATE SKIP LOCKED`
+  means a retry can't double-claim an already-`:sending`/`:sent` row.
+
+### Extension: Paced Resend All Invites
+
+**Requirement**: `InvitesController#resend_all_invites` (the admin "Resend
+All Invites" button) predates this feature and calls `Invite#resend_invite`
+— an immediate, undelayed `Jobs.enqueue(:invite_email, ...)` — for every
+matching invite in a plain loop. That completely bypasses the throttle
+above: triggering it mid-campaign re-sends every already-sent invite as a
+duplicate *and* blasts out every still-`bulk_pending` invite all at once,
+reproducing the exact burst-send pattern this whole feature exists to
+prevent — reachable by a single click.
+
+**Implementation** (`app/models/invite.rb`,
+`app/controllers/invites_controller.rb`):
+
+- New `Invite#requeue_for_paced_resend`: the same expiry/invalidation reset
+  as `resend_invite`, but sets `emailed_status: :bulk_pending` instead of
+  enqueuing `Jobs::InviteEmail` directly. `resend_invite` itself is
+  untouched and still used as-is for the single-invite resend action (no
+  burst risk there — one admin-triggered email is fine to send immediately).
+- `InvitesController#resend_all_invites_paced` (private): iterates the same
+  invite scope `resend_all_invites` already used, skips any invite whose
+  `emailed_status` is already `bulk_pending`/`sending` (already queued —
+  requeuing it would be redundant and risks reordering or duplicating an
+  in-flight send), calls `requeue_for_paced_resend` on the rest, and
+  enqueues `Jobs::ProcessBulkInviteEmails` once at the end — reusing the
+  exact same one-at-a-time, randomly-paced throttle (and AI personalization,
+  if enabled) a fresh CSV upload goes through, rather than adding a second
+  throttle implementation.
+- Gated behind new site setting `bulk_invite_paced_resend_enabled` (default
+  **off**, matching `bulk_invite_ai_personalization_enabled`'s
+  safe-default-for-existing-sites precedent): `resend_all_invites` branches
+  on it, calling `resend_all_invites_paced` when on or falling back to the
+  original immediate-send loop when off. A site that never opts in sees
+  zero behavior change.
+
+**Edge cases**:
+
+- Re-queuing overwrites `custom_message` the next time
+  `Jobs::ProcessBulkInviteEmails` processes the invite: if AI personalization
+  is enabled, a resent invite gets a freshly-generated (differently worded)
+  note rather than reusing its original one — desirable, since identical
+  wording on a resend burst would be exactly the fingerprint risk this
+  feature avoids. If personalization is disabled or unavailable at that
+  point, `custom_message` is cleared back to blank and the invite sends via
+  the plain template, same as any other throttled send.
+- Invites deliberately marked `:not_required` via `skip_email` still match
+  `resend_all_invites`'s existing scope (`email IS NOT NULL` alone satisfies
+  it for a bound invite) and still get requeued/resent when paced resend is
+  on — this is unchanged, pre-existing scope behavior from before this
+  extension, not something introduced here.
+- The pre-existing `bulk-reinvite-per-day` rate limiter (1/day) still
+  applies unchanged and limits how often "Resend All Invites" can be
+  triggered at all; it does not limit how many invites a single trigger
+  requeues.

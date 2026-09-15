@@ -662,6 +662,27 @@ RSpec.describe Invite do
       expect(invite).not_to be_expired
       expect(invite.invalidated_at).to be_nil
     end
+
+    it "sends immediately, unlike requeue_for_paced_resend" do
+      invite.resend_invite
+      expect(Jobs::InviteEmail.jobs.size).to eq(1)
+    end
+  end
+
+  describe "#requeue_for_paced_resend" do
+    fab!(:invite)
+
+    it "resets expiry like resend_invite, but sets emailed_status to bulk_pending instead of sending immediately" do
+      invite.update!(invalidated_at: 10.days.ago, expires_at: 10.days.ago)
+      expect(invite).to be_expired
+
+      invite.requeue_for_paced_resend
+
+      expect(invite).not_to be_expired
+      expect(invite.invalidated_at).to be_nil
+      expect(invite.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+      expect(Jobs::InviteEmail.jobs).to be_empty
+    end
   end
 
   describe "#can_be_redeemed_by?" do
