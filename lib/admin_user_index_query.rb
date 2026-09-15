@@ -94,7 +94,7 @@ class AdminUserIndexQuery
   def filter_by_query_classification
     case params[:query]
     when "staff"
-      CohortFilter.institute_staff_only(@query, true)
+      @query.where("admin or moderator")
     when "admins"
       @query.where(admin: true)
     when "moderators"

@@ -39,7 +39,13 @@ module BatchModeration
     end
 
     def can_grant_batch_moderator?(user)
-      can_administer?(user) && BatchModeration::GroupSync.batch_group_for(user).present? &&
+      # Mirrors Moderator.shares_batch_group?'s own `target.staff?` exclusion --
+      # Batch Moderator is a narrower stand-in for full Moderator on non-staff
+      # users (see lib/tasks/batch_moderation.rake's revoke_site_moderators),
+      # so an existing Admin/Moderator granted batch-group ownership on top
+      # would be a meaningless, inconsistent staff+batch-owner state.
+      !user.staff? && can_administer?(user) &&
+        BatchModeration::GroupSync.batch_group_for(user).present? &&
         !BatchModeration::GroupSync.owned_batch_groups(user).exists?
     end
 
