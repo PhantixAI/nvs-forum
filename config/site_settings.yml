@@ -1334,10 +1334,6 @@ groups:
     default: "Dean/Professor/Staff"
     type: list
     area: "group_permissions"
-  batch_moderator_linkedin_auth:
-    client: false
-    default: false
-    area: "group_permissions"
   max_automatic_membership_email_domains:
     default: 50
     hidden: true

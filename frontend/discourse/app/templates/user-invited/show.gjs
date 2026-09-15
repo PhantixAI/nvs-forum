@@ -64,13 +64,6 @@ export default <template>
                   />
                 {{/if}}
               {{/if}}
-            {{else if @controller.needsLinkedinForBulkInvite}}
-              <span class="bulk-invite-needs-linkedin">
-                {{i18n "user.invited.bulk_invite.needs_linkedin"}}
-                <LinkTo @route="preferences.account">
-                  {{i18n "user.invited.bulk_invite.connect_linkedin"}}
-                </LinkTo>
-              </span>
             {{/if}}
           {{/if}}
           {{#if @controller.showBulkActionButtons}}
@@ -399,11 +392,6 @@ export default <template>
                   @label="user.invited.none.tip.action"
                 />
                 {{i18n "user.invited.none.tip.suffix"}}
-              {{else if @controller.needsLinkedinForBulkInvite}}
-                {{i18n "user.invited.bulk_invite.needs_linkedin"}}
-                <LinkTo @route="preferences.account">
-                  {{i18n "user.invited.bulk_invite.connect_linkedin"}}
-                </LinkTo>
               {{/if}}
             </:tip>
           </DEmptyState>
