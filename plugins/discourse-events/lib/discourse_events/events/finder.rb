@@ -219,6 +219,10 @@ module DiscourseEvents
         digest_key = DiscourseEvents::CalendarEventScope::COHORT_DIGEST_CUSTOM_FIELD_KEY
         institution_value = DiscourseEvents::CalendarEventScope.institution_value_for(user)
         cohort_digest = DiscourseEvents::CalendarEventScope.cohort_digest_for(user)
+        # Matches events synced before the collision-safe digest encoding
+        # existed, whose stored digest is still in the old format -- see
+        # CalendarEventScope.legacy_cohort_digest_for.
+        legacy_cohort_digest = DiscourseEvents::CalendarEventScope.legacy_cohort_digest_for(user)
 
         events.where(
           <<~SQL,
@@ -239,6 +243,7 @@ module DiscourseEvents
               AND (
                 (discourse_post_event_events.custom_fields ->> :digest_key) IS NULL
                 OR (discourse_post_event_events.custom_fields ->> :digest_key) = :cohort_digest
+                OR (discourse_post_event_events.custom_fields ->> :digest_key) = :legacy_cohort_digest
               )
             )
             OR (
@@ -246,7 +251,14 @@ module DiscourseEvents
               AND (discourse_post_event_events.custom_fields ->> :separation_key) = :institution_value
             )
           SQL
-          { scope_key:, separation_key:, digest_key:, institution_value:, cohort_digest: },
+          {
+            scope_key:,
+            separation_key:,
+            digest_key:,
+            institution_value:,
+            cohort_digest:,
+            legacy_cohort_digest:,
+          },
         )
       end
 

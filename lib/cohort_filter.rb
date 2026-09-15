@@ -6,7 +6,19 @@
 # College/Vidyalaya/Batch/Branch UserFields the batch-moderation cohort
 # groups are keyed on.
 module CohortFilter
-  FIELD_NAMES = %w[College Vidyalaya Batch Branch].freeze
+  # Derived from the same admin-configurable site settings
+  # BatchModeration::GroupSync itself resolves cohort fields through
+  # (institution/batch/secondary field names), rather than a fixed list --
+  # a hardcoded list here would silently stop matching anything the moment
+  # an admin reconfigures those settings to different UserField names, even
+  # though GroupSync would keep working correctly with the new names.
+  def self.field_names
+    (
+      SiteSetting.batch_moderation_institution_field_names.split("|") +
+        [SiteSetting.batch_moderation_batch_field_name] +
+        SiteSetting.batch_moderation_secondary_field_names.split("|")
+    ).reject(&:blank?).uniq
+  end
 
   # `filters_json` is a JSON object of `{ user_field_id => value }`,
   # e.g. `{"1":"NIT Trichy","3":"2024"}`, built by the cohort filter
@@ -28,7 +40,7 @@ module CohortFilter
     return items if filter_values.blank?
 
     allowed_field_scope = guardian.is_staff? ? UserField.all : UserField.public_fields
-    allowed_fields = allowed_field_scope.where(name: FIELD_NAMES).index_by { |f| f.id.to_s }
+    allowed_fields = allowed_field_scope.where(name: field_names).index_by { |f| f.id.to_s }
 
     filter_values.each do |field_id, value|
       field = allowed_fields[field_id.to_s]

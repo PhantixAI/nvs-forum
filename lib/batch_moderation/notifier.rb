@@ -20,12 +20,14 @@ module BatchModeration
           }
         end
 
-      Notification::Action::BulkCreate.call(records: records, skip_send_email: true)
+      notifications_by_user_id = bulk_create_and_index_by_user_id(records)
 
       # Emails are sent from a background job (retried by Sidekiq on failure)
       # rather than inline, so a slow/failing SMTP send doesn't block the
       # suspend/silence/report request for however many staff members exist.
       staff_ids.each do |staff_member_id|
+        next unless email_allowed?(notifications_by_user_id[staff_member_id])
+
         Jobs.enqueue(
           :batch_moderation_notify_staff_email,
           staff_member_id: staff_member_id,
@@ -60,9 +62,11 @@ module BatchModeration
           }
         end
 
-      Notification::Action::BulkCreate.call(records: records, skip_send_email: true)
+      notifications_by_user_id = bulk_create_and_index_by_user_id(records)
 
       recipient_ids.each do |recipient_id|
+        next unless email_allowed?(notifications_by_user_id[recipient_id])
+
         Jobs.enqueue(
           :batch_moderation_notify_cohort_change_email,
           recipient_id: recipient_id,
@@ -97,9 +101,11 @@ module BatchModeration
           }
         end
 
-      Notification::Action::BulkCreate.call(records: records, skip_send_email: true)
+      notifications_by_user_id = bulk_create_and_index_by_user_id(records)
 
       recipient_ids.each do |recipient_id|
+        next unless email_allowed?(notifications_by_user_id[recipient_id])
+
         Jobs.enqueue(
           :batch_moderation_notify_status_change_email,
           recipient_id: recipient_id,
@@ -117,5 +123,29 @@ module BatchModeration
       (staff_ids + cohort_moderator_ids).uniq - exclude_user_ids
     end
     private_class_method :broad_recipients_for
+
+    def self.bulk_create_and_index_by_user_id(records)
+      notification_ids =
+        Notification::Action::BulkCreate.call(records: records, skip_send_email: true)
+      Notification.where(id: notification_ids).index_by(&:user_id)
+    end
+    private_class_method :bulk_create_and_index_by_user_id
+
+    # These three notification types are emailed via their own dedicated jobs
+    # (above) rather than NotificationEmailer -- its EmailUser dispatches by
+    # a fixed set of core notification-type method names and has none for
+    # these custom types, so routing through NotificationEmailer.
+    # process_notification would silently send nothing rather than
+    # respecting the intent of a plugin-registered filter. Running each
+    # notification through the same DiscoursePluginRegistry.
+    # email_notification_filters extension point NotificationEmailer itself
+    # checks keeps that veto hook working for these emails too.
+    def self.email_allowed?(notification)
+      return true if notification.nil?
+      DiscoursePluginRegistry.email_notification_filters.none? do |filter|
+        !filter.call(notification)
+      end
+    end
+    private_class_method :email_allowed?
   end
 end

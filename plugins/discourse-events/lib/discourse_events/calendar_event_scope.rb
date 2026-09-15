@@ -41,6 +41,19 @@ module DiscourseEvents
       return nil if user.nil?
       key = BatchModeration::GroupSync.cohort_key_for(user)
       return nil if key.blank? || key.length < 2
+      BatchModeration::GroupSync.digest_for_key(key)
+    end
+
+    # The pre-fix digest formula (plain space-joined values), kept only so
+    # Events::Finder#filter_by_calendar_event_scope can still match events
+    # that were synced before GroupSync.digest_for_key's collision-safe
+    # encoding existed -- those events' stored digest was computed this way
+    # and won't match cohort_digest_for's output for the same user anymore.
+    # New/re-synced events always get the safe digest via cohort_digest_for.
+    def self.legacy_cohort_digest_for(user)
+      return nil if user.nil?
+      key = BatchModeration::GroupSync.cohort_key_for(user)
+      return nil if key.blank? || key.length < 2
       Digest::SHA1.hexdigest(key.map { |_field, value| value }.join(" "))[0, 12]
     end
 
