@@ -2063,6 +2063,11 @@ en:
 
   site_settings:
     allow_bulk_invite: "Allow bulk invites by uploading a CSV file"
+    bulk_invite_ai_personalization_enabled: "Use an AI language model to rewrite each bulk invite email's body from {{setting:bulk_invite_ai_personalization_template}} into a distinct, personalized note per recipient, to reduce spam filtering on large sends. Requires an AI language model to be configured under AI plugin settings; when none is configured, invites send with the plain template as normal."
+    bulk_invite_ai_personalization_template: "Base pitch used as the starting point for each recipient's AI-personalized bulk invite note. Only used when {{setting:bulk_invite_ai_personalization_enabled}} is on."
+    bulk_invite_email_delay_min_seconds: "Minimum random delay, in seconds, between each bulk invite email being sent. Applies to every bulk invite, whether or not AI personalization is enabled."
+    bulk_invite_email_delay_max_seconds: "Maximum random delay, in seconds, between each bulk invite email being sent. Applies to every bulk invite, whether or not AI personalization is enabled."
+    bulk_invite_paced_resend_enabled: "When an admin uses Resend All Invites, re-queue matching invites through the same one-at-a-time, randomly-paced throttle a bulk invite CSV upload uses (governed by {{setting:bulk_invite_email_delay_min_seconds}} and {{setting:bulk_invite_email_delay_max_seconds}}), instead of emailing all of them immediately. Recommended for sites running large bulk invite campaigns, so a resend can't send a burst of emails that gets flagged as spam."
     disabled: "disabled"
     display_local_time_in_user_card: "Display the local time based on a user's timezone when their user card is opened."
     censored_words: "Words that will be automatically replaced with &#9632;&#9632;&#9632;&#9632;"
@@ -3256,6 +3261,8 @@ en:
       max_username_length_exists: "You cannot set 'max username length' below the longest username (%{username})."
       max_group_name_length_exists: "You cannot set 'max username length' below the longest group name (%{group_name})."
       max_username_length_range: "You cannot set the 'max username length' below 'min username length'."
+      bulk_invite_email_delay_min: "You cannot set 'bulk invite email delay min seconds' above 'bulk invite email delay max seconds'."
+      bulk_invite_email_delay_max: "You cannot set 'bulk invite email delay max seconds' below 'bulk invite email delay min seconds'."
       invalid_hex_value: "Color values have to be 6-digit hexadecimal codes."
       empty_selectable_avatars: "You must first upload at least two selectable avatars before enabling this setting."
       category_search_priority:

@@ -531,10 +531,17 @@ class InvitesController < ApplicationController
     # additionally picks up unbound allow_any_email invites that were genuinely sent
     # (see Jobs::BulkInvite) without sweeping in ordinary never-emailed link invites,
     # which stay at :not_required.
-    Invite
-      .pending(current_user)
-      .where("email IS NOT NULL OR emailed_status != ?", Invite.emailed_status_types[:not_required])
-      .find_each { |invite| invite.resend_invite }
+    invites_to_resend =
+      Invite.pending(current_user).where(
+        "email IS NOT NULL OR emailed_status != ?",
+        Invite.emailed_status_types[:not_required],
+      )
+
+    if SiteSetting.bulk_invite_paced_resend_enabled
+      resend_all_invites_paced(invites_to_resend)
+    else
+      invites_to_resend.find_each { |invite| invite.resend_invite }
+    end
 
     render json: success_json
   end
@@ -635,6 +642,29 @@ class InvitesController < ApplicationController
 
   def skip_email_param
     !SiteSetting.allow_email_invites || params[:skip_email]
+  end
+
+  # Re-queues every matching invite through the same one-at-a-time, randomly
+  # paced throttle a fresh bulk CSV upload uses (Jobs::ProcessBulkInviteEmails),
+  # instead of firing an immediate, undelayed email for each one -- otherwise
+  # "resend all" is an easy way to trigger the exact burst-send pattern this
+  # feature exists to avoid, especially for an admin with a large invite list.
+  # Invites still mid-throttle (bulk_pending/sending) are left untouched
+  # rather than requeued, so this can't double-send or reorder them.
+  def resend_all_invites_paced(invites)
+    in_flight_statuses = [
+      Invite.emailed_status_types[:bulk_pending],
+      Invite.emailed_status_types[:sending],
+    ]
+
+    requeued = false
+    invites.find_each do |invite|
+      next if in_flight_statuses.include?(invite.emailed_status)
+      invite.requeue_for_paced_resend
+      requeued = true
+    end
+
+    ::Jobs.enqueue(:process_bulk_invite_emails) if requeued
   end
 
   def show_invite(invite)

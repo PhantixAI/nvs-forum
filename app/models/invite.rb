@@ -13,6 +13,10 @@ class Invite < ActiveRecord::Base
   include RateLimiter::OnCreateRecord
   include Trashable
 
+  # Only governs the immediate-vs-throttled threshold for unbound
+  # (allow_any_email) bulk-invite rows -- see Jobs::BulkInvite#send_invite.
+  # Bound bulk invites always throttle through :bulk_pending regardless of
+  # CSV size (Jobs::ProcessBulkInviteEmails paces them one at a time).
   BULK_INVITE_EMAIL_LIMIT = 200
   DOMAIN_REGEX =
     /\A(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)+([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])\z/
@@ -325,6 +329,23 @@ class Invite < ActiveRecord::Base
       expires_at: SiteSetting.invite_expiry_days.days.from_now,
     )
     Jobs.enqueue(:invite_email, invite_id: id)
+  end
+
+  # Used by InvitesController#resend_all_invites instead of resend_invite,
+  # when SiteSetting.bulk_invite_paced_resend_enabled is on: resend_invite
+  # sends immediately (fine for a single admin-triggered resend), but firing
+  # it in a loop for every pending invite is exactly the kind of undelayed
+  # burst send Jobs::ProcessBulkInviteEmails exists to avoid. This instead
+  # re-queues the invite the same way a fresh bulk CSV row does, so the
+  # existing one-at-a-time, randomly-paced throttle (and AI personalization,
+  # if enabled) picks it up rather than mailing it out immediately.
+  def requeue_for_paced_resend
+    update_columns(
+      updated_at: Time.zone.now,
+      invalidated_at: nil,
+      expires_at: SiteSetting.invite_expiry_days.days.from_now,
+      emailed_status: Invite.emailed_status_types[:bulk_pending],
+    )
   end
 
   def limit_invites_per_day

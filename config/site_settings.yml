@@ -4282,6 +4282,38 @@ uncategorized:
     default: false
     hidden: true
 
+  bulk_invite_ai_personalization_enabled:
+    default: false
+    client: false
+    area: "users"
+
+  bulk_invite_ai_personalization_template:
+    default: ""
+    textarea: true
+    client: false
+    area: "users"
+    depends_on:
+      - bulk_invite_ai_personalization_enabled
+    depends_behavior: "hidden"
+    dependent_setting_display: "inline"
+
+  bulk_invite_email_delay_min_seconds:
+    default: 5
+    client: false
+    area: "users"
+    validator: "BulkInviteEmailDelayMinSecondsValidator"
+
+  bulk_invite_email_delay_max_seconds:
+    default: 15
+    client: false
+    area: "users"
+    validator: "BulkInviteEmailDelayMaxSecondsValidator"
+
+  bulk_invite_paced_resend_enabled:
+    default: false
+    client: false
+    area: "users"
+
   max_api_invites:
     default: 200
     hidden: true

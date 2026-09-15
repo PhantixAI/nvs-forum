@@ -174,6 +174,24 @@ RSpec.describe Jobs::BulkInvite do
       end
     end
 
+    context "with a small batch of bound invites" do
+      it "routes them through the paced bulk_pending throttle instead of sending immediately" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "test2@discourse.org" }, { email: "test3@discourse.org" }],
+        )
+
+        Invite
+          .where(email: %w[test2@discourse.org test3@discourse.org])
+          .find_each do |invite|
+            expect(invite.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+          end
+
+        expect(Jobs::InviteEmail.jobs).to be_empty
+        expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
+      end
+    end
+
     it "does not send an invite email when skip_email_bulk_invites is true" do
       SiteSetting.skip_email_bulk_invites = true
 
@@ -250,6 +268,15 @@ RSpec.describe Jobs::BulkInvite do
           current_user_id: admin.id,
           invites: [{ email: "student@college.edu", allow_any_email: "true" }],
         )
+      end
+
+      it "does not route a small allow_any_email batch through bulk_pending" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu", allow_any_email: "true" }],
+        )
+
+        expect(Invite.last.emailed_status).not_to eq(Invite.emailed_status_types[:bulk_pending])
       end
 
       it "does not enqueue delivery when skip_email_bulk_invites is true" do
