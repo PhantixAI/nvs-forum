@@ -705,7 +705,7 @@ individual invites — an inconsistent permission boundary.
   is a pure widen-the-gate change reusing an already-existing capability
   (`invite_allowed_groups`) rather than introducing new logic.
 
-### Extension: Batch Moderator bulk invite via Review Queue + optional LinkedIn gate
+### Extension: Batch Moderator bulk invite via Review Queue
 
 The above widened bulk invite to site moderators (`is_staff?`). Batch
 Moderators (section 1) are deliberately weaker — non-staff — so they don't
@@ -738,22 +738,15 @@ get the same immediate-processing path. Instead:
   silently drops unauthorized groups rather than trusting a CSV column
   unconditionally. Matters more now that a lower-trust role's invites can
   reach this job post-approval.
-- Optional, site-setting-gated layer on top: `batch_moderator_linkedin_auth`
-  (default off) additionally requires a Batch Moderator to have a connected
-  LinkedIn account (`UserAssociatedAccount` row for `linkedin_oidc`) before
-  `can_bulk_invite_to_forum?` returns true for them — folded into the same
-  guardian method, so no separate enforcement path exists to fall out of
-  sync. `bulk_invite_needs_linkedin_connection?` mirrors the same condition
-  purely for frontend messaging (a "connect your LinkedIn account" prompt
-  linking to `/my/preferences/account`, shown in place of the upload button
-  on `/u/<username>/invited`). Staff always bypass this via `super` before
-  any LinkedIn check runs, same as the core permission itself.
+- A Batch Moderator does **not** need to have connected a LinkedIn account
+  to bulk-invite — `can_bulk_invite_to_forum?` only checks batch-group
+  ownership. An earlier version of this feature added an optional,
+  site-setting-gated LinkedIn-connection requirement on top of this; it was
+  removed as unwanted. LinkedIn login (`linkedin_oidc`, section 9) is
+  unrelated and unaffected by that removal.
 
 ### Edge cases (Batch Moderator extension)
 
-- No retroactive enforcement — the LinkedIn requirement only applies to new
-  CSV upload attempts; existing pending/historical bulk invites are
-  unaffected.
 - No automated spec coverage yet for `ReviewableBulkInvite`'s
   submit/approve/reject flow or the new guardian methods — verified
   manually this round (console scripts + live browser testing against a
