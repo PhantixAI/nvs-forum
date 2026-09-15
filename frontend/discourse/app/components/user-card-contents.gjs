@@ -559,6 +559,15 @@ export default class UserCardContents extends CardContentsBase {
                       showUser=this.handleShowUser
                     }}
                   />
+                  {{#if this.nameFirst}}
+                    <div class="names__secondary username">
+                      {{this.user.username}}
+                    </div>
+                  {{else if this.user.name}}
+                    <div class="names__secondary full-name">
+                      {{this.user.name}}
+                    </div>
+                  {{/if}}
                   {{#if this.user.title}}
                     <div class="names__secondary">{{this.user.title}}</div>
                   {{/if}}

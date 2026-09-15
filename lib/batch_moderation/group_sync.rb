@@ -250,17 +250,41 @@ module BatchModeration
 
     def self.find_or_create_group(key)
       name = deterministic_name(key)
-      Group.find_by(name: name) || create_group(name, key)
+      # legacy_name falls back to the pre-fix (plain space-joined) digest a
+      # group for this exact cohort may already have been created under, so
+      # a site with existing batch groups doesn't get a duplicate group per
+      # cohort the moment this deploys -- new cohorts always get `name`.
+      Group.find_by(name: name) || Group.find_by(name: legacy_name(key)) || create_group(name, key)
     rescue ActiveRecord::RecordNotUnique
       Group.find_by(name: name)
     end
     private_class_method :find_or_create_group
 
     def self.deterministic_name(key)
+      "#{NAME_PREFIX}#{digest_for_key(key)}"
+    end
+    private_class_method :deterministic_name
+
+    def self.legacy_name(key)
       digest = Digest::SHA1.hexdigest(key.map { |_field, value| value }.join(" "))[0, 12]
       "#{NAME_PREFIX}#{digest}"
     end
-    private_class_method :deterministic_name
+    private_class_method :legacy_name
+
+    # Length-prefixes each value before hashing (netstring-style), so two
+    # structurally different keys can never collide onto the same digest --
+    # e.g. institution="Blue Ridge"+batch="2024" vs institution="Blue"+
+    # batch="Ridge 2024" would both join to "Blue Ridge 2024" under a plain
+    # space-joined string, silently merging two unrelated cohorts' groups.
+    # A value's own bytes can never be mistaken for a neighboring field's
+    # length prefix or boundary this way. Public (not private_class_method)
+    # so DiscourseEvents::CalendarEventScope.cohort_digest_for, which needs
+    # the exact same digest for the exact same key, reuses this instead of
+    # keeping its own separate, driftable copy of the hashing scheme.
+    def self.digest_for_key(key)
+      encoded = key.map { |_field, value| "#{value.length}:#{value}" }.join
+      Digest::SHA1.hexdigest(encoded)[0, 12]
+    end
 
     def self.create_group(name, key)
       values = key.map { |_field, value| value }
