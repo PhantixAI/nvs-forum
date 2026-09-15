@@ -2319,6 +2319,52 @@ RSpec.describe InvitesController do
       expect(invite_ids).to include(sent_invite.id)
       expect(invite_ids).not_to include(never_emailed_invite.id)
     end
+
+    context "when bulk_invite_paced_resend_enabled is true" do
+      before { SiteSetting.bulk_invite_paced_resend_enabled = true }
+
+      it "requeues matching invites through the throttle instead of sending immediately" do
+        invite = Fabricate(:invite, invited_by: admin)
+
+        sign_in(admin)
+        post "/invites/reinvite-all"
+
+        expect(response.status).to eq(200)
+        expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+        expect(Jobs::InviteEmail.jobs).to be_empty
+        expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
+      end
+
+      it "leaves invites already mid-throttle untouched" do
+        invite =
+          Fabricate(
+            :invite,
+            invited_by: admin,
+            emailed_status: Invite.emailed_status_types[:bulk_pending],
+          )
+        original_updated_at = invite.updated_at
+
+        sign_in(admin)
+        post "/invites/reinvite-all"
+
+        expect(response.status).to eq(200)
+        expect(invite.reload.updated_at).to eq_time(original_updated_at)
+      end
+
+      it "does not enqueue the throttle job when nothing needs requeuing" do
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          emailed_status: Invite.emailed_status_types[:bulk_pending],
+        )
+
+        sign_in(admin)
+        post "/invites/reinvite-all"
+
+        expect(response.status).to eq(200)
+        expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
+      end
+    end
   end
 
   describe "#upload_csv" do

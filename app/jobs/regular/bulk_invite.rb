@@ -33,9 +33,11 @@ module Jobs
 
       process_invites(@invites)
 
-      if @invites.length > Invite::BULK_INVITE_EMAIL_LIMIT
-        ::Jobs.enqueue(:process_bulk_invite_emails)
-      end
+      # Every bound invite created below is routed through :bulk_pending (see
+      # send_invite), so this always has something to pick up -- except when
+      # every row failed/was skipped/was allow_any_email, in which case it's
+      # a harmless no-op (Jobs::ProcessBulkInviteEmails finds nothing pending).
+      ::Jobs.enqueue(:process_bulk_invite_emails)
     ensure
       notify_user
     end
@@ -226,7 +228,17 @@ module Jobs
             skip_email: @skip_email,
           }
 
-          if @invites.length > Invite::BULK_INVITE_EMAIL_LIMIT
+          # allow_any_email rows keep their original immediate-send-under-the-limit
+          # behavior (delivered explicitly via to_override below); every bound
+          # invite is now always routed through :bulk_pending regardless of CSV
+          # size, so Jobs::ProcessBulkInviteEmails' one-at-a-time, randomly-paced
+          # throttle (and AI personalization) applies uniformly, not just to
+          # batches over the historical 200-row threshold.
+          if allow_any_email
+            if @invites.length > Invite::BULK_INVITE_EMAIL_LIMIT
+              invite_opts[:emailed_status] = Invite.emailed_status_types[:bulk_pending]
+            end
+          else
             invite_opts[:emailed_status] = Invite.emailed_status_types[:bulk_pending]
           end
 
