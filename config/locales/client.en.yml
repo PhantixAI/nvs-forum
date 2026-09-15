@@ -2761,8 +2761,6 @@ en:
           success: "File uploaded successfully. You will be notified via message when the process is complete."
           pending_review: "File uploaded successfully. It has been submitted for staff review and won't be processed until approved."
           error: "Sorry, file should be CSV format."
-          needs_linkedin: "Connect your LinkedIn account to enable bulk invites."
-          connect_linkedin: "Connect LinkedIn"
 
       confirm_access:
         title: "Confirm access"
