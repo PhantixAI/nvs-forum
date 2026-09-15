@@ -12,12 +12,16 @@ Rails.application.config.to_prepare do
   end
 end
 
+# Backgrounded (not called inline): a cohort change runs several UserField
+# lookups plus, on top, the full Notifier pipeline (bulk insert + per-
+# recipient job enqueue loop) -- real latency to add to every profile-save
+# request if run synchronously in-request.
 DiscourseEvent.on(:user_created) do |user|
   next if Thread.current[BatchModeration::GroupSync::DEFER_SYNC_ON_SIGNUP_THREAD_KEY]
-  BatchModeration::GroupSync.sync(user)
+  Jobs.enqueue(:sync_batch_moderation_group, user_id: user.id)
 end
 
 DiscourseEvent.on(:user_updated) do |user, _changed_columns|
   next if Thread.current[BatchModeration::GroupSync::DEFER_SYNC_ON_SIGNUP_THREAD_KEY]
-  BatchModeration::GroupSync.sync(user)
+  Jobs.enqueue(:sync_batch_moderation_group, user_id: user.id)
 end

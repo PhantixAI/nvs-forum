@@ -418,17 +418,23 @@ RSpec.describe AdminUserIndexQuery do
       user.save_custom_fields(true, run_validations: false)
     end
 
-    it "'staff' query classifies by the cohort staff member-type, not admin/moderator" do
-      staff_member = Fabricate(:user)
-      set_member_type(staff_member, "Dean/Professor/Staff")
+    it "'staff' query classifies by admin/moderator, not the cohort staff member-type" do
+      # This is the pre-existing, unmodified admin nav tab's meaning of
+      # "Staff" (see the frontend's `query: "staff"` route param) -- the
+      # cohort-based classification asserted here at one point collided
+      # with it. The cohort classification has its own, separate
+      # `staff_only` param/CohortFilter.institute_staff_only (see
+      # AdminUserIndexQuery#filter_staff_only), which is not this.
+      cohort_staff_member = Fabricate(:user)
+      set_member_type(cohort_staff_member, "Dean/Professor/Staff")
       moderator = Fabricate(:user, moderator: true)
 
       query = AdminUserIndexQuery.new({ query: "staff" }, guardian: admin.guardian)
 
       ids = real_users(query).pluck(:id)
-      expect(ids).to include(staff_member.id)
-      expect(ids).not_to include(moderator.id)
-      expect(ids).not_to include(admin.id)
+      expect(ids).to include(moderator.id)
+      expect(ids).to include(admin.id)
+      expect(ids).not_to include(cohort_staff_member.id)
     end
   end
 end
