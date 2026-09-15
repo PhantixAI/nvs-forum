@@ -25,7 +25,6 @@ class CurrentUserSerializer < BasicUserSerializer
              :can_edit,
              :can_invite_to_forum,
              :can_bulk_invite_to_forum,
-             :bulk_invite_needs_linkedin_connection,
              :can_create_admin_invite,
              :no_password,
              :can_delete_account,
@@ -258,14 +257,6 @@ class CurrentUserSerializer < BasicUserSerializer
 
   def include_can_bulk_invite_to_forum?
     scope.can_bulk_invite_to_forum?
-  end
-
-  def bulk_invite_needs_linkedin_connection
-    true
-  end
-
-  def include_bulk_invite_needs_linkedin_connection?
-    scope.bulk_invite_needs_linkedin_connection?
   end
 
   def can_create_admin_invite
