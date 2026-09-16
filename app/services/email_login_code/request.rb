@@ -23,12 +23,38 @@ class EmailLoginCode::Request
   model :user, optional: true
   only_if(:existing_account?) { step :trigger_before_email_login }
 
+  policy :email_domain_allowed
   only_if(:deliverable?) do
     model :login_code, :generate_login_code
     step :send_login_code_email
   end
 
   private
+
+  # Existing accounts always pass -- an allowlist change must not lock out
+  # an existing user. For an email with no account yet, both a login and a
+  # signup attempt are told the domain isn't allowed rather than left
+  # silently waiting: this mirrors what /u/check_email already reveals to
+  # any signup attempt regardless of whether that email has an account, so
+  # it doesn't add a new email-enumeration channel -- the only thing this
+  # newly distinguishes is "no account, disallowed domain" from "no
+  # account, some other non-delivery reason," never "does this exact email
+  # exist."
+  #
+  # Deliberately checks only allowed_email_domains, not the blocked_email_domains
+  # branch of EmailValidator.allowed? -- a blocklist match must stay silent
+  # like every other non-delivery reason (it's a blocklist of specific bad
+  # actors/domains, not public site policy the way an allowlist is), so
+  # `deliverable?` below still covers it via EmailValidator.allowed?.
+  def email_domain_allowed(user:, params:)
+    return true if user.present?
+
+    setting = SiteSetting.allowed_email_domains
+    return true if setting.blank?
+
+    EmailValidator.email_in_restriction_setting?(setting, params.email) ||
+      EmailValidator.is_developer?(params.email)
+  end
 
   def signup?(params:)
     params.signup
@@ -55,6 +81,9 @@ class EmailLoginCode::Request
     return if !SiteSetting.allow_new_registrations
     return if SiteSetting.invite_only
     return if SiteSetting.require_invite_code
+    # email_domain_allowed above already loudly rejects an allowed_email_domains
+    # mismatch; this still needs to silently cover blocked_email_domains, which
+    # EmailValidator.allowed? also checks.
     return if !EmailValidator.allowed?(params.email)
     return if ScreenedEmail.should_block?(params.email)
     # Login matches on the exact address, but a new account can't be created for

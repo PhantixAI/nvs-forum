@@ -199,6 +199,36 @@ RSpec.describe EmailLoginCode::Request do
       end
     end
 
+    context "when the email domain isn't in the allowed list" do
+      let(:email) { "newuser@notallowed.com" }
+
+      before { SiteSetting.allowed_email_domains = "allowed.com" }
+
+      it { is_expected.to fail_a_policy(:email_domain_allowed) }
+
+      it "does not generate a code" do
+        expect { result }.not_to change(EmailLoginCode, :count)
+      end
+
+      context "when it's a login attempt rather than a signup" do
+        let(:params) { { email:, signup: "false" } }
+
+        it { is_expected.to fail_a_policy(:email_domain_allowed) }
+      end
+
+      context "when the email belongs to an existing account" do
+        fab!(:user) { Fabricate(:user, email: "existing@notallowed.com") }
+
+        let(:email) { user.email }
+
+        it { is_expected.to run_successfully }
+
+        it "still generates a login code" do
+          expect { result }.to change { EmailLoginCode.for_email(user.email).count }.by(1)
+        end
+      end
+    end
+
     context "when the email is screened" do
       let(:email) { "newuser@example.com" }
 
