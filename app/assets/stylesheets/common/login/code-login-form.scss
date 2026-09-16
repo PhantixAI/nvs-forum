@@ -284,12 +284,26 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 0.5em;
-  }
-}
 
-// Keep the disclaimer from hugging the continue button it follows.
-.code-login-form + .signup-page-cta__disclaimer {
-  margin-top: 1.5em;
+    // The disclaimer and continue button share one row on desktop, wrapping
+    // only on mobile (handled by the passwordless-signup override below).
+    // Starts at `md`, not `sm`, so it can't overlap that override's
+    // `until(md)` range and fight over the continue button's width.
+    @include viewport.from(md) {
+      flex-wrap: nowrap;
+    }
+  }
+
+  &__disclaimer {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: var(--font-down-1);
+    color: var(--primary-medium);
+  }
+
+  &__continue {
+    flex-shrink: 0;
+  }
 }
 
 // Scoped to the passwordless signup flow so login and regular signup are untouched.
