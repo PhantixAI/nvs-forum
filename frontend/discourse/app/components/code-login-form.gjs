@@ -1075,6 +1075,12 @@ export default class CodeLoginForm extends Component {
             {{/if}}
 
             <div class="code-login-form__email-actions">
+              {{#if @disclaimerHtml}}
+                <div class="code-login-form__disclaimer">
+                  {{trustHTML @disclaimerHtml}}
+                </div>
+              {{/if}}
+
               <form.Submit
                 class="btn-primary code-login-form__continue"
                 @label="code_login.continue_button"
@@ -1093,6 +1099,39 @@ export default class CodeLoginForm extends Component {
               {{/if}}
             </div>
           </Form>
+
+          {{! Reuses the classic form's own cross-link markup/classes so this
+          picks up its divider + centered layout for free, and stays visually
+          identical to it. }}
+          {{#if this.isSignup}}
+            {{#if @onGoToLogin}}
+              <div class="signup-page-cta">
+                <div class="signup-page-cta__buttons">
+                  <span class="signup-page-cta__existing-account">
+                    {{i18n "create_account.already_have_account"}}
+                  </span>
+                  <DButton
+                    class="btn-large btn-flat signup-page-cta__login"
+                    @action={{@onGoToLogin}}
+                    @label="log_in"
+                  />
+                </div>
+              </div>
+            {{/if}}
+          {{else if @onCreateAccount}}
+            <div class="login-page-cta">
+              <div class="login-page-cta__buttons">
+                <span class="login-page-cta__no-account-yet">
+                  {{i18n "create_account.no_account_yet"}}
+                </span>
+                <DButton
+                  class="btn-large btn-flat login-page-cta__signup"
+                  @action={{@onCreateAccount}}
+                  @label="create_account.title"
+                />
+              </div>
+            </div>
+          {{/if}}
         {{/if}}
       {{else if this.isCodeStep}}
         <div class="code-login-form__code-step">

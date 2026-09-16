@@ -79,16 +79,11 @@ export default <template>
         {{#if @controller.showCodeSignupForm}}
           <CodeLoginForm
             @context="signup"
+            @disclaimerHtml={{@controller.disclaimerHtml}}
             @initialEmail={{@controller.accountEmail}}
+            @onGoToLogin={{@controller.goToLogin}}
             @onStepChange={{@controller.updateCodeSignupStep}}
           />
-          {{#if
-            (and @controller.codeSignupOnEmailStep @controller.disclaimerHtml)
-          }}
-            <div class="signup-page-cta__disclaimer">
-              {{trustHTML @controller.disclaimerHtml}}
-            </div>
-          {{/if}}
         {{/if}}
         {{#if @controller.showCreateForm}}
           <form id="login-form">
