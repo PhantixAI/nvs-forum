@@ -2643,6 +2643,13 @@ en:
           error: "There was an error generating Invite link"
         cannot_invite_to_forum: "Sorry, you don't have permission to create invites. Please contact an admin to grant you invite permission."
 
+        sent_email:
+          modal:
+            title: "Last Sent Email"
+            subject: "Subject"
+            body: "Body"
+            headers: "Headers"
+
         invite:
           new_title: "Invite members"
           edit_title: "Edit invite"
@@ -2653,6 +2660,7 @@ en:
           copy_link_and_share_it: "Copy the link below and share it to instantly grant access to this site."
           copy_link: "Copy link"
           link_copied: "Link copied!"
+          preview_sent_email: "Preview last sent email"
           share_link: "Share link"
           link_validity_MF: |
             Link is valid for up to { user_count, plural,

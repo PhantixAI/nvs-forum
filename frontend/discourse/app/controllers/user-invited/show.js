@@ -6,6 +6,7 @@ import { dependentKeyCompat } from "@ember/object/compat";
 import { service } from "@ember/service";
 import { observes } from "@ember-decorators/object";
 import CreateInviteBulk from "discourse/components/modal/create-invite-bulk";
+import SentInviteEmail from "discourse/components/modal/sent-invite-email";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import { removeValueFromArray } from "discourse/lib/array-tools";
 import { debounce } from "discourse/lib/decorators";
@@ -151,6 +152,16 @@ export default class UserInvitedShowController extends Controller {
           .catch(popupAjaxError);
       },
     });
+  }
+
+  @action
+  async previewSentEmail(invite) {
+    try {
+      const model = await Invite.findLatestSentEmail(invite.id);
+      this.modal.show(SentInviteEmail, { model });
+    } catch (error) {
+      popupAjaxError(error);
+    }
   }
 
   @action

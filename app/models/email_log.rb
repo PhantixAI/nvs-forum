@@ -135,6 +135,7 @@ end
 #  to_address                :string           not null
 #  created_at                :datetime         not null
 #  updated_at                :datetime         not null
+#  invite_id                 :integer
 #  message_id                :string
 #  post_id                   :integer
 #  smtp_group_id             :integer
@@ -146,6 +147,7 @@ end
 #  index_email_logs_on_bounce_key  (bounce_key) UNIQUE WHERE (bounce_key IS NOT NULL)
 #  index_email_logs_on_bounced     (bounced)
 #  index_email_logs_on_created_at  (created_at)
+#  index_email_logs_on_invite_id   (invite_id) WHERE (invite_id IS NOT NULL)
 #  index_email_logs_on_message_id  (message_id)
 #  index_email_logs_on_post_id     (post_id)
 #  index_email_logs_on_topic_id    (topic_id) WHERE (topic_id IS NOT NULL)
