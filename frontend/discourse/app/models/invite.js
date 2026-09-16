@@ -50,6 +50,10 @@ export default class Invite extends EmberObject {
     });
   }
 
+  static findLatestSentEmail(inviteId) {
+    return ajax(`/admin/email-logs/invite_sent/${inviteId}.json`);
+  }
+
   @computed("topics.firstObject.id")
   get topicId() {
     return this.topics?.firstObject?.id;

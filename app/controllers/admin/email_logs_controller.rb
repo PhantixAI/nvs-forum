@@ -65,6 +65,15 @@ class Admin::EmailLogsController < Admin::AdminController
     render_json_dump(serializer)
   end
 
+  def invite_sent
+    params.require(:invite_id)
+    invite = Invite.find(params[:invite_id].to_i)
+    email_log = invite.latest_sent_email_log
+    raise Discourse::NotFound if email_log.nil?
+
+    render_json_dump(EmailLogDetailsSerializer.new(email_log, root: false))
+  end
+
   def incoming_from_bounced
     params.require(:id)
 

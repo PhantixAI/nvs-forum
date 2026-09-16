@@ -280,6 +280,81 @@ RSpec.describe Admin::EmailLogsController do
     end
   end
 
+  describe "#invite_sent" do
+    fab!(:invite)
+
+    context "when logged in as an admin" do
+      before { sign_in(admin) }
+
+      def raw_email(subject:, body:)
+        <<~EMAIL
+          From: bot@example.com
+          To: student@example.com
+          Subject: #{subject}
+          Content-Type: text/plain; charset=UTF-8
+
+          #{body}
+        EMAIL
+      end
+
+      it "returns the latest sent email's headers/subject/body for the invite" do
+        Fabricate(
+          :email_log,
+          invite_id: invite.id,
+          email_type: "invite",
+          raw: raw_email(subject: "You're invited", body: "Come join us."),
+        )
+
+        get "/admin/email-logs/invite_sent/#{invite.id}.json"
+
+        expect(response.status).to eq(200)
+        json = response.parsed_body
+        expect(json["subject"]).to eq("You're invited")
+        expect(json["body"]).to include("Come join us.")
+      end
+
+      it "returns only the most recent email log when an invite was sent more than once" do
+        Fabricate(
+          :email_log,
+          invite_id: invite.id,
+          email_type: "invite",
+          raw: raw_email(subject: "First send", body: "Original note."),
+          created_at: 1.day.ago,
+        )
+        Fabricate(
+          :email_log,
+          invite_id: invite.id,
+          email_type: "invite",
+          raw: raw_email(subject: "Second send", body: "Regenerated note."),
+        )
+
+        get "/admin/email-logs/invite_sent/#{invite.id}.json"
+
+        json = response.parsed_body
+        expect(json["subject"]).to eq("Second send")
+      end
+
+      it "404s when the invite has never been emailed" do
+        get "/admin/email-logs/invite_sent/#{invite.id}.json"
+        expect(response.status).to eq(404)
+      end
+
+      it "404s for a non-existent invite" do
+        get "/admin/email-logs/invite_sent/-1.json"
+        expect(response.status).to eq(404)
+      end
+    end
+
+    context "when logged in as a non-staff user" do
+      before { sign_in(user) }
+
+      it "denies access with a 404 response" do
+        get "/admin/email-logs/invite_sent/#{invite.id}.json"
+        expect(response.status).to eq(404)
+      end
+    end
+  end
+
   describe "#incoming_from_bounced" do
     context "when logged in as an admin" do
       before { sign_in(admin) }

@@ -353,6 +353,19 @@ export default <template>
                                     />
                                   </dropdown.item>
                                 {{/if}}
+                                {{#if invite.emailed}}
+                                  <dropdown.item>
+                                    <DButton
+                                      class="btn-transparent preview-sent-email"
+                                      @action={{fn
+                                        @controller.previewSentEmail
+                                        invite
+                                      }}
+                                      @icon="envelope"
+                                      @label="user.invited.invite.preview_sent_email"
+                                    />
+                                  </dropdown.item>
+                                {{/if}}
                               </DDropdownMenu>
                             </:content>
                           </DMenu>

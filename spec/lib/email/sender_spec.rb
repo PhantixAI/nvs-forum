@@ -495,6 +495,21 @@ RSpec.describe Email::Sender do
           expect(message.header["Auto-Submitted"]).to eq(nil)
         end
       end
+
+      context "when the email is an invite" do
+        fab!(:invite)
+        let(:email_sender) { Email::Sender.new(message, :invite) }
+
+        before { message.header["X-Discourse-Invite-Id"] = invite.id }
+
+        it "stores the invite_id and the raw content, unlike other email types" do
+          email_sender.send
+
+          expect(email_log).to be_present
+          expect(email_log.invite_id).to eq(invite.id)
+          expect(email_log.raw).to include("hello")
+        end
+      end
     end
 
     context "with email log with a post id and topic id" do
