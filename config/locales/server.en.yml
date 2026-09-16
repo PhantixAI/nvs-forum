@@ -3687,7 +3687,7 @@ en:
     email:
       blank: "can't be blank."
       invalid: "is invalid."
-      not_allowed: "is not allowed from that email provider. Please use another email address."
+      not_allowed: "domain is not in the list of allowed college domains. Please reach out to support to get your domain added."
       blocked: "is not allowed."
       revoked: "Won't be sending emails to '%{email}' until %{date}."
       does_not_exist: "N/A"
