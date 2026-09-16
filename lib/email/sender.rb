@@ -113,6 +113,7 @@ module Email
 
       post_id = header_value("X-Discourse-Post-Id")
       topic_id = header_value("X-Discourse-Topic-Id")
+      invite_id = header_value("X-Discourse-Invite-Id")
       reply_key = get_reply_key(post_id, user_id)
       from_address = @message.from&.first
       smtp_group_id =
@@ -190,6 +191,7 @@ module Email
 
       email_log.post_id = post_id if post_id.present?
       email_log.topic_id = topic_id if topic_id.present?
+      email_log.invite_id = invite_id if invite_id.present?
 
       if reply_key.present?
         @message.header["Reply-To"] = header_value("Reply-To").gsub!("%{reply_key}", reply_key)
@@ -277,14 +279,17 @@ module Email
 
       # Log when a message is being sent from a group SMTP address, so we
       # can debug deliverability issues.
-      if smtp_group_id
-        email_log.smtp_group_id = smtp_group_id
+      email_log.smtp_group_id = smtp_group_id if smtp_group_id
 
-        # Store contents of all outgoing emails using group SMTP
-        # for greater visibility and debugging. If the size of this
-        # gets out of hand, we should look into a group-level setting
-        # to enable this; size should be kept in check by regular purging
-        # of EmailLog though.
+      # Store contents of all outgoing emails using group SMTP, and of every
+      # invite email, for greater visibility and debugging -- invites are
+      # otherwise unrecoverable once resent/re-personalized (see
+      # BulkInvitePersonalization::Generator, which overwrites
+      # Invite#custom_message on every pass). If the size of this gets out
+      # of hand, we should look into a group-level/site setting to control
+      # it; size should be kept in check by regular purging of EmailLog
+      # though.
+      if smtp_group_id || @email_type.to_s == "invite"
         email_log.raw = Email::Cleaner.new(@message).execute
       end
 

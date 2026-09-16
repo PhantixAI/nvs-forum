@@ -48,6 +48,7 @@ class InviteMailer < ActionMailer::Base
         site_description: SiteSetting.site_description,
         site_title: SiteSetting.title,
         user_custom_message: sanitized_message,
+        invite_id: invite.id,
       )
     else
       template =
@@ -65,6 +66,7 @@ class InviteMailer < ActionMailer::Base
         site_description: SiteSetting.site_description,
         site_title: SiteSetting.title,
         user_custom_message: sanitized_message,
+        invite_id: invite.id,
       )
     end
   end

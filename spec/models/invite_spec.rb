@@ -685,6 +685,30 @@ RSpec.describe Invite do
     end
   end
 
+  describe "#latest_sent_email_log" do
+    fab!(:invite)
+
+    it "returns nil when the invite has never been emailed" do
+      expect(invite.latest_sent_email_log).to be_nil
+    end
+
+    it "returns the most recently created invite-type email log for this invite" do
+      older =
+        Fabricate(:email_log, invite_id: invite.id, email_type: "invite", created_at: 1.day.ago)
+      newer = Fabricate(:email_log, invite_id: invite.id, email_type: "invite")
+
+      expect(invite.latest_sent_email_log).to eq(newer)
+      expect(invite.latest_sent_email_log).not_to eq(older)
+    end
+
+    it "ignores email logs for a different invite or a different email type" do
+      Fabricate(:email_log, invite_id: Fabricate(:invite).id, email_type: "invite")
+      Fabricate(:email_log, invite_id: invite.id, email_type: "signup")
+
+      expect(invite.latest_sent_email_log).to be_nil
+    end
+  end
+
   describe "#can_be_redeemed_by?" do
     context "for invite links" do
       fab!(:invite) { Fabricate(:invite, email: nil, domain: nil, max_redemptions_allowed: 1) }
