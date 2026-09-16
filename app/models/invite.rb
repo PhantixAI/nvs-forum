@@ -352,6 +352,15 @@ class Invite < ActiveRecord::Base
     RateLimiter.new(invited_by, "invites-per-day", SiteSetting.max_invites_per_day, 1.day.to_i)
   end
 
+  # The EmailLog row for the most recent invite email actually sent for this
+  # invite (if any) -- distinct from custom_message, which only holds the
+  # note as currently written and gets overwritten on every AI-personalization
+  # pass (see BulkInvitePersonalization::Generator) or resend, losing any
+  # record of what a prior send actually contained.
+  def latest_sent_email_log
+    EmailLog.where(invite_id: id, email_type: "invite").order(created_at: :desc).first
+  end
+
   def self.base_directory
     Rails.public_path.join("uploads", "csv", RailsMultisite::ConnectionManagement.current_db).to_s
   end
