@@ -534,6 +534,7 @@ class SessionController < ApplicationController
       on_failed_policy(:can_register_from_ip) do
         render json: login_code_registration_ip_limit_error
       end
+      on_failed_policy(:email_domain_allowed) { render json: login_code_domain_not_allowed_error }
       on_failed_contract do |contract|
         render json: failed_json.merge(errors: contract.errors.full_messages), status: :bad_request
       end
@@ -1449,6 +1450,10 @@ class SessionController < ApplicationController
     password_errors = user.user_password&.errors&.full_messages_for(:password)
     response[:password_error] = password_errors.join(". ") if password_errors.present?
     response
+  end
+
+  def login_code_domain_not_allowed_error
+    { error: I18n.t("user.email.not_allowed") }
   end
 
   def login_code_account_error(user)

@@ -761,6 +761,47 @@ RSpec.describe SessionController do
       end
     end
 
+    context "when the email domain isn't in the allowed list" do
+      before { SiteSetting.allowed_email_domains = "allowed.com" }
+
+      it "returns the domain-not-allowed error without sending a code, for both login and signup" do
+        expect_not_enqueued_with(job: :send_email_login_code) do
+          post "/session/login-code.json",
+               params: honeypot_magic(email: "newuser@notallowed.com", signup: false)
+        end
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["error"]).to eq(I18n.t("user.email.not_allowed"))
+
+        expect_not_enqueued_with(job: :send_email_login_code) do
+          post "/session/login-code.json",
+               params: honeypot_magic(email: "anothernewuser@notallowed.com", signup: true)
+        end
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["error"]).to eq(I18n.t("user.email.not_allowed"))
+
+        expect(EmailLoginCode.count).to eq(0)
+      end
+
+      it "still sends a code for an existing account regardless of current domain policy" do
+        SiteSetting.allowed_email_domains = ""
+        existing_user = Fabricate(:user, email: "existing@notallowed.com")
+        SiteSetting.allowed_email_domains = "allowed.com"
+
+        expect_enqueued_with(
+          job: :send_email_login_code,
+          args: {
+            to_address: existing_user.email,
+          },
+        ) { post "/session/login-code.json", params: honeypot_magic(email: existing_user.email) }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["success"]).to eq("OK")
+        expect(EmailLoginCode.for_email(existing_user.email).count).to eq(1)
+      end
+    end
+
     context "when rate limited" do
       before { RateLimiter.enable }
 

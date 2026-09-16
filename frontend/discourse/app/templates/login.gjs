@@ -78,6 +78,7 @@ export default <template>
               {{#if @controller.showCodeLoginForm}}
                 <CodeLoginForm
                   @initialEmail={{@controller.loginName}}
+                  @onCreateAccount={{@controller.createAccount}}
                   @onUsePassword={{@controller.usePassword}}
                 />
               {{else}}
