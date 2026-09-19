@@ -10,6 +10,8 @@ jobs:
   deploy:
     name: Rebuild Discourse
     runs-on: self-hosted
+    # Backstop so a stuck step can't hold the only runner for GitHub's 6h limit.
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +30,12 @@ jobs:
           DISCOURSE_S3_ACCESS_KEY_ID: ${{ secrets.DISCOURSE_S3_ACCESS_KEY_ID }}
           DISCOURSE_S3_SECRET_ACCESS_KEY: ${{ secrets.DISCOURSE_S3_SECRET_ACCESS_KEY }}
         run: |
-          python3 - << 'PYEOF' > /tmp/discourse_app.yml
+          # mktemp creates the file 0600, and the trap removes it even when the
+          # copy below fails (the step runs with -e), so the secrets never sit
+          # in /tmp readable by other users.
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          python3 - << 'PYEOF' > "$tmp"
           import os, sys
           content = open('containers/app.yml').read()
           for placeholder, envvar in [
@@ -42,8 +49,7 @@ jobs:
               content = content.replace(placeholder, os.environ[envvar])
           sys.stdout.write(content)
           PYEOF
-          sudo cp /tmp/discourse_app.yml /var/discourse/containers/app.yml
-          rm /tmp/discourse_app.yml
+          sudo cp "$tmp" /var/discourse/containers/app.yml
 
       - name: Write multisite.yml with secrets
         env:
@@ -67,9 +73,15 @@ jobs:
 
       - name: Wait for nginx and apply multisite fix
         run: |
-          until sudo docker exec app sv status nginx | grep -q "^run:"; do
-            echo "Waiting for nginx to start..."; sleep 5
+          for attempt in $(seq 1 60); do
+            if sudo docker exec app sv status nginx | grep -q "^run:"; then break; fi
+            echo "Waiting for nginx to start ($attempt/60)..."; sleep 5
           done
+          if ! sudo docker exec app sv status nginx | grep -q "^run:"; then
+            echo "nginx did not start in time"
+            sudo docker logs --tail 200 app
+            exit 1
+          fi
           sudo docker exec app bash -c '
             sed -i "/http_host != /,/^}/d" /usr/local/bin/configure-ssl
             /usr/local/bin/configure-ssl
@@ -79,8 +91,18 @@ jobs:
       - name: Verify all sites are up
         run: |
           for site in navodians.com nitians.in iitians.in; do
-            until curl -sk -o /dev/null -w "%{http_code}" https://$site/ | grep -q "200"; do
-              echo "Waiting for $site..."; sleep 5
+            up=false
+            for attempt in $(seq 1 60); do
+              if [ "$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' https://$site/)" = "200" ]; then
+                up=true
+                break
+              fi
+              echo "Waiting for $site ($attempt/60)..."; sleep 5
             done
+            if [ "$up" != true ]; then
+              echo "$site did not come up in time"
+              sudo docker logs --tail 200 app
+              exit 1
+            fi
             echo "$site is up"
           done

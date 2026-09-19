@@ -1,8 +1,14 @@
 import { isProduction } from "discourse/lib/environment";
 import loadSentryBrowser from "discourse/lib/load-sentry-browser";
 
+// A Sentry DSN only lets a client send events, and is public in any browser
+// bundle by design, so it is fine to keep in source.
 const SENTRY_DSN =
   "https://ccf912bb2adf15b79d1f2241de857f4a@o4511980973916160.ingest.us.sentry.io/4511984205561856";
+
+// tracesSampleRate doesn't apply to captureMessage, and a message is sent per
+// route change for every visitor, so sample them here to stay under quota.
+const MESSAGE_SAMPLE_RATE = 0.05;
 
 const ROUTE_TRANSITION_START_MARK = "route-transition-start";
 const ROUTE_TRANSITION_END_MARK = "route-transition-end";
@@ -10,6 +16,12 @@ const ROUTE_TRANSITION_MEASURE = "route-transition";
 
 let Sentry;
 let router;
+
+function reportMessage(message, options) {
+  if (Math.random() < MESSAGE_SAMPLE_RATE) {
+    Sentry?.captureMessage(message, options);
+  }
+}
 
 function handleRouteWillChange(transition) {
   // Ignore intermediate transitions (e.g. loading substates), matching the
@@ -31,7 +43,7 @@ function handleRouteDidChange(transition) {
       ROUTE_TRANSITION_START_MARK,
       ROUTE_TRANSITION_END_MARK
     );
-    Sentry?.captureMessage("route_transition", {
+    reportMessage("route_transition", {
       level: "info",
       extra: { durationMs: measure.duration, route: transition.to?.name },
     });
@@ -48,7 +60,7 @@ function reportInitToPaint() {
   setTimeout(() => {
     const [measure] = performance.getEntriesByName("discourse-init-to-paint");
     if (measure) {
-      Sentry?.captureMessage("discourse_init_to_paint", {
+      reportMessage("discourse_init_to_paint", {
         level: "info",
         extra: { durationMs: measure.duration },
       });
@@ -69,7 +81,9 @@ export default {
       dsn: SENTRY_DSN,
       environment: "production",
       tracesSampleRate: 0.1,
-      initialScope: { tags: { surface: "web" } },
+      initialScope: {
+        tags: { surface: "web", site: window.location.hostname },
+      },
     });
 
     // eslint-disable-next-line ember/no-private-routing-service

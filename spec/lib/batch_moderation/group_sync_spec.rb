@@ -134,6 +134,32 @@ RSpec.describe BatchModeration::GroupSync do
       expect { described_class.sync(user) }.not_to change { Group.count }
     end
 
+    it "runs each user's sync under a lock so overlapping jobs can't both announce the join" do
+      SiteSetting.batch_moderation_auto_promote_count = 0
+      set_student(user, college: "MNIT Jaipur", branch: "CSE", batch: "2024")
+
+      DistributedMutex
+        .expects(:synchronize)
+        .with("batch_moderation_sync_user_#{user.id}", validity: 60)
+        .yields
+        .once
+
+      described_class.sync(user)
+    end
+
+    it "announces a join once when the same user is synced twice" do
+      allow(BatchModeration::Notifier).to receive(:notify_cohort_change)
+      set_student(user, college: "MNIT Jaipur", branch: "CSE", batch: "2024")
+
+      2.times { described_class.sync(user) }
+
+      expect(BatchModeration::Notifier).to have_received(:notify_cohort_change).with(
+        user: user,
+        group: an_instance_of(Group),
+        joined: true,
+      ).once
+    end
+
     it "notifies on cohort join and leave" do
       allow(BatchModeration::Notifier).to receive(:notify_cohort_change)
 
@@ -246,6 +272,31 @@ RSpec.describe BatchModeration::GroupSync do
 
       group = Group.last
       expect(group.full_name).to eq("IIT Delhi · 2024")
+    end
+  end
+
+  describe ".member_type_field_visible_to?" do
+    fab!(:admin)
+
+    it "is always true for staff" do
+      expect(described_class.member_type_field_visible_to?(admin.guardian)).to eq(true)
+    end
+
+    it "is false for others while the member-type field is not shown on profiles or user cards" do
+      expect(described_class.member_type_field_visible_to?(user.guardian)).to eq(false)
+      expect(described_class.member_type_field_visible_to?(Guardian.new)).to eq(false)
+    end
+
+    it "is true for others once the member-type field is shown on profiles" do
+      type_field.update!(show_on_profile: true)
+
+      expect(described_class.member_type_field_visible_to?(user.guardian)).to eq(true)
+    end
+
+    it "is false when the site has no member-type field" do
+      type_field.destroy!
+
+      expect(described_class.member_type_field_visible_to?(user.guardian)).to eq(false)
     end
   end
 

@@ -29,6 +29,22 @@ export default <template>
   </div>
 
   <div class="review-item__post">
-    <p>{{@reviewable.payload.reason}}</p>
+    {{#if @reviewable.payload.reports.length}}
+      <div class="review-item__meta-label">{{i18n
+          "batch_moderation.reviewable.all_reports"
+        }}</div>
+      <ul class="batch-moderation-report__reports">
+        {{#each @reviewable.payload.reports as |report|}}
+          <li class="batch-moderation-report__report">
+            <span
+              class="batch-moderation-report__reporter"
+            >{{report.reporter_username}}:</span>
+            {{report.reason}}
+          </li>
+        {{/each}}
+      </ul>
+    {{else}}
+      <p>{{@reviewable.payload.reason}}</p>
+    {{/if}}
   </div>
 </template>

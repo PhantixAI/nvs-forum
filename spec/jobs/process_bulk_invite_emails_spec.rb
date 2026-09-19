@@ -83,5 +83,113 @@ RSpec.describe Jobs::ProcessBulkInviteEmails do
       expect(invite.reload.custom_message).to eq(nil)
       expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:sending])
     end
+
+    it "keeps a note the inviter wrote when personalization is unavailable" do
+      invite =
+        Fabricate(
+          :invite,
+          emailed_status: Invite.emailed_status_types[:bulk_pending],
+          custom_message: "Looking forward to having you.",
+        )
+
+      BulkInvitePersonalization::Generator.stubs(:personalize).returns(nil)
+
+      described_class.new.execute({})
+
+      expect(invite.reload.custom_message).to eq("Looking forward to having you.")
+    end
+
+    it "moves an invite that fails to send to pending and keeps the chain going" do
+      invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
+      later_invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
+
+      BulkInvitePersonalization::Generator.stubs(:personalize).raises(StandardError, "boom")
+
+      described_class.new.execute({})
+
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:pending])
+      expect(later_invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+      expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
+    end
+
+    it "stamps the claim time so time spent sending can be measured" do
+      freeze_time
+      invite =
+        Fabricate(
+          :invite,
+          emailed_status: Invite.emailed_status_types[:bulk_pending],
+          updated_at: 3.days.ago,
+        )
+
+      described_class.new.execute({})
+
+      expect(invite.reload.updated_at).to eq_time(Time.zone.now)
+    end
+
+    it "requeues an invite stuck in sending after its worker died" do
+      stuck = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:sending])
+      stuck.update_columns(updated_at: 2.hours.ago)
+
+      described_class.new.execute({})
+
+      expect(Jobs::InviteEmail.jobs.size).to eq(1)
+      expect(Jobs::InviteEmail.jobs.first["args"].first["invite_id"]).to eq(stuck.id)
+    end
+
+    it "leaves an invite that only just entered sending alone" do
+      Fabricate(:invite, emailed_status: Invite.emailed_status_types[:sending])
+
+      described_class.new.execute({})
+
+      expect(Jobs::InviteEmail.jobs.size).to eq(0)
+    end
+
+    it "clears the chain key when nothing is pending" do
+      Discourse.redis.set(described_class::CHAIN_KEY, 1)
+
+      described_class.new.execute({})
+
+      expect(Discourse.redis.get(described_class::CHAIN_KEY)).to eq(nil)
+    end
+
+    it "starts a new chain if an invite arrived as the old one ended" do
+      Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
+      Discourse.redis.set(described_class::CHAIN_KEY, 1)
+      described_class.any_instance.stubs(:claim_next_pending_invite).returns(nil)
+
+      described_class.new.execute({})
+
+      expect(Discourse.redis.get(described_class::CHAIN_KEY)).to be_present
+      expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
+    end
+
+    it "keeps the chain key alive while it has work" do
+      Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
+
+      described_class.new.execute({})
+
+      expect(Discourse.redis.ttl(described_class::CHAIN_KEY)).to be > 0
+    end
+  end
+
+  describe ".ensure_chain!" do
+    it "enqueues one job however many starters call it" do
+      3.times { described_class.ensure_chain! }
+
+      expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
+    end
+
+    it "returns whether it started a chain" do
+      expect(described_class.ensure_chain!).to eq(true)
+      expect(described_class.ensure_chain!).to eq(false)
+    end
+
+    it "lets a lapsed chain be replaced" do
+      described_class.ensure_chain!
+      Discourse.redis.del(described_class::CHAIN_KEY)
+
+      expect(described_class.ensure_chain!).to eq(true)
+      expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(2)
+    end
   end
 end
