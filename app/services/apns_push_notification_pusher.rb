@@ -1,8 +1,17 @@
 # frozen_string_literal: true
 
 class ApnsPushNotificationPusher
+  # The Apple key settings are defined by the Apple auth plugin, and APNs
+  # reuses that Sign in with Apple key, so a site without the plugin has none
+  # of them -- skip it rather than fail every push job on a missing setting.
+  def self.configured?
+    %i[apple_pem apple_key_id apple_team_id apns_bundle_id].all? do |setting|
+      SiteSetting.respond_to?(setting)
+    end && SiteSetting.apple_pem.present?
+  end
+
   def self.push(user, payload)
-    return if SiteSetting.apple_pem.blank?
+    return if !configured?
 
     client_ids = UserApiKey.push_clients_for(user).select { |_, platform| platform == "ios" }
     return if client_ids.empty?

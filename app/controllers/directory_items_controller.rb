@@ -84,9 +84,11 @@ class DirectoryItemsController < ApplicationController
       serializer_opts[
         :batch_moderator_user_ids
       ] = BatchModeration::GroupSync.batch_moderator_user_ids(query_result.items.map(&:user_id))
-      serializer_opts[:staff_type_user_ids] = BatchModeration::GroupSync.staff_type_user_ids(
-        query_result.items.map(&:user_id),
-      )
+      if BatchModeration::GroupSync.member_type_field_visible_to?(guardian)
+        serializer_opts[:staff_type_user_ids] = BatchModeration::GroupSync.staff_type_user_ids(
+          query_result.items.map(&:user_id),
+        )
+      end
     end
 
     serialized = serialize_data(query_result.items, DirectoryItemSerializer, serializer_opts)

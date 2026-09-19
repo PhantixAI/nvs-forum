@@ -685,7 +685,8 @@ RSpec.describe DirectoryItemsController do
     end
 
     it "restricts results to the cohort staff member-type when staff_only is true" do
-      type_field = Fabricate(:user_field, name: "I am", requirement: "optional")
+      type_field =
+        Fabricate(:user_field, name: "I am", requirement: "optional", show_on_profile: true)
       evil_trout.custom_fields[
         "#{User::USER_FIELD_PREFIX}#{type_field.id}"
       ] = "Dean/Professor/Staff"
@@ -747,8 +748,39 @@ RSpec.describe DirectoryItemsController do
       expect(items["heisenberg"]["user"]["is_batch_moderator"]).to eq(false)
     end
 
-    it "marks staff-type members via is_staff_type" do
+    it "hides staff-type information when the member-type field is not public" do
       type_field = Fabricate(:user_field, name: "I am", requirement: "optional")
+      SiteSetting.enable_batch_moderation = true
+      evil_trout.custom_fields[
+        "#{User::USER_FIELD_PREFIX}#{type_field.id}"
+      ] = "Dean/Professor/Staff"
+      evil_trout.save_custom_fields(true, run_validations: false)
+
+      get "/directory_items.json", params: { period: "all" }
+      items = response.parsed_body["directory_items"].index_by { |item| item["user"]["username"] }
+      expect(items["eviltrout"]["user"]["is_staff_type"]).to eq(false)
+
+      get "/directory_items.json", params: { period: "all", staff_only: true }
+      expect(response.parsed_body["directory_items"].length).to eq(4)
+    end
+
+    it "shows staff-type information to staff even when the field is not public" do
+      type_field = Fabricate(:user_field, name: "I am", requirement: "optional")
+      SiteSetting.enable_batch_moderation = true
+      evil_trout.custom_fields[
+        "#{User::USER_FIELD_PREFIX}#{type_field.id}"
+      ] = "Dean/Professor/Staff"
+      evil_trout.save_custom_fields(true, run_validations: false)
+      sign_in(Fabricate(:admin))
+
+      get "/directory_items.json", params: { period: "all" }
+      items = response.parsed_body["directory_items"].index_by { |item| item["user"]["username"] }
+      expect(items["eviltrout"]["user"]["is_staff_type"]).to eq(true)
+    end
+
+    it "marks staff-type members via is_staff_type" do
+      type_field =
+        Fabricate(:user_field, name: "I am", requirement: "optional", show_on_profile: true)
       SiteSetting.enable_batch_moderation = true
       evil_trout.custom_fields[
         "#{User::USER_FIELD_PREFIX}#{type_field.id}"
