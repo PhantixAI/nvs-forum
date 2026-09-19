@@ -216,9 +216,13 @@ original commit): a new, non-admin controller
 whose own policies call the (now extended) `guardian.can_suspend?`/
 `can_silence_user?`.
 
-**Report path** (unchanged): `report` creates a `ReviewableBatchModerationReport`
-via `.report!`, landing in the normal staff review queue with Agree/Disagree
-actions.
+**Report path**: `report` creates a `ReviewableBatchModerationReport` via
+`.report!`, landing in the normal staff review queue with Agree/Disagree
+actions. A user has one reviewable (unique on type + target), so a later report
+of an already-reported user finds the existing row; `record_report!` therefore
+appends every report (`reporter_id`, `reporter_username`, `reason`,
+`reported_at`) to `payload["reports"]`, keeps `payload["reason"]` as the newest
+reason, and the review item lists all of them.
 
 **Frontend, user-card surfaces** (unchanged): `user-card-contents.gjs`'s
 Suspend/Silence/Report buttons gated on `user.can_batch_moderate`/
@@ -307,6 +311,28 @@ default `"College|Vidyalaya"`, new), `batch_moderation_member_type_field_name`
   reaches 10 owners — intentional for bootstrapping, but means "batch
   moderator" isn't necessarily hand-picked on a young group; worth tuning down
   per-site if that's a concern (also why some specs override this to `0`).
+- **Known, accepted risk — self-service promotion**: the cohort key comes from
+  profile fields the member can edit, so anyone with a valid college email can
+  set them to match a cohort that has fewer than
+  `batch_moderation_auto_promote_count` owners, be auto-promoted, and then
+  suspend/silence/report its members. Mitigations: the `allowed_email_domains`
+  allowlist gates who can sign up at all, and the count can be lowered (or set
+  to `0` to make promotion admin-only). Reviewed and deliberately left as is.
+- **Sync is serialised**: `GroupSync.sync` runs under a per-user
+  `DistributedMutex`, and the owner-cap check + `add_owner` under a per-group
+  one, so overlapping `user_created`/`user_updated` jobs send one join
+  notification and simultaneous joiners can't overshoot the cap.
+- **Staff-type visibility follows the field**: `is_staff_type` and the
+  directory's `staff_only` filter are only honoured for a viewer who could read
+  the member-type UserField (staff always; others only if it is shown on
+  profiles or user cards) — `GroupSync.member_type_field_visible_to?`. The admin
+  users list is unchanged (staff and Batch Moderators).
+- **Notification type ids are 1001-1003**: `batch_moderation_action` /
+  `_cohort_change` / `_status_change` were 46-48, ids upstream hands out
+  sequentially. They were moved (migration
+  `RenumberBatchModerationNotificationTypes`) so a future upstream type can't
+  share one. The earlier username backfill migration deliberately still targets
+  46-48, since it runs first.
 - **Staff-type cohorts are institution-wide**: a Staff-type member's key drops
   Batch/Branch entirely, so *all* Staff-type members at the same institution
   share one cohort group regardless of department — by design (see
@@ -633,7 +659,9 @@ service in the loop.
   `user-api-key-new.js` controller/route) is what actually gets stored into
   `push_url`; validated against `UserApiKey::ALLOWED_PUSH_PLATFORMS = %w[ios android]`.
 - `app/services/apns_push_notification_pusher.rb`: builds an `Apnotic`
-  connection from `SiteSetting.apple_pem`/`apple_key_id`/`apple_team_id`,
+  connection from `SiteSetting.apple_pem`/`apple_key_id`/`apple_team_id`
+  (defined by the Apple auth plugin — APNs reuses that Sign in with Apple key;
+  `ApnsPushNotificationPusher.configured?` skips APNs when they aren't defined),
   pushes to every iOS client for the user. If APNs responds `BadDeviceToken`
   (common for debug/TestFlight builds registered against the sandbox rather
   than production APNs), retries once against the sandbox endpoint before
@@ -833,6 +861,12 @@ multisite config, pointing at real RDS hosts — distinct from the
 `DEPLOYMENT.md` directly for the full operational runbook rather than
 duplicating it here.
 
+The workflow fails visibly rather than hanging: the "wait for nginx" and "verify
+all sites are up" steps retry a bounded number of times (60 x 5s, `curl
+--max-time 10`), then fail and print the container log tail; the job has
+`timeout-minutes: 45`. The secrets-bearing `app.yml` is written to an
+`mktemp` (0600) file that a `trap` removes even if the copy fails.
+
 ### Edge case worth flagging
 
 `config/multisite.yml`'s production DB hosts are unreachable from a local
@@ -967,16 +1001,21 @@ of total CSV size, instead of bursting.
 - `allow_any_email` invites are explicitly out of scope: neither
   personalized nor re-paced beyond their pre-existing
   `> BULK_INVITE_EMAIL_LIMIT`-row `bulk_pending` threshold.
-- Overlapping `Jobs::BulkInvite` runs (e.g. two CSV uploads close together)
-  can produce more than one concurrently-active `ProcessBulkInviteEmails`
-  self-rescheduling chain; `FOR UPDATE SKIP LOCKED` prevents any row from
-  being double-sent, but pacing guarantees only hold per-chain, not
-  globally, under that overlap — accepted as a rare, non-corrupting edge
-  case rather than adding a distributed lock.
-- A `Jobs::ProcessBulkInviteEmails` crash between marking an invite
-  `:sending` and its `enqueue_in` reschedule leaves that one row stuck at
-  `:sending` forever — a pre-existing risk in the batch version too,
-  unchanged by this work.
+- The pacing chain is a singleton per site. Starters (`Jobs::BulkInvite`,
+  resend-all) call `Jobs::ProcessBulkInviteEmails.ensure_chain!`, which takes a
+  Redis key (`set nx`, TTL = 3 x the max delay + 60s so a dead chain is
+  replaced); each tick refreshes it, and a chain that finds nothing pending
+  deletes it and re-checks once for an upload that landed in between. Two
+  uploads, or an upload plus resend-all, therefore share one chain and the
+  min/max delay really does cap the send rate. `FOR UPDATE SKIP LOCKED` still
+  guards each claim.
+- A failure while handling one invite (personalization/enqueue raising) is
+  rescued: the invite moves to `:pending` (unsent and resendable — not back to
+  `:bulk_pending`, where an always-failing invite would be re-claimed first
+  forever) and the chain reschedules as normal. If a worker dies outright
+  between the claim and the enqueue, the invite sits in `:sending`; each tick
+  returns invites that have been `:sending` for over an hour to
+  `:bulk_pending`.
 - `Jobs.enqueue_in` retains Sidekiq's default retry behavior for this job
   (deliberately not disabled, unlike `Jobs::BulkInvite`'s
   `sidekiq_options retry: false`) — safe because `FOR UPDATE SKIP LOCKED`
@@ -1019,14 +1058,16 @@ prevent — reachable by a single click.
 
 **Edge cases**:
 
-- Re-queuing overwrites `custom_message` the next time
-  `Jobs::ProcessBulkInviteEmails` processes the invite: if AI personalization
-  is enabled, a resent invite gets a freshly-generated (differently worded)
-  note rather than reusing its original one — desirable, since identical
-  wording on a resend burst would be exactly the fingerprint risk this
-  feature avoids. If personalization is disabled or unavailable at that
-  point, `custom_message` is cleared back to blank and the invite sends via
-  the plain template, same as any other throttled send.
+- Re-queuing rewrites `custom_message` the next time
+  `Jobs::ProcessBulkInviteEmails` processes the invite, but only when
+  personalization actually returns text: if AI personalization is enabled, a
+  resent invite gets a freshly-generated (differently worded) note rather than
+  reusing its original one — desirable, since identical wording on a resend
+  burst would be exactly the fingerprint risk this feature avoids. If
+  personalization is disabled or unavailable, the existing `custom_message`
+  (for example one the inviter wrote) is left untouched. Known residual: with AI
+  on, a generated note still replaces an inviter-written one, as the two can't
+  be told apart without a schema marker.
 - Invites deliberately marked `:not_required` via `skip_email` still match
   `resend_all_invites`'s existing scope (`email IS NOT NULL` alone satisfies
   it for a bound invite) and still get requeued/resent when paced resend is
@@ -1089,3 +1130,22 @@ rename when there is.
   spec edits. Like the random settings, console or API can still change it.
 - Classic (non-code) signup is unchanged: the member picks their own username
   there.
+
+## 12. Code-Review Follow-Ups (Invites, Sentry, `email_logs`)
+
+- **Resending an unbound bulk invite**: `InvitesController#update` with
+  `send_email` used to refuse any invite with no email. An unbound bulk invite
+  (`email` nil, recipient kept in `description`, `emailed_status` not
+  `:not_required`) is now resent to that address when the description is a valid
+  email. A plain invite link stays at `:not_required`, so editing its description
+  still can't turn it into a way to send mail.
+- **`email_logs.invite_id` index**: `AddInviteIdToEmailLogs` only adds the
+  column; `AddIndexToEmailLogsInviteId` builds the partial index concurrently
+  (`disable_ddl_transaction!`), since a plain build blocks writes to a large,
+  busy table. It drops any existing index first, so sites that already ran the
+  older blocking version get it rebuilt.
+- **Sentry performance messages**: `performance-monitoring.js` sends
+  `route_transition` / `discourse_init_to_paint` messages, sampled at 5%
+  (`MESSAGE_SAMPLE_RATE`; `tracesSampleRate` doesn't cover `captureMessage`) and
+  tagged with the site hostname so the three domains can be told apart. The DSN
+  stays in source; a Sentry DSN only permits sending events.

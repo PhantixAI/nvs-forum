@@ -488,7 +488,15 @@ describe DiscourseMcp::Tools do
       expect(SiteSetting.title).to eq("Admin UI title")
     end
 
+    # This fork hides enable_random_usernames, but it is the only setting that
+    # depends on a hidden one, which is what the two examples below exercise.
+    def expose_enable_random_usernames
+      visible = SiteSetting.hidden_settings - [:enable_random_usernames]
+      SiteSetting.stubs(:hidden_settings).returns(visible)
+    end
+
     it "checks hidden site setting dependencies without exposing them" do
+      expose_enable_random_usernames
       SiteSetting.enable_local_logins_via_code = false
 
       expect do
@@ -506,6 +514,7 @@ describe DiscourseMcp::Tools do
     end
 
     it "updates a setting when its hidden dependencies are satisfied" do
+      expose_enable_random_usernames
       SiteSetting.enable_local_logins_via_code = true
 
       result =

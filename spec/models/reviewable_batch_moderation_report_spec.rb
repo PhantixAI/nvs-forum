@@ -25,6 +25,36 @@ RSpec.describe ReviewableBatchModerationReport do
     end
   end
 
+  describe "repeat reports" do
+    fab!(:other_moderator, :user)
+
+    it "keeps every report and shows the newest reason" do
+      described_class.report!(actor: actor, target: target, reason: "first report")
+      reviewable =
+        described_class.report!(actor: other_moderator, target: target, reason: "second report")
+
+      expect(reviewable.payload["reason"]).to eq("second report")
+      expect(reviewable.reports.map { |report| report["reporter_username"] }).to eq(
+        [actor.username, other_moderator.username],
+      )
+      expect(reviewable.reports.map { |report| report["reason"] }).to eq(
+        ["first report", "second report"],
+      )
+    end
+
+    it "reopens a resolved report with the new reporter's reason" do
+      reviewable = described_class.report!(actor: actor, target: target, reason: "spam")
+      reviewable.perform(admin, :disagree_report)
+
+      reopened =
+        described_class.report!(actor: other_moderator, target: target, reason: "harassment")
+
+      expect(reopened).to be_pending
+      expect(reopened.payload["reason"]).to eq("harassment")
+      expect(reopened.reports.size).to eq(2)
+    end
+  end
+
   describe "#perform_agree_report" do
     it "approves the reviewable" do
       reviewable = described_class.report!(actor: actor, target: target, reason: "spam")

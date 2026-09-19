@@ -1257,6 +1257,38 @@ RSpec.describe InvitesController do
           expect(Jobs::InviteEmail.jobs.size).to eq(0)
         end
 
+        it "sends an unbound bulk invite to the address kept in its description" do
+          unbound_invite =
+            Fabricate(
+              :invite,
+              invited_by: admin,
+              email: nil,
+              description: "jane@example.com",
+              emailed_status: Invite.emailed_status_types[:sent],
+            )
+
+          put "/invites/#{unbound_invite.id}", params: { send_email: true }
+
+          expect(response.status).to eq(200)
+          expect(Jobs::InviteEmail.jobs.size).to eq(1)
+        end
+
+        it "still refuses an unbound bulk invite whose description is not an email address" do
+          unbound_invite =
+            Fabricate(
+              :invite,
+              invited_by: admin,
+              email: nil,
+              description: "just a note",
+              emailed_status: Invite.emailed_status_types[:sent],
+            )
+
+          put "/invites/#{unbound_invite.id}", params: { send_email: true }
+
+          expect(response.status).to eq(422)
+          expect(Jobs::InviteEmail.jobs.size).to eq(0)
+        end
+
         it "still allows binding an email and sending in the same request" do
           put "/invites/#{link_invite.id}", params: { email: "jane@example.com", send_email: true }
           expect(response.status).to eq(200)
@@ -2333,6 +2365,18 @@ RSpec.describe InvitesController do
         expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
         expect(Jobs::InviteEmail.jobs).to be_empty
         expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
+      end
+
+      it "joins the running throttle chain instead of starting a second one" do
+        invite = Fabricate(:invite, invited_by: admin)
+        Discourse.redis.set(Jobs::ProcessBulkInviteEmails::CHAIN_KEY, 1)
+
+        sign_in(admin)
+        post "/invites/reinvite-all"
+
+        expect(response.status).to eq(200)
+        expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+        expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
       end
 
       it "leaves invites already mid-throttle untouched" do

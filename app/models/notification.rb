@@ -171,9 +171,11 @@ class Notification < ActiveRecord::Base
         boost: 43, # Used by https://github.com/discourse/discourse-boosts
         suggested_edit_created: 44, # Used by https://github.com/discourse/discourse/tree/main/plugins/discourse-suggested-edits
         suggested_edit_accepted: 45, # Used by https://github.com/discourse/discourse/tree/main/plugins/discourse-suggested-edits
-        batch_moderation_action: 46,
-        batch_moderation_cohort_change: 47,
-        batch_moderation_status_change: 48,
+        # Fork-only types sit outside the sequential range upstream hands out
+        # (next free is 46), so a future upstream type can never share an id.
+        batch_moderation_action: 1001,
+        batch_moderation_cohort_change: 1002,
+        batch_moderation_status_change: 1003,
         following: 800, # Used by https://github.com/discourse/discourse-follow
         following_created_topic: 801, # Used by https://github.com/discourse/discourse-follow
         following_replied: 802, # Used by https://github.com/discourse/discourse-follow
