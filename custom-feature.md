@@ -1036,3 +1036,56 @@ prevent — reachable by a single click.
   applies unchanged and limits how often "Resend All Invites" can be
   triggered at all; it does not limit how many invites a single trigger
   requeues.
+
+## 11. Name-Based Usernames at Email-Code Signup + Locked Full-Name Requirement
+
+### Requirement
+
+Batch-moderator promotion notifications (and the cohort-change / action
+notifications) link to `/u/<username>`. Email-code signup used to create the
+account with a random placeholder (`QuietFalcon34`, or `userN` with random
+names off) that the new member then renamed on the "account ready" screen, so
+links built from the placeholder went dead. Usernames now start from the
+member's own name so there's usually nothing to rename, and links survive a
+rename when there is.
+
+### Implementation
+
+- `User::Action::CreateFromVerifiedEmail` derives the username from the name
+  first (`UserNameSuggester.suggest(name)`, gated on
+  `use_name_for_username_suggestions`, default on): "Rahul Sharma" becomes
+  `Rahul_Sharma`, `Rahul_Sharma1` on collision. Only if that yields nothing
+  (no name, or one that sanitizes to nothing) does it fall through to the old
+  chain: email-based suggestion, random generator, generic `userN`.
+- `Jobs::UpdateUsername#update_batch_moderation_notifications` rewrites
+  `user_username` / `actor_username` / `target_username` in the three
+  `batch_moderation_*` notification types on every rename (core's
+  `update_notifications` only knows its own keys). Runs in the existing
+  low-priority job; one scan of `notifications` (no index on those keys or on
+  `notification_type` alone).
+- Migration `BackfillBatchModerationNotificationUsernames` repoints already
+  stale notifications by `user_id` / `target_user_id`. Notifications whose user
+  no longer exists can't be repaired. Actor names have no id stored, so they
+  are only fixed going forward.
+- Full name is permanently required: `full_name_requirement` defaults to
+  `required_at_signup`, is `hidden`, and `FullNameRequirementValidator`
+  rejects any other value (UI, API and `SiteSetting.x =` alike). Migration
+  `ResetFullNameAndRandomUsernameSettings` deletes any override of it.
+  Specs covering the other modes use `stub_full_name_requirement`
+  (`spec/support/full_name_requirement_helper.rb`).
+- `enable_random_usernames`, `random_username_adjectives` and
+  `random_username_nouns` are hidden from the admin UI. Random names remain the
+  fallback for names that can't become a username. The migration also deletes
+  any `enable_random_usernames` override so it stays on; customised word lists
+  are left in place.
+
+### Edge cases
+
+- Hidden is not locked for the random settings: they can still be changed by
+  console or API, unlike `full_name_requirement`.
+- `enable_names` is hidden and its override is reset (it must stay on for the
+  required name to be collected), but it has no validator: many core and
+  plugin specs assign it `false`, so a validator would need dozens of upstream
+  spec edits. Like the random settings, console or API can still change it.
+- Classic (non-code) signup is unchanged: the member picks their own username
+  there.

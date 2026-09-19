@@ -393,7 +393,7 @@ describe "Sign up via email code" do
   end
 
   context "when a full name is required at signup" do
-    before { SiteSetting.full_name_requirement = "required_at_signup" }
+    before { stub_full_name_requirement("required_at_signup") }
 
     it "collects the name after the code is verified" do
       open_code_signup

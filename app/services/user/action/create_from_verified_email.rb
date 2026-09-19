@@ -11,16 +11,20 @@ class User::Action::CreateFromVerifiedEmail < Service::ActionBase
   def call
     raise Discourse::SiteArchived if SiteSetting.site_archived
 
-    # A random name beats the generic "userN" fallback here: there is no
-    # signup form where the user could pick one before the account exists.
-    # Sites that turn random names off fall through to that generic name.
-    suggested_username =
-      UserNameSuggester.suggest(email, allow_generic_fallback: false) ||
-        RandomUsernameGenerator.generate || UserNameSuggester.suggest(email)
-
     user = User.where(staged: true).with_email(email).first
     user&.unstage!
     user ||= User.new
+
+    # The person's own name comes first so the username they start with is
+    # one they have no reason to change -- a changed username leaves stored
+    # links to it (e.g. in notifications) pointing nowhere. A random name
+    # beats the generic "userN" fallback after that: there is no signup form
+    # where the user could pick one before the account exists. Sites that
+    # turn random names off fall through to that generic name.
+    suggested_username =
+      username_from_name(name.presence || user.name) ||
+        UserNameSuggester.suggest(email, allow_generic_fallback: false) ||
+        RandomUsernameGenerator.generate || UserNameSuggester.suggest(email)
 
     user.attributes = {
       email: email,
@@ -47,6 +51,12 @@ class User::Action::CreateFromVerifiedEmail < Service::ActionBase
   end
 
   private
+
+  def username_from_name(full_name)
+    return if !SiteSetting.use_name_for_username_suggestions || full_name.blank?
+
+    UserNameSuggester.suggest(full_name, allow_generic_fallback: false)
+  end
 
   def assign_user_fields(user)
     return if user_fields.blank?

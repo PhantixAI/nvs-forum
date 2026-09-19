@@ -1606,7 +1606,7 @@ RSpec.describe SessionController do
       end
 
       context "when a full name is required at signup" do
-        before { SiteSetting.full_name_requirement = "required_at_signup" }
+        before { stub_full_name_requirement("required_at_signup") }
 
         it "asks for the name without consuming the code, then creates the user with it" do
           post "/session/login-code/verify.json", params: { email: "newuser@example.com", code: }

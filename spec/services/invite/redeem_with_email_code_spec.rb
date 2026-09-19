@@ -141,7 +141,7 @@ RSpec.describe Invite::RedeemWithEmailCode do
     end
 
     context "when a full name is required at signup" do
-      before { SiteSetting.full_name_requirement = "required_at_signup" }
+      before { stub_full_name_requirement("required_at_signup") }
 
       it { is_expected.to fail_a_policy(:required_full_name_provided) }
 
@@ -155,7 +155,7 @@ RSpec.describe Invite::RedeemWithEmailCode do
     context "when a required full name is provided" do
       let(:params) { { invite_key: invite.invite_key, email:, code:, name: "Invited Person" } }
 
-      before { SiteSetting.full_name_requirement = "required_at_signup" }
+      before { stub_full_name_requirement("required_at_signup") }
 
       it { is_expected.to run_successfully }
 

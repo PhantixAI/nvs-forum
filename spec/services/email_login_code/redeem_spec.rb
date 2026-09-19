@@ -143,6 +143,30 @@ RSpec.describe EmailLoginCode::Redeem do
         it "saves the name even though it isn't required" do
           expect(result[:user].name).to eq("Jane Doe")
         end
+
+        it "derives the username from the name" do
+          expect(result[:user].username).to eq("Jane_Doe")
+        end
+
+        it "numbers the username when another user already has it" do
+          Fabricate(:user, username: "Jane_Doe")
+
+          expect(result[:user].username).to eq("Jane_Doe1")
+        end
+
+        it "does not derive the username from the name when name-based suggestions are disabled" do
+          SiteSetting.use_name_for_username_suggestions = false
+
+          expect(result[:user].username).not_to include("Jane")
+        end
+
+        it "falls back to a generated username when the name has no usable characters" do
+          SiteSetting.unicode_usernames = false
+          params[:name] = "!!!"
+
+          expect(result[:user].username).to be_present
+          expect(result[:user].username).not_to include("!")
+        end
       end
 
       it "enqueues the welcome message" do
@@ -232,7 +256,7 @@ RSpec.describe EmailLoginCode::Redeem do
     end
 
     context "when a full name is required at signup" do
-      before { SiteSetting.full_name_requirement = "required_at_signup" }
+      before { stub_full_name_requirement("required_at_signup") }
 
       it { is_expected.to fail_a_policy(:required_full_name_provided) }
 
