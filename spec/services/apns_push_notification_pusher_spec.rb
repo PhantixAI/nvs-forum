@@ -27,6 +27,13 @@ RSpec.describe ApnsPushNotificationPusher do
   end
 
   before do
+    # The Apple key settings belong to the Apple auth plugin, which core spec
+    # runs don't load. The plugin-absent path is covered separately in
+    # apns_push_notification_pusher_without_plugin_spec.rb.
+    if !SiteSetting.respond_to?(:apple_pem)
+      skip "requires the discourse-apple-auth plugin (LOAD_PLUGINS=1)"
+    end
+
     SiteSetting.apple_pem = "test-auth-key"
     SiteSetting.apple_key_id = "test-key-id"
     SiteSetting.apple_team_id = "test-team-id"
@@ -46,6 +53,26 @@ RSpec.describe ApnsPushNotificationPusher do
 
     described_class.push(user, payload)
     expect(Apnotic::Connection).not_to have_received(:new)
+  end
+
+  it "does nothing when APNs isn't configured, as on a site without the Apple auth plugin" do
+    setup_ios_client(user)
+    described_class.stubs(:configured?).returns(false)
+
+    expect { described_class.push(user, payload) }.not_to raise_error
+    expect(Apnotic::Connection).not_to have_received(:new)
+  end
+
+  describe ".configured?" do
+    it "is true when the settings exist and a key is present" do
+      expect(described_class.configured?).to eq(true)
+    end
+
+    it "is false when the key is blank" do
+      SiteSetting.apple_pem = ""
+
+      expect(described_class.configured?).to eq(false)
+    end
   end
 
   it "pushes a notification with the title, body, url and apns topic for each ios client" do

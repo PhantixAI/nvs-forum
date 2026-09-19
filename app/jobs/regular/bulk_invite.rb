@@ -37,7 +37,7 @@ module Jobs
       # send_invite), so this always has something to pick up -- except when
       # every row failed/was skipped/was allow_any_email, in which case it's
       # a harmless no-op (Jobs::ProcessBulkInviteEmails finds nothing pending).
-      ::Jobs.enqueue(:process_bulk_invite_emails)
+      ::Jobs::ProcessBulkInviteEmails.ensure_chain!
     ensure
       notify_user
     end

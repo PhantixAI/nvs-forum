@@ -15,10 +15,18 @@ RSpec.describe BackfillBatchModerationNotificationUsernames do
 
   after { ActiveRecord::Migration.verbose = @original_verbose }
 
+  # The ids these types had when this migration ran; Notification.types has
+  # since moved them (see RenumberBatchModerationNotificationTypes).
+  HISTORICAL_TYPE_IDS = {
+    batch_moderation_action: 46,
+    batch_moderation_cohort_change: 47,
+    batch_moderation_status_change: 48,
+  }.freeze
+
   def create_notification(type, data)
     Notification.create!(
       user: recipient,
-      notification_type: Notification.types[type],
+      notification_type: HISTORICAL_TYPE_IDS.fetch(type),
       data: data.to_json,
     )
   end

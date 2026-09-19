@@ -36,6 +36,12 @@ module TestSetup
       allow_uncategorized_topics: true,
     }.each { |k, v| SiteSetting.set(k, v) }
 
+    # Pinned to required_at_signup in production (FullNameRequirementValidator),
+    # which the upstream specs and fabricators predate. Written straight into
+    # the in-memory values to bypass the validator, so fab! records built
+    # outside an example see it too.
+    SiteSetting.current[:full_name_requirement] = "hidden_at_signup"
+
     # very expensive IO operations
     SiteSetting.automatically_download_gravatars = false
 

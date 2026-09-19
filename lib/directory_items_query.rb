@@ -115,6 +115,7 @@ class DirectoryItemsQuery
 
   def filter_staff_only(items, staff_only)
     return items unless staff_only
+    return items if !BatchModeration::GroupSync.member_type_field_visible_to?(guardian)
     CohortFilter.institute_staff_only(items.references(:user), staff_only)
   end
 
