@@ -106,7 +106,7 @@ shared_examples "social authentication scenarios" do
 
       context "when Full Name is set to Required and auth overrides name" do
         before do
-          SiteSetting.full_name_requirement = "required_at_signup"
+          stub_full_name_requirement("required_at_signup")
           SiteSetting.auth_overrides_name = true
         end
 
@@ -591,7 +591,7 @@ shared_examples "social authentication scenarios" do
 end
 
 describe "Social authentication" do
-  before { SiteSetting.full_name_requirement = "optional_at_signup" }
+  before { stub_full_name_requirement("optional_at_signup") }
 
   context "when desktop" do
     include_examples "social authentication scenarios"
