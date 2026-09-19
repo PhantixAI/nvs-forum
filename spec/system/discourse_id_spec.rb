@@ -45,7 +45,7 @@ describe "discourse login client auth" do
       end
 
       context "when full_name_requirement is required_at_signup" do
-        before { SiteSetting.full_name_requirement = "required_at_signup" }
+        before { stub_full_name_requirement("required_at_signup") }
 
         it "shows the signup form when name is not provided by the provider" do
           visit("/")

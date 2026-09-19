@@ -7,6 +7,12 @@ module Jobs
     # we are limiting it so only 1 per cluster runs
     cluster_concurrency 1
 
+    BATCH_MODERATION_NOTIFICATION_TYPES = %i[
+      batch_moderation_action
+      batch_moderation_cohort_change
+      batch_moderation_status_change
+    ]
+
     def execute(args)
       @user_id = args[:user_id]
       user = User.find_by(id: @user_id)
@@ -42,6 +48,7 @@ module Jobs
       update_posts
       update_revisions
       update_notifications
+      update_batch_moderation_notifications
       update_post_custom_fields
 
       DiscourseEvent.trigger(:username_changed, @old_username, @new_username)
@@ -135,6 +142,44 @@ module Jobs
           data :: JSONB ->> 'display_username' = :old_username OR
           data :: JSONB ->> 'username' = :old_username OR
           data :: JSONB ->> 'username2' = :old_username
+      SQL
+    end
+
+    # Batch moderation notifications keep usernames under their own keys
+    # (which update_notifications doesn't know about) and link to /u/<name>
+    # from them, so a rename would otherwise leave those links dead.
+    def update_batch_moderation_notifications
+      params = {
+        old_username: @old_username,
+        new_username: @new_username,
+        types: BATCH_MODERATION_NOTIFICATION_TYPES.map { |type| Notification.types[type] },
+      }
+
+      DB.exec(<<~SQL, params)
+        UPDATE notifications
+        SET data = (data :: JSONB ||
+                    jsonb_strip_nulls(
+                        jsonb_build_object(
+                            'user_username', CASE data :: JSONB ->> 'user_username'
+                                             WHEN :old_username
+                                               THEN :new_username
+                                             ELSE NULL END,
+                            'actor_username', CASE data :: JSONB ->> 'actor_username'
+                                              WHEN :old_username
+                                                THEN :new_username
+                                              ELSE NULL END,
+                            'target_username', CASE data :: JSONB ->> 'target_username'
+                                               WHEN :old_username
+                                                 THEN :new_username
+                                               ELSE NULL END
+                        )
+                    )) :: JSON
+        WHERE
+          notification_type IN (:types) AND (
+            data :: JSONB ->> 'user_username' = :old_username OR
+            data :: JSONB ->> 'actor_username' = :old_username OR
+            data :: JSONB ->> 'target_username' = :old_username
+          )
       SQL
     end
 
