@@ -323,6 +323,7 @@ class InvitesController < ApplicationController
         # description (an ordinary note field) and requesting send_email, even though no
         # email was ever actually provided for this invite.
         effective_email = params.has_key?(:email) ? params[:email].presence : invite.email.presence
+        effective_email ||= unbound_invite_recipient(invite) if !params.has_key?(:email)
         return render_json_error(I18n.t("invite.email_required_to_send")) if effective_email.blank?
 
         if invite.emailed_status != Invite.emailed_status_types[:pending]
@@ -664,7 +665,20 @@ class InvitesController < ApplicationController
       requeued = true
     end
 
-    ::Jobs.enqueue(:process_bulk_invite_emails) if requeued
+    ::Jobs::ProcessBulkInviteEmails.ensure_chain! if requeued
+  end
+
+  # An unbound bulk invite (see Jobs::BulkInvite#send_invite) has no email, by
+  # design; its recipient lives in the description, and an emailed status other
+  # than :not_required is what marks it as one that really was sent to
+  # someone. A plain invite link stays at :not_required, so editing its
+  # description still can't turn it into a way to send mail.
+  def unbound_invite_recipient(invite)
+    return if invite.email.present?
+    return if invite.emailed_status == Invite.emailed_status_types[:not_required]
+
+    description = params.has_key?(:description) ? params[:description] : invite.description
+    description.presence if EmailAddressValidator.valid_value?(description.to_s)
   end
 
   def show_invite(invite)

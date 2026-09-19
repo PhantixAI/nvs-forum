@@ -1765,6 +1765,7 @@ en:
       reviewable:
         reported_by: "Reported by"
         reported_user: "Reported user"
+        all_reports: "All reports"
       reviewable_bulk_invite:
         submitted_by: "Submitted by"
         invite_count:

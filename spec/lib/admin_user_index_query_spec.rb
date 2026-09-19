@@ -390,6 +390,12 @@ RSpec.describe AdminUserIndexQuery do
       expect(ids).not_to include(other.id)
     end
 
+    it "treats a missing guardian as a non-staff viewer instead of raising" do
+      query = AdminUserIndexQuery.new({ filters: { college_field.id => "NIT Trichy" }.to_json })
+
+      expect { query.find_users_query.to_sql }.not_to raise_error
+    end
+
     it "is a no-op when filters is blank" do
       query = AdminUserIndexQuery.new({ filters: nil }, guardian: admin.guardian)
       expect { query.find_users_query.to_sql }.not_to raise_error

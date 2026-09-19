@@ -1,6 +1,18 @@
 # frozen_string_literal: true
 
+# The tasks loop over every configured site, and in specs that list comes from
+# the tracked multisite config -- i.e. production. Scope them to the test DB.
+RSpec.shared_context "with only the current site" do
+  before do
+    RailsMultisite::ConnectionManagement.stubs(:each_connection).yields(
+      RailsMultisite::ConnectionManagement.current_db,
+    )
+  end
+end
+
 describe "batch_moderation:resync_cohorts" do
+  include_context "with only the current site"
+
   fab!(:college_field) { Fabricate(:user_field, name: "College", requirement: "optional") }
   fab!(:branch_field) { Fabricate(:user_field, name: "Branch", requirement: "optional") }
   fab!(:batch_field) { Fabricate(:user_field, name: "Batch", requirement: "optional") }
@@ -47,6 +59,8 @@ describe "batch_moderation:resync_cohorts" do
 end
 
 describe "batch_moderation:backfill_member_type" do
+  include_context "with only the current site"
+
   fab!(:branch_field) { Fabricate(:user_field, name: "Branch", requirement: "optional") }
   fab!(:batch_field) { Fabricate(:user_field, name: "Batch", requirement: "optional") }
 
@@ -142,6 +156,8 @@ describe "batch_moderation:backfill_member_type" do
 end
 
 describe "batch_moderation:revoke_site_moderators" do
+  include_context "with only the current site"
+
   before do
     Rake::Task.clear
     silence_warnings { Discourse::Application.load_tasks }

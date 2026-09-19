@@ -39,7 +39,7 @@ module CohortFilter
     return items unless filter_values.is_a?(Hash)
     return items if filter_values.blank?
 
-    allowed_field_scope = guardian.is_staff? ? UserField.all : UserField.public_fields
+    allowed_field_scope = guardian&.is_staff? ? UserField.all : UserField.public_fields
     allowed_fields = allowed_field_scope.where(name: field_names).index_by { |f| f.id.to_s }
 
     filter_values.each do |field_id, value|

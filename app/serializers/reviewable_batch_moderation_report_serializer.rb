@@ -3,7 +3,7 @@
 class ReviewableBatchModerationReportSerializer < ReviewableSerializer
   attributes :target_user
 
-  payload_attributes(:reason)
+  payload_attributes(:reason, :reports)
 
   def target_user
     FlaggedUserSerializer.new(object.target, scope: scope, root: false).as_json

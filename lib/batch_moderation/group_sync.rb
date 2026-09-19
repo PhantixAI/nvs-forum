@@ -27,9 +27,19 @@ module BatchModeration
     # existing user under a new cohort-key algorithm would otherwise fire a
     # leave+join (and possibly a status-change) notification, to every staff
     # member and cohort owner, for every single user on the site.
+    #
+    # Runs under a per-user lock: signup fires both a user_created and a
+    # user_updated sync, and when those two jobs overlap each would see the
+    # user as not yet in the cohort and send its own join notification.
     def self.sync(user, notify: true)
       return unless SiteSetting.enable_batch_moderation
 
+      DistributedMutex.synchronize("batch_moderation_sync_user_#{user.id}", validity: 60) do
+        sync_user(user, notify: notify)
+      end
+    end
+
+    def self.sync_user(user, notify:)
       key = cohort_key_for(user)
       desired_group = find_or_create_group(key) if key
 
@@ -59,6 +69,7 @@ module BatchModeration
         auto_promote_if_understaffed(desired_group, user, notify: notify)
       end
     end
+    private_class_method :sync_user
 
     def self.batch_group?(group)
       return false unless group
@@ -178,6 +189,18 @@ module BatchModeration
       UserField.find_by(name: SiteSetting.batch_moderation_member_type_field_name)
     end
 
+    # Which members hold a staff-type value is only the viewer's to know if
+    # they could read that field themselves -- the same rule CohortFilter
+    # applies to the other cohort fields. Without this the directory's
+    # staff-only filter and is_staff_type flag would expose a field the admin
+    # deliberately left off profiles and user cards.
+    def self.member_type_field_visible_to?(guardian)
+      return true if guardian&.is_staff?
+
+      type_field = find_member_type_field
+      type_field.present? && UserField.public_fields.exists?(id: type_field.id)
+    end
+
     # Computes the ordered set of (field, value) cohort-key components for a
     # user, or `nil` if their cohort isn't complete (missing a required
     # field's value). Public so specs can exercise the key logic directly
@@ -237,13 +260,21 @@ module BatchModeration
 
     def self.auto_promote_if_understaffed(group, user, notify: true)
       return if SiteSetting.batch_moderation_auto_promote_count <= 0
-      if group.group_users.where(owner: true).count >=
-           SiteSetting.batch_moderation_auto_promote_count
-        return
-      end
 
-      group.add_owner(user)
-      return unless notify
+      # Locked per group so two people joining at once can't both read "one
+      # below the cap" and each be promoted past it.
+      promoted =
+        DistributedMutex.synchronize("batch_moderation_promote_group_#{group.id}", validity: 60) do
+          if group.group_users.where(owner: true).count >=
+               SiteSetting.batch_moderation_auto_promote_count
+            false
+          else
+            group.add_owner(user)
+            true
+          end
+        end
+
+      return unless promoted && notify
       Notifier.notify_moderator_status_change(actor: nil, user: user, group: group, granted: true)
     end
     private_class_method :auto_promote_if_understaffed
