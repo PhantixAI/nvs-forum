@@ -43,6 +43,9 @@ class WebHookUserSerializer < UserSerializer
     sidebar_category_ids
     sidebar_tags
     can_pick_theme_with_custom_homepage
+    can_batch_moderate
+    can_batch_report
+    is_batch_moderator
   ].each { |attr| define_method("include_#{attr}?") { false } }
 
   def include_email?

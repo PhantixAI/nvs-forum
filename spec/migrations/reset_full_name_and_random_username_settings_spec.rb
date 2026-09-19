@@ -13,7 +13,8 @@ RSpec.describe ResetFullNameAndRandomUsernameSettings do
   def override(name, value, type)
     DB.exec(
       "INSERT INTO site_settings (name, data_type, value, created_at, updated_at)
-       VALUES (:name, :type, :value, now(), now())",
+       VALUES (:name, :type, :value, now(), now())
+       ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value",
       name:,
       type:,
       value:,

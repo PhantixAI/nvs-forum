@@ -192,6 +192,17 @@ RSpec.describe Jobs::BulkInvite do
       end
     end
 
+    it "shares one throttle chain between overlapping uploads" do
+      2.times do |i|
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "overlap#{i}@discourse.org" }],
+        )
+      end
+
+      expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
+    end
+
     it "does not send an invite email when skip_email_bulk_invites is true" do
       SiteSetting.skip_email_bulk_invites = true
 
