@@ -32,6 +32,7 @@ RSpec.describe InviteSerializer do
         :email,
         :domain,
         :emailed,
+        :delivery_status,
         :max_redemptions_allowed,
         :redemption_count,
         :custom_message,
@@ -47,6 +48,57 @@ RSpec.describe InviteSerializer do
       json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
 
       expect(json[:topics]).to eq([])
+    end
+  end
+
+  describe "#delivery_status" do
+    fab!(:user)
+    fab!(:invite) do
+      Fabricate(
+        :invite,
+        invited_by: user,
+        email: "invitee@example.com",
+        emailed_status: Invite.emailed_status_types[:sent],
+      )
+    end
+
+    it "falls back to querying for the EmailLog when none is preloaded" do
+      Fabricate(:email_log, invite_id: invite.id, email_type: "invite", bounced: true)
+
+      json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
+
+      expect(json[:delivery_status]).to eq("bounced")
+    end
+
+    it "uses a preloaded EmailLog passed via email_logs_by_invite_id, avoiding a query" do
+      email_log = Fabricate(:email_log, invite_id: invite.id, email_type: "invite", bounced: true)
+
+      json =
+        InviteSerializer.new(
+          invite,
+          scope: Guardian.new(user),
+          root: false,
+          email_logs_by_invite_id: {
+            invite.id => email_log,
+          },
+        ).as_json
+
+      expect(json[:delivery_status]).to eq("bounced")
+    end
+
+    it "treats a missing entry in the preloaded hash as no EmailLog, not as unloaded" do
+      Fabricate(:email_log, invite_id: invite.id, email_type: "invite", bounced: true)
+
+      json =
+        InviteSerializer.new(
+          invite,
+          scope: Guardian.new(user),
+          root: false,
+          email_logs_by_invite_id: {
+          },
+        ).as_json
+
+      expect(json[:delivery_status]).to eq("sent")
     end
   end
 

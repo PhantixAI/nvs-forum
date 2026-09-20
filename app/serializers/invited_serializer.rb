@@ -17,6 +17,7 @@ class InvitedSerializer < ApplicationSerializer
       scope: scope,
       root: false,
       show_emails: object.show_emails,
+      email_logs_by_invite_id: object.email_logs_by_invite_id,
     ).as_json
   end
 

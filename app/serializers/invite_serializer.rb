@@ -8,6 +8,7 @@ class InviteSerializer < ApplicationSerializer
              :email,
              :domain,
              :emailed,
+             :delivery_status,
              :can_delete_invite,
              :max_redemptions_allowed,
              :redemption_count,
@@ -48,6 +49,21 @@ class InviteSerializer < ApplicationSerializer
 
   def emailed
     object.emailed_status != Invite.emailed_status_types[:not_required]
+  end
+
+  def include_delivery_status?
+    email.present? && can_see_invite_details?
+  end
+
+  def delivery_status
+    # Passing an explicit nil would defeat Invite#delivery_status's own
+    # default argument (falling back to latest_sent_email_log) -- only pass
+    # an argument at all when a preload hash was actually given.
+    if options[:email_logs_by_invite_id]
+      object.delivery_status(options[:email_logs_by_invite_id][object.id])
+    else
+      object.delivery_status
+    end
   end
 
   def can_delete_invite

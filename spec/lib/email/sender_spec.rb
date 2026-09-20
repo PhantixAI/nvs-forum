@@ -969,6 +969,22 @@ RSpec.describe Email::Sender do
       expect(@email_log.smtp_transaction_response).to eq(mock_smtp_transaction_response)
     end
 
+    it "does not set ses_message_id for a non-SES SMTP response" do
+      expect(@email_log.ses_message_id).to eq(nil)
+    end
+
+    context "when the SMTP transaction response is SES-shaped" do
+      let(:mock_smtp_transaction_response) do
+        "250 Ok 010901a075d1bd53-2bdf9bfa-57d6-41e7-a08f-e1884959e9a6-000000"
+      end
+
+      it "extracts the SES message ID" do
+        expect(@email_log.ses_message_id).to eq(
+          "010901a075d1bd53-2bdf9bfa-57d6-41e7-a08f-e1884959e9a6-000000",
+        )
+      end
+    end
+
     describe "post reply keys" do
       fab!(:post)
 

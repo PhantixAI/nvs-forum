@@ -8,6 +8,7 @@ import DTooltip from "discourse/float-kit/components/d-tooltip";
 import i18nYesNo from "discourse/helpers/i18n-yes-no";
 import lazyHash from "discourse/helpers/lazy-hash";
 import rawDate from "discourse/helpers/raw-date";
+import { showsBatchModeratorBadge } from "discourse/lib/batch-moderator-badge";
 import ComboBox from "discourse/select-kit/components/combo-box";
 import { not, or } from "discourse/truth-helpers";
 import DButton from "discourse/ui-kit/d-button";
@@ -532,7 +533,7 @@ export default <template>
                     {{#if user.moderator}}
                       {{dIcon "shield-halved" title="admin.moderator"}}
                     {{/if}}
-                    {{#if user.is_batch_moderator}}
+                    {{#if (showsBatchModeratorBadge user)}}
                       {{dIcon "shield" title="batch_moderation.badge_title"}}
                     {{/if}}
                     {{#if user.second_factor_enabled}}
