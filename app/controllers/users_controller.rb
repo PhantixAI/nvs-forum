@@ -587,12 +587,30 @@ class UsersController < ApplicationController
       expired_count = can_see_invite_details ? Invite.expired(inviter).reorder(nil).count.to_i : 0
       redeemed_count = Invite.redeemed_users(inviter).reorder(nil).count.to_i
 
+      invite_list = invites.to_a
+      # Only pending/expired invites are rendered through InviteSerializer
+      # (redeemed invites use InvitedUserSerializer instead), so this is the
+      # only branch that ever reads delivery_status -- skip the extra query
+      # otherwise. A page is capped at SiteSetting.invites_per_page, so this
+      # is never an unbounded scan.
+      email_logs_by_invite_id =
+        if (filter == "pending" || filter == "expired") && invite_list.present?
+          EmailLog
+            .where(invite_id: invite_list.map(&:id), email_type: "invite")
+            .order(created_at: :desc)
+            .group_by(&:invite_id)
+            .transform_values(&:first)
+        else
+          {}
+        end
+
       render json:
                MultiJson.dump(
                  InvitedSerializer.new(
                    OpenStruct.new(
-                     invite_list: invites.to_a,
+                     invite_list: invite_list,
                      show_emails: show_emails,
+                     email_logs_by_invite_id: email_logs_by_invite_id,
                      inviter: inviter,
                      type: filter,
                      counts: {

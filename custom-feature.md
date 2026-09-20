@@ -338,7 +338,12 @@ exclusion, or `spec/serializers/web_hook_user_serializer_spec.rb` fails.
 Suspend/Silence/Report buttons gated on `user.can_batch_moderate`/
 `can_batch_report`; `modal/batch-moderation-penalty.gjs`/
 `modal/batch-moderation-report.gjs`; the shield badge connectors near
-usernames gated on `is_batch_moderator`. Icons: `shield` is added to the SVG sprite
+usernames (`after-user-name`, `user-card-after-username`) and the admin list
+icon are gated on `showsBatchModeratorBadge` (`lib/batch-moderator-badge.js`):
+the badge shows only when the member is a Batch Moderator and neither an admin
+nor a site moderator, so a profile displays its highest role. The
+`is_batch_moderator` flag itself stays true for them, because the admin user
+page's Grant/Revoke row and the permission checks still read it. Icons: `shield` is added to the SVG sprite
 (`lib/svg_sprite.rb`), `user-tie` is registered in
 `config/initializers/301-batch-moderation.rb`, and the three notification types
 get icons via `register-batch-moderation-notification-icons.js`.
@@ -1406,3 +1411,95 @@ rename when there is.
   stays in source; a Sentry DSN only permits sending events. The
   `@sentry/browser` dependency is in `frontend/discourse/package.json`, and
   `pnpm-workspace.yaml` sets `strictDepBuilds: false` (upstream: `true`).
+
+## 13. Invite Email Delivery Status (SES Bounce/Delivery/Complaint)
+
+### Requirement
+
+For a 10K+ cold-outreach invite campaign, `Invite#emailed_status` only tracks
+whether we handed an email to the mailer (`pending`/`bulk_pending`/`sending`/
+`sent`) — it has no idea what happened downstream: accepted, bounced, or
+marked as spam. Admins need that, sourced from AWS SES.
+
+### Root cause fixed along the way
+
+Discourse core already ships a real SES/SNS bounce webhook
+(`POST /webhooks/aws` → `Jobs::ProcessSnsNotification`), but it was silently
+broken on this site: `EmailLog#message_id` is the locally-generated RFC822
+`Message-ID` header, while SES's own SNS notifications carry a completely
+different, SES-assigned ID in `mail.messageId`. The job matched on the wrong
+column, so no bounce would ever have been recorded even once AWS-side wiring
+was added. `Jobs::ProcessSnsNotification` also only handled `"Bounce"`
+notifications; `"Delivery"` and `"Complaint"` were silently ignored.
+
+### Implementation
+
+- **`email_logs`** gets three new nullable columns:
+  `AddSesFieldsToEmailLogs` (`ses_message_id`, `delivered_at`,
+  `complained_at`), `AddIndexToEmailLogsSesMessageId` (partial index, built
+  concurrently, same pattern as the `invite_id` index in §12), and
+  `BackfillSesMessageIdOnEmailLogs` (batched backfill of `ses_message_id` from
+  the already-captured `smtp_transaction_response`, so historical sends become
+  reconcilable too, not just future ones).
+- **`lib/email/sender.rb`**: `SES_MESSAGE_ID_PATTERN` parses SES's own ID out
+  of the SMTP response right after it's captured (`"250 Ok <ses-id>"` →
+  `<ses-id>`); no-op for any non-SES SMTP response (e.g. local dev).
+- **`app/jobs/regular/process_sns_notification.rb`**: rewritten to look up by
+  `ses_message_id` instead of `message_id`, and to dispatch on
+  `notificationType` (`Bounce`/`Delivery`/`Complaint`) instead of only
+  handling bounces. All three handlers skip an `EmailLog` that already has a
+  *different* one of the three terminal outcomes recorded — SES notifications
+  can arrive out of order, and the first one to land is the more useful
+  signal than a later, contradictory one (a post-review fix: the initial cut
+  only guarded Delivery/Complaint against each other and against an existing
+  Bounce, but not the reverse). No invite-specific branching needed here:
+  once a notification is matched to the right `EmailLog` row, that row's
+  `invite_id` (set at send time, §10 extension) carries the update through
+  for free.
+- **`Invite#delivery_status`**: derived, not a new `emailed_status` value —
+  that enum intentionally only tracks mailer hand-off. Maps
+  `pending`/`bulk_pending` → `"scheduled"`, `sending` → `"pending"`, and once
+  `sent`, reads the linked `EmailLog` for `"delivered"`/`"bounced"`/
+  `"complained"`/`"sent"` (no signal yet). Takes an optional preloaded
+  `EmailLog` (defaults to `latest_sent_email_log`, §10 extension) so a caller
+  rendering a page of invites can batch-load it once.
+- **`UsersController#invited`**: preloads the latest `EmailLog` per invite for
+  the current page only (pending/expired filters, where `InviteSerializer` is
+  used) via one grouped query, threaded through `InvitedSerializer` →
+  `InviteSerializer` the same way `show_emails` already is.
+- **`InviteSerializer`**: new `delivery_status` attribute, gated the same way
+  `emailed` already is (`can_see_invite_details?`). Only calls
+  `Invite#delivery_status` with an explicit argument when a preload hash was
+  actually passed in `options` -- passing `nil` unconditionally would defeat
+  that method's own default-argument fallback to `latest_sent_email_log`.
+- `spec/requests/webhooks_controller_spec.rb`'s existing `#aws` bounce specs
+  fabricated their `EmailLog` with `message_id:` set to the SNS payload's
+  `mail.messageId` -- that's the exact bug being fixed here, so those specs
+  now fabricate with `ses_message_id:` instead. The other provider blocks in
+  that file (mailgun, etc.) are untouched; they genuinely match on
+  `message_id`.
+- Frontend: new "Delivery" column on the pending/expired invited-users table
+  (`templates/user-invited/show.gjs`), a small dedicated pill helper
+  (`helpers/invite-delivery-status.js`, modeled on the reviewable-queue's
+  `reviewable-status.js` pattern rather than editing that file), and a
+  `.delivery-status-pill` style block in `user.scss` reusing the
+  `review-item__status` pill's visual language. New flat i18n keys under
+  `user.invited.delivery_status*`.
+
+### Edge cases
+
+- Until the AWS-side SNS/SES wiring below is done for a site,
+  `delivery_status` for a sent invite stays `"sent"` — the pill helper
+  deliberately renders nothing for that state, so the new column is blank for
+  existing data until wiring lands, rather than showing a misleading pill.
+- The allowlist/authenticity checks run twice (once in
+  `WebhooksController#aws` before enqueueing, again inside the job) —
+  intentional defense-in-depth, left as-is.
+- AWS-side wiring (per distinct site database — `default`/`navodians` share
+  one, so really ~3 configs, not 4): create an SNS topic, subscribe it via
+  HTTPS to `/webhooks/aws`, configure the SES identity to publish Bounce,
+  Delivery and Complaint events to it, and set `aws_sns_topic_arn_allowlist`
+  *before* confirming the subscription (`Jobs::ConfirmSnsSubscription` only
+  proceeds for allowlisted topics). Verify with SES's simulator addresses
+  (`bounce@`/`complaint@`/`success@simulator.amazonses.com`). Not done yet as
+  of this writing — infrastructure work, not code.
