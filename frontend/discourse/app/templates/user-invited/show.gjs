@@ -4,6 +4,7 @@ import { trustHTML } from "@ember/template";
 import SvgEnvelopeZero from "discourse/components/svg/envelope-zero";
 import DMenu from "discourse/float-kit/components/d-menu";
 import bodyClass from "discourse/helpers/body-class";
+import inviteDeliveryStatus from "discourse/helpers/invite-delivery-status";
 import rawDate from "discourse/helpers/raw-date";
 import { groupPath } from "discourse/lib/url";
 import DButton from "discourse/ui-kit/d-button";
@@ -213,6 +214,9 @@ export default <template>
                   <th class="d-table__header-cell">{{i18n
                       "user.invited.expires_at"
                     }}</th>
+                  <th class="d-table__header-cell">{{i18n
+                      "user.invited.delivery_status"
+                    }}</th>
                   <th class="d-table__header-cell"></th>
                 </tr>
               </thead>
@@ -300,6 +304,13 @@ export default <template>
                       {{else}}
                         {{rawDate invite.expires_at}}
                       {{/if}}
+                    </td>
+
+                    <td class="d-table__cell --detail invite-delivery-status">
+                      <div class="d-table__mobile-label">
+                        {{i18n "user.invited.delivery_status"}}
+                      </div>
+                      {{inviteDeliveryStatus invite.delivery_status}}
                     </td>
 
                     {{#if invite.can_delete_invite}}
