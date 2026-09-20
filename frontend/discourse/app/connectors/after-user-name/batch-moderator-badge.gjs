@@ -1,10 +1,11 @@
 import Component from "@glimmer/component";
 import DTooltip from "discourse/float-kit/components/d-tooltip";
+import { showsBatchModeratorBadge } from "discourse/lib/batch-moderator-badge";
 import { i18n } from "discourse-i18n";
 
 export default class BatchModeratorBadge extends Component {
   static shouldRender(args) {
-    return !!args.user?.is_batch_moderator;
+    return showsBatchModeratorBadge(args.user);
   }
 
   <template>

@@ -361,6 +361,32 @@ class Invite < ActiveRecord::Base
     EmailLog.where(invite_id: id, email_type: "invite").order(created_at: :desc).first
   end
 
+  # Downstream delivery outcome (sourced from SES via the linked EmailLog),
+  # distinct from emailed_status above -- that enum only tracks whether we
+  # handed the email to the mailer, not what happened after. Not folded into
+  # emailed_status itself since that would conflate "did we try to send" with
+  # "what happened once we did", which have different lifecycles (a bounce
+  # can arrive seconds or days after emailed_status already reads "sent").
+  # Accepts an optional preloaded EmailLog so callers rendering a page of
+  # invites (see UsersController#invited) can batch-load it once and avoid an
+  # EmailLog query per invite.
+  def delivery_status(email_log = latest_sent_email_log)
+    case emailed_status
+    when Invite.emailed_status_types[:not_required]
+      nil
+    when Invite.emailed_status_types[:pending], Invite.emailed_status_types[:bulk_pending]
+      "scheduled"
+    when Invite.emailed_status_types[:sending]
+      "pending"
+    else
+      return "sent" if email_log.nil?
+      return "complained" if email_log.complained_at
+      return "bounced" if email_log.bounced?
+      return "delivered" if email_log.delivered_at
+      "sent"
+    end
+  end
+
   def self.base_directory
     Rails.public_path.join("uploads", "csv", RailsMultisite::ConnectionManagement.current_db).to_s
   end

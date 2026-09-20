@@ -12,6 +12,13 @@ require "uri"
 require "net/smtp"
 
 SMTP_CLIENT_ERRORS = [Net::SMTPFatalError, Net::SMTPSyntaxError]
+# Matches the message ID Amazon SES assigns on accept, e.g.
+# "250 Ok 010901a075d1bd53-2bdf9bfa-57d6-41e7-a08f-e1884959e9a6-000000". This
+# is SES's own internal ID, distinct from the locally-generated RFC822
+# Message-ID header stored in EmailLog#message_id -- SNS bounce/delivery/
+# complaint notifications key off this ID, not that one. No-op for any
+# non-SES SMTP response (e.g. local dev mail servers).
+SES_MESSAGE_ID_PATTERN = /\A\d+\s+Ok\s+(\S+)/
 BYPASS_DISABLE_TYPES = %w[
   admin_login
   test_message
@@ -302,6 +309,8 @@ module Email
         # returns an array containing @message, so we have to have this workaround.
         if message_response.kind_of?(Net::SMTP::Response)
           email_log.smtp_transaction_response = message_response.message&.chomp
+          email_log.ses_message_id =
+            email_log.smtp_transaction_response&.[](SES_MESSAGE_ID_PATTERN, 1)
         end
       rescue *SMTP_CLIENT_ERRORS => e
         error_message = smtp_error_message(e)

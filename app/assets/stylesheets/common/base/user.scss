@@ -1339,6 +1339,14 @@
         }
       }
 
+      &.invite-delivery-status {
+        width: 14%;
+
+        @include viewport.until(md) {
+          width: auto;
+        }
+      }
+
       .invite-shortkey {
         @include viewport.until(md) {
           max-width: 70%;
@@ -1378,6 +1386,30 @@
         display: inline-flex;
         align-items: center;
         color: var(--primary-high);
+      }
+    }
+
+    .delivery-status-pill {
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      padding: var(--space-1) var(--space-2);
+      font-size: var(--font-down-1);
+      line-height: 1;
+      background: var(--secondary-low);
+      color: var(--primary-low);
+
+      &.--delivered {
+        background-color: var(--success);
+        color: var(--secondary);
+      }
+
+      &.--bounced,
+      &.--complained {
+        background-color: var(--danger);
+        color: var(--secondary);
       }
     }
   }

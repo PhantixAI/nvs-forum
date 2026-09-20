@@ -709,6 +709,84 @@ RSpec.describe Invite do
     end
   end
 
+  describe "#delivery_status" do
+    fab!(:invite)
+
+    it "returns nil when no email is required" do
+      invite.update!(emailed_status: Invite.emailed_status_types[:not_required])
+      expect(invite.delivery_status).to be_nil
+    end
+
+    it "returns scheduled for pending and bulk_pending" do
+      invite.update!(emailed_status: Invite.emailed_status_types[:pending])
+      expect(invite.delivery_status).to eq("scheduled")
+
+      invite.update!(emailed_status: Invite.emailed_status_types[:bulk_pending])
+      expect(invite.delivery_status).to eq("scheduled")
+    end
+
+    it "returns pending while actively sending" do
+      invite.update!(emailed_status: Invite.emailed_status_types[:sending])
+      expect(invite.delivery_status).to eq("pending")
+    end
+
+    context "when emailed_status is sent" do
+      before { invite.update!(emailed_status: Invite.emailed_status_types[:sent]) }
+
+      it "returns sent when there is no EmailLog yet" do
+        expect(invite.delivery_status).to eq("sent")
+      end
+
+      it "returns sent when the EmailLog has no bounce/delivery/complaint data" do
+        Fabricate(:email_log, invite_id: invite.id, email_type: "invite")
+        expect(invite.delivery_status).to eq("sent")
+      end
+
+      it "returns delivered when the EmailLog has delivered_at set" do
+        Fabricate(
+          :email_log,
+          invite_id: invite.id,
+          email_type: "invite",
+          delivered_at: Time.current,
+        )
+        expect(invite.delivery_status).to eq("delivered")
+      end
+
+      it "returns bounced when the EmailLog is bounced" do
+        Fabricate(:email_log, invite_id: invite.id, email_type: "invite", bounced: true)
+        expect(invite.delivery_status).to eq("bounced")
+      end
+
+      it "returns complained when the EmailLog has complained_at set" do
+        Fabricate(
+          :email_log,
+          invite_id: invite.id,
+          email_type: "invite",
+          complained_at: Time.current,
+        )
+        expect(invite.delivery_status).to eq("complained")
+      end
+
+      it "prefers complained over bounced when both are set" do
+        Fabricate(
+          :email_log,
+          invite_id: invite.id,
+          email_type: "invite",
+          bounced: true,
+          complained_at: Time.current,
+        )
+        expect(invite.delivery_status).to eq("complained")
+      end
+
+      it "accepts a preloaded EmailLog instead of querying for it" do
+        preloaded = Fabricate(:email_log, invite_id: invite.id, email_type: "invite", bounced: true)
+        expect(invite.delivery_status(preloaded)).to eq("bounced")
+        # explicitly passing nil means "no email log", even if one exists
+        expect(invite.delivery_status(nil)).to eq("sent")
+      end
+    end
+  end
+
   describe "#can_be_redeemed_by?" do
     context "for invite links" do
       fab!(:invite) { Fabricate(:invite, email: nil, domain: nil, max_redemptions_allowed: 1) }

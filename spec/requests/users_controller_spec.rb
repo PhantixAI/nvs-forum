@@ -2673,6 +2673,39 @@ RSpec.describe UsersController do
       expect(invites.first).to include("description" => "student@college.edu")
     end
 
+    it "includes each pending invite's delivery_status, preloaded without an EmailLog query per invite" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      sent_invite =
+        Fabricate(
+          :invite,
+          email: "sent@example.com",
+          invited_by: inviter,
+          emailed_status: Invite.emailed_status_types[:sent],
+        )
+      Fabricate(:email_log, invite_id: sent_invite.id, email_type: "invite", bounced: true)
+      Fabricate(
+        :invite,
+        email: "scheduled@example.com",
+        invited_by: inviter,
+        emailed_status: Invite.emailed_status_types[:bulk_pending],
+      )
+
+      queries =
+        track_sql_queries do
+          get "/u/#{inviter.username}/invited.json", params: { filter: "pending" }
+        end
+      email_log_queries = queries.count { |q| q.include?("email_logs") }
+
+      expect(response.status).to eq(200)
+      expect(email_log_queries).to eq(1)
+
+      statuses = response.parsed_body["invites"].to_h { |i| [i["email"], i["delivery_status"]] }
+      expect(statuses["sent@example.com"]).to eq("bounced")
+      expect(statuses["scheduled@example.com"]).to eq("scheduled")
+    end
+
     it "hides last seen timestamps for hidden profiles" do
       SiteSetting.allow_users_to_hide_profile = true
 
