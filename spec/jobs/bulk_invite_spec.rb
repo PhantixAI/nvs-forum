@@ -192,6 +192,87 @@ RSpec.describe Jobs::BulkInvite do
       end
     end
 
+    context "with recipient name/keywords columns" do
+      it "persists them onto the created invite" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu", name: "Priya", keywords: "robotics club" }],
+        )
+
+        invite = Invite.find_by(email: "student@college.edu")
+        expect(invite.recipient_name).to eq("Priya")
+        expect(invite.recipient_keywords).to eq("robotics club")
+      end
+
+      it "does not misinterpret them as user fields" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu", name: "Priya", keywords: "robotics club" }],
+        )
+
+        post = Post.last
+        expect(post.raw).to include("0 warning")
+      end
+
+      it "leaves recipient_name/recipient_keywords nil when the columns are absent" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student2@college.edu" }],
+        )
+
+        invite = Invite.find_by(email: "student2@college.edu")
+        expect(invite.recipient_name).to eq(nil)
+        expect(invite.recipient_keywords).to eq(nil)
+      end
+    end
+
+    context "with a skip_personalization column" do
+      it "persists it onto the created invite" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "faculty@college.edu", skip_personalization: "true" }],
+        )
+
+        invite = Invite.find_by(email: "faculty@college.edu")
+        expect(invite.skip_personalization).to eq(true)
+      end
+
+      it "does not misinterpret it as a user field" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "faculty@college.edu", skip_personalization: "true" }],
+        )
+
+        post = Post.last
+        expect(post.raw).to include("0 warning")
+      end
+
+      it "defaults to false when the column is absent" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu" }],
+        )
+
+        invite = Invite.find_by(email: "student@college.edu")
+        expect(invite.skip_personalization).to eq(false)
+      end
+
+      it "only treats an explicit truthy spelling as true" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [
+            { email: "a@college.edu", skip_personalization: "yes" },
+            { email: "b@college.edu", skip_personalization: "no" },
+            { email: "c@college.edu", skip_personalization: "maybe" },
+          ],
+        )
+
+        expect(Invite.find_by(email: "a@college.edu").skip_personalization).to eq(true)
+        expect(Invite.find_by(email: "b@college.edu").skip_personalization).to eq(false)
+        expect(Invite.find_by(email: "c@college.edu").skip_personalization).to eq(false)
+      end
+    end
+
     it "shares one throttle chain between overlapping uploads" do
       2.times do |i|
         described_class.new.execute(
@@ -223,6 +304,19 @@ RSpec.describe Jobs::BulkInvite do
         expect(invite.email).to eq(nil)
         expect(invite.is_invite_link?).to eq(true)
         expect(invite.description).to eq("student@college.edu")
+      end
+
+      it "persists allow_any_email on the invite itself" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [
+            { email: "student0@college.edu", allow_any_email: "true" },
+            { email: "student0b@college.edu", allow_any_email: "false" },
+          ],
+        )
+
+        expect(Invite.find_by(description: "student0@college.edu").allow_any_email).to eq(true)
+        expect(Invite.find_by(email: "student0b@college.edu").allow_any_email).to eq(false)
       end
 
       it "marks the invite as emailed so it's eligible for Resend All Invites" do

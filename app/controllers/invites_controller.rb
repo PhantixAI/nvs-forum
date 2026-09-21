@@ -4,8 +4,22 @@ require "csv"
 
 class InvitesController < ApplicationController
   # allow_any_email: per-row CSV flag consumed by Jobs::BulkInvite -- see there for
-  # what it does.
-  ALLOWED_BULK_INVITE_COLUMNS = %w[email groups topic_id locale allow_any_email]
+  # what it does. skip_personalization: per-row opt-out of AI personalization (see
+  # BulkInvitePersonalization::Generator), even when the site-wide setting is on.
+  # name/keywords: optional per-row context passed to the AI personalization prompt
+  # when enabled; ignored otherwise. A site with a custom User Field named "name",
+  # "keywords", or "skip_personalization" would have that field's column shadowed by
+  # these -- an accepted tradeoff shared with the other reserved column names here.
+  ALLOWED_BULK_INVITE_COLUMNS = %w[
+    email
+    groups
+    topic_id
+    locale
+    allow_any_email
+    skip_personalization
+    name
+    keywords
+  ]
 
   # Bounds the raw file bytes persisted verbatim into ReviewableBulkInvite's
   # payload (see upload_csv) -- unlike the parsed `invites` array, that isn't
@@ -516,10 +530,18 @@ class InvitesController < ApplicationController
 
     guardian.ensure_can_resend_all_invites!
 
+    # See UsersController#invited for why this is validated against
+    # DOMAIN_REGEX rather than used as-is -- it also becomes part of the
+    # rate-limiter key below.
+    domain = params[:domain].presence if params[:domain].to_s.match?(Invite::DOMAIN_REGEX)
+
     begin
+      # Keyed per domain so resending nit.ac.in and iitb.ac.in the same day
+      # are independent, while resending nit.ac.in twice the same day (or
+      # resending everyone) still only gets one shot each.
       RateLimiter.new(
         current_user,
-        "bulk-reinvite-per-day",
+        domain.present? ? "bulk-reinvite-per-day-#{domain}" : "bulk-reinvite-per-day",
         1,
         1.day,
         apply_limit_to_staff: true,
@@ -533,7 +555,7 @@ class InvitesController < ApplicationController
     # (see Jobs::BulkInvite) without sweeping in ordinary never-emailed link invites,
     # which stay at :not_required.
     invites_to_resend =
-      Invite.pending(current_user).where(
+      Invite.pending(current_user, domain:).where(
         "email IS NOT NULL OR emailed_status != ?",
         Invite.emailed_status_types[:not_required],
       )
