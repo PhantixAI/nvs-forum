@@ -164,8 +164,25 @@ module Jobs
       # security-relevant flag filled in free-text by an admin -- only treat an explicit
       # truthy spelling as true, everything else (including typos) stays false/bound.
       allow_any_email = %w[true t 1 yes y].include?(invite[:allow_any_email].to_s.strip.downcase)
+      skip_personalization = %w[true t 1 yes y].include?(
+        invite[:skip_personalization].to_s.strip.downcase,
+      )
+      recipient_name = invite[:name].presence
+      recipient_keywords = invite[:keywords].presence
       user_fields =
-        get_user_fields(invite.except(:email, :groups, :topic_id, :locale, :allow_any_email), email)
+        get_user_fields(
+          invite.except(
+            :email,
+            :groups,
+            :topic_id,
+            :locale,
+            :allow_any_email,
+            :skip_personalization,
+            :name,
+            :keywords,
+          ),
+          email,
+        )
 
       begin
         if user = Invite.find_user_by_email(email)
@@ -219,13 +236,20 @@ module Jobs
           # #perform_accept_invitation and InviteRedeemer#can_redeem_invite?, neither of
           # which enforce an email match for this invite type). `description` keeps the
           # CSV row's email visible on the admin Pending/Redeemed invite list even though
-          # it's no longer bound to the invite.
+          # it's no longer bound to the invite. `allow_any_email` is persisted too (not just
+          # used to decide email/description above) so InviteRedeemer.create_user_from_invite
+          # can also bypass the site's domain allowlist for these rows -- without it "any
+          # email" would still get rejected by SiteSetting.allowed_email_domains.
           invite_opts = {
             email: allow_any_email ? nil : email,
             description: allow_any_email ? email : nil,
             topic: topic,
             group_ids: groups.map(&:id),
             skip_email: @skip_email,
+            recipient_name: recipient_name,
+            recipient_keywords: recipient_keywords,
+            skip_personalization: skip_personalization,
+            allow_any_email: allow_any_email,
           }
 
           # allow_any_email rows keep their original immediate-send-under-the-limit

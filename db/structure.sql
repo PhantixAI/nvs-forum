@@ -5928,7 +5928,11 @@ CREATE TABLE public.email_logs (
     topic_id integer,
     bounce_error_code character varying,
     smtp_transaction_response character varying(500),
-    bcc_addresses text
+    bcc_addresses text,
+    invite_id integer,
+    ses_message_id character varying,
+    delivered_at timestamp(6) without time zone,
+    complained_at timestamp(6) without time zone
 );
 
 
@@ -7184,7 +7188,12 @@ CREATE TABLE public.invites (
     email_token character varying,
     domain character varying,
     description character varying(100),
-    admin boolean DEFAULT false NOT NULL
+    admin boolean DEFAULT false NOT NULL,
+    recipient_name character varying(100),
+    recipient_keywords character varying(255),
+    skip_personalization boolean DEFAULT false NOT NULL,
+    email_domain character varying,
+    allow_any_email boolean DEFAULT false NOT NULL
 );
 
 
@@ -21786,6 +21795,13 @@ CREATE INDEX index_email_logs_on_created_at ON public.email_logs USING btree (cr
 
 
 --
+-- Name: index_email_logs_on_invite_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_email_logs_on_invite_id ON public.email_logs USING btree (invite_id) WHERE (invite_id IS NOT NULL);
+
+
+--
 -- Name: index_email_logs_on_message_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -21797,6 +21813,13 @@ CREATE INDEX index_email_logs_on_message_id ON public.email_logs USING btree (me
 --
 
 CREATE INDEX index_email_logs_on_post_id ON public.email_logs USING btree (post_id);
+
+
+--
+-- Name: index_email_logs_on_ses_message_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_email_logs_on_ses_message_id ON public.email_logs USING btree (ses_message_id) WHERE (ses_message_id IS NOT NULL);
 
 
 --
@@ -22322,6 +22345,13 @@ CREATE UNIQUE INDEX index_invites_on_invite_key ON public.invites USING btree (i
 --
 
 CREATE INDEX index_invites_on_invited_by_id ON public.invites USING btree (invited_by_id);
+
+
+--
+-- Name: index_invites_on_invited_by_id_and_email_domain; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_invites_on_invited_by_id_and_email_domain ON public.invites USING btree (invited_by_id, email_domain) WHERE (email_domain IS NOT NULL);
 
 
 --
@@ -25609,14 +25639,28 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20260923080644'),
 ('20260923080642'),
 ('20260922233816'),
+('20260922102211'),
+('20260921130452'),
+('20260921130439'),
+('20260921130433'),
+('20260921130408'),
 ('20260921120000'),
+('20260921112625'),
 ('20260921081150'),
 ('20260921074918'),
 ('20260921015711'),
+('20260919195234'),
+('20260919195223'),
+('20260919195208'),
+('20260919101500'),
+('20260919101433'),
+('20260919072524'),
+('20260919061443'),
 ('20260918062827'),
 ('20260918062145'),
 ('20260918061735'),
 ('20260917145657'),
+('20260916051233'),
 ('20260915204557'),
 ('20260915191328'),
 ('20260914213908'),

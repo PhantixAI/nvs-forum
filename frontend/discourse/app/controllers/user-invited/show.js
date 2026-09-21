@@ -1,6 +1,6 @@
 /* eslint-disable ember/no-observers */
 import { tracked } from "@glimmer/tracking";
-import Controller from "@ember/controller";
+import Controller, { inject as controller } from "@ember/controller";
 import { action, computed } from "@ember/object";
 import { dependentKeyCompat } from "@ember/object/compat";
 import { service } from "@ember/service";
@@ -21,11 +21,13 @@ export default class UserInvitedShowController extends Controller {
   @service toasts;
   @service currentUser;
   @service siteSettings;
+  @controller("user-invited") userInvitedController;
 
   @tracked canLoadMore = true;
   @tracked hasLoadedInitialInvites = false;
   @tracked invitesLoading = false;
   @tracked filter = null;
+  @tracked selectedDomain = null;
 
   user = null;
   model = null;
@@ -102,14 +104,34 @@ export default class UserInvitedShowController extends Controller {
     return this.model.invites.length > 0 && this.currentUser.staff;
   }
 
-  @computed("invitesCount", "filter")
+  @computed("invitesCount", "filter", "selectedDomain")
   get showSearch() {
-    return this.invitesCount[this.filter] > 5;
+    // Keep visible once a domain is selected even if it narrows the count to
+    // <=5 (or 0) -- otherwise .user-invite-search's margin-right: auto (the
+    // flex anchor that right-aligns .user-invite-buttons) disappears along
+    // with it, and the whole button row snaps to the left.
+    return this.invitesCount[this.filter] > 5 || Boolean(this.selectedDomain);
+  }
+
+  @computed("model.available_domains")
+  get domainOptions() {
+    return (this.model?.available_domains || []).map((domain) => ({
+      id: domain,
+      name: domain,
+    }));
+  }
+
+  @computed("domainOptions", "currentUser.staff")
+  get showDomainFilter() {
+    // Intentionally not gated on model.invites like showBulkActionButtons --
+    // a domain filter that narrows the current tab to zero results must stay
+    // visible, or there would be no way to clear it again.
+    return this.currentUser?.staff && this.domainOptions.length > 0;
   }
 
   @observes("searchTerm")
   searchTermChanged() {
-    this._searchTermChanged();
+    this._refetch();
   }
 
   @action
@@ -172,14 +194,23 @@ export default class UserInvitedShowController extends Controller {
 
   @action
   reinviteAll() {
+    const domain = this.selectedDomain;
     this.dialog.yesNoConfirm({
-      message: i18n("user.invited.reinvite_all_confirm"),
+      message: domain
+        ? i18n("user.invited.reinvite_all_confirm_domain", { domain })
+        : i18n("user.invited.reinvite_all_confirm"),
       didConfirm: () => {
-        return Invite.reinviteAll()
+        return Invite.reinviteAll(domain)
           .then(() => this.set("reinvitedAll", true))
           .catch(popupAjaxError);
       },
     });
+  }
+
+  @action
+  domainChanged(domain) {
+    this.selectedDomain = domain;
+    this._refetch();
   }
 
   @action
@@ -194,7 +225,8 @@ export default class UserInvitedShowController extends Controller {
           this.user,
           this.filter,
           this.searchTerm,
-          model.invites.length
+          model.invites.length,
+          this.selectedDomain
         );
         const inviteList = result.invites;
 
@@ -214,9 +246,26 @@ export default class UserInvitedShowController extends Controller {
   }
 
   @debounce(INPUT_DELAY)
-  _searchTermChanged() {
-    Invite.findInvitedBy(this.user, this.filter, this.searchTerm).then(
-      (invites) => this.set("model", invites)
-    );
+  _refetch() {
+    Invite.findInvitedBy(
+      this.user,
+      this.filter,
+      this.searchTerm,
+      null,
+      this.selectedDomain
+    ).then((invites) => {
+      this.set("model", invites);
+      // Unlike searchTerm, a domain filter also narrows the tab counts
+      // (see UsersController#invited). The visible "Pending (n)" tab labels
+      // are rendered by the parent user-invited controller's own
+      // invitesCount (set once by the route on initial load), not this
+      // controller's -- both need updating, this one for showSearch.
+      this.set("invitesCount", invites.counts);
+      this.userInvitedController.set("invitesCount", invites.counts);
+      this.userInvitedController.set(
+        "domainFilterActive",
+        Boolean(this.selectedDomain)
+      );
+    });
   }
 }
