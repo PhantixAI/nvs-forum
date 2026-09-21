@@ -6,6 +6,10 @@ class UserEmail < ActiveRecord::Base
   attr_accessor :skip_validate_email
   attr_accessor :skip_validate_unique_email
   attr_accessor :skip_normalize_email
+  # Narrower than skip_validate_email: skips only EmailValidator's domain-allowlist check
+  # (see lib/validators/email_validator.rb), not format/blocklist. Set via User#=
+  # skip_email_domain_validation, propagated here by User#set_skip_email_domain_validation.
+  attr_accessor :skip_email_domain_validation
 
   before_validation :strip_downcase_email
   before_validation :normalize_email

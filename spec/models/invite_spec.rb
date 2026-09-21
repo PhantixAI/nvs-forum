@@ -14,6 +14,8 @@ RSpec.describe Invite do
     it { is_expected.to rate_limit }
     it { is_expected.to validate_length_of(:custom_message).is_at_most(1000) }
     it { is_expected.to validate_length_of(:description).is_at_most(100) }
+    it { is_expected.to validate_length_of(:recipient_name).is_at_most(100) }
+    it { is_expected.to validate_length_of(:recipient_keywords).is_at_most(255) }
 
     it "allows invites with valid emails" do
       invite = Fabricate.build(:invite, email: "test@example.com", invited_by: user)
@@ -148,6 +150,51 @@ RSpec.describe Invite do
         Invite.generate(user, email: "test@example.com").destroy!
         invite = Invite.generate(user, email: "test@example.com")
         expect(invite).to be_present
+      end
+
+      it "persists recipient_name and recipient_keywords when given" do
+        invite =
+          Invite.generate(
+            user,
+            email: "test@example.com",
+            recipient_name: "Priya",
+            recipient_keywords: "robotics club, class of 2022",
+          )
+        expect(invite.recipient_name).to eq("Priya")
+        expect(invite.recipient_keywords).to eq("robotics club, class of 2022")
+      end
+
+      it "leaves recipient_name and recipient_keywords nil when not given" do
+        invite = Invite.generate(user, email: "test@example.com")
+        expect(invite.recipient_name).to eq(nil)
+        expect(invite.recipient_keywords).to eq(nil)
+      end
+
+      it "derives email_domain from email" do
+        invite = Invite.generate(user, email: "test@example.com")
+        expect(invite.email_domain).to eq("example.com")
+      end
+
+      it "updates email_domain when email changes" do
+        invite = Invite.generate(user, email: "test@example.com")
+        invite.update!(email: "other@nit.ac.in")
+        expect(invite.email_domain).to eq("nit.ac.in")
+      end
+
+      it "persists skip_personalization when given, defaulting to false" do
+        invite = Invite.generate(user, email: "test@example.com", skip_personalization: true)
+        expect(invite.skip_personalization).to eq(true)
+
+        invite2 = Invite.generate(user, email: "test2@example.com")
+        expect(invite2.skip_personalization).to eq(false)
+      end
+
+      it "persists allow_any_email when given, defaulting to false" do
+        invite = Invite.generate(user, email: "test@example.com", allow_any_email: true)
+        expect(invite.allow_any_email).to eq(true)
+
+        invite2 = Invite.generate(user, email: "test2@example.com")
+        expect(invite2.allow_any_email).to eq(false)
       end
     end
 
@@ -589,6 +636,13 @@ RSpec.describe Invite do
           partially_redeemed_invite,
         )
       end
+
+      it "filters by domain when given" do
+        nit_invite = Fabricate(:invite, invited_by: inviter, email: "student@nit.ac.in")
+
+        expect(Invite.pending(inviter, domain: "nit.ac.in")).to contain_exactly(nit_invite)
+        expect(Invite.pending(inviter, domain: "example.com")).to contain_exactly(pending_invite)
+      end
     end
 
     describe "#expired" do
@@ -597,6 +651,11 @@ RSpec.describe Invite do
           expired_invite,
           partially_redeemed_and_expired_invite,
         )
+      end
+
+      it "filters by domain when given" do
+        expect(Invite.expired(inviter, domain: "example.com")).to contain_exactly(expired_invite)
+        expect(Invite.expired(inviter, domain: "nit.ac.in")).to be_empty
       end
     end
 
@@ -608,6 +667,13 @@ RSpec.describe Invite do
           redeemed_and_expired_invite_user,
           partially_redeemed_and_expired_invite_user,
         )
+      end
+
+      it "filters by domain when given" do
+        expect(Invite.redeemed_users(inviter, domain: "example.com").map(&:user)).to include(
+          redeemed_invite_user,
+        )
+        expect(Invite.redeemed_users(inviter, domain: "nit.ac.in")).to be_empty
       end
 
       it "returns redeemed users for trashed invites" do

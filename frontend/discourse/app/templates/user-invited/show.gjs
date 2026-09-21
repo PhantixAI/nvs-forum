@@ -1,4 +1,4 @@
-import { concat, fn } from "@ember/helper";
+import { concat, fn, hash } from "@ember/helper";
 import { LinkTo } from "@ember/routing";
 import { trustHTML } from "@ember/template";
 import SvgEnvelopeZero from "discourse/components/svg/envelope-zero";
@@ -7,6 +7,7 @@ import bodyClass from "discourse/helpers/body-class";
 import inviteDeliveryStatus from "discourse/helpers/invite-delivery-status";
 import rawDate from "discourse/helpers/raw-date";
 import { groupPath } from "discourse/lib/url";
+import ComboBox from "discourse/select-kit/components/combo-box";
 import DButton from "discourse/ui-kit/d-button";
 import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
 import DCopyButton from "discourse/ui-kit/d-copy-button";
@@ -66,6 +67,15 @@ export default <template>
                 {{/if}}
               {{/if}}
             {{/if}}
+          {{/if}}
+          {{#if @controller.showDomainFilter}}
+            <ComboBox
+              class="invite-domain-filter"
+              @content={{@controller.domainOptions}}
+              @onChange={{@controller.domainChanged}}
+              @options={{hash none="user.invited.all_domains"}}
+              @value={{@controller.selectedDomain}}
+            />
           {{/if}}
           {{#if @controller.showBulkActionButtons}}
             {{#if @controller.inviteExpired}}

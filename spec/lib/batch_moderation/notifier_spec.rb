@@ -64,6 +64,23 @@ RSpec.describe BatchModeration::Notifier do
         described_class.notify_staff!(actor: actor, target: target, action: :report, reason: "rude")
       }.to change(Jobs::BatchModerationNotifyStaffEmail.jobs, :size).by(2)
     end
+
+    it "enqueues a push notification for staff members with a push subscription" do
+      Fabricate(:push_subscription, user: admin)
+
+      expect {
+        described_class.notify_staff!(
+          actor: actor,
+          target: target,
+          action: :suspend,
+          reason: "rude",
+        )
+      }.to change(Jobs::DeliverPushNotification.jobs, :size).by(1)
+
+      payload = Jobs::DeliverPushNotification.jobs.last["args"].first["payload"]
+      expect(payload["post_url"]).to eq("/u/#{target.username}")
+      expect(payload["excerpt"]).to include(actor.username).and include(target.username)
+    end
   end
 
   describe ".notify_cohort_change" do
@@ -102,6 +119,18 @@ RSpec.describe BatchModeration::Notifier do
       expect {
         described_class.notify_cohort_change(user: target, group: group, joined: false)
       }.to change(Jobs::BatchModerationNotifyCohortChangeEmail.jobs, :size).by(3)
+    end
+
+    it "enqueues a push notification for recipients with a push subscription" do
+      Fabricate(:push_subscription, user: cohort_moderator)
+
+      expect {
+        described_class.notify_cohort_change(user: target, group: group, joined: true)
+      }.to change(Jobs::DeliverPushNotification.jobs, :size).by(1)
+
+      payload = Jobs::DeliverPushNotification.jobs.last["args"].first["payload"]
+      expect(payload["post_url"]).to eq("/u/#{target.username}")
+      expect(payload["excerpt"]).to include(target.username)
     end
   end
 
@@ -143,6 +172,36 @@ RSpec.describe BatchModeration::Notifier do
     end
 
     it "handles a nil actor (auto-promotion)" do
+      expect {
+        described_class.notify_moderator_status_change(
+          actor: nil,
+          user: target,
+          group: group,
+          granted: true,
+        )
+      }.not_to raise_error
+    end
+
+    it "enqueues a push notification for recipients with a push subscription" do
+      Fabricate(:push_subscription, user: cohort_moderator)
+
+      expect {
+        described_class.notify_moderator_status_change(
+          actor: admin,
+          user: target,
+          group: group,
+          granted: true,
+        )
+      }.to change(Jobs::DeliverPushNotification.jobs, :size).by(1)
+
+      payload = Jobs::DeliverPushNotification.jobs.last["args"].first["payload"]
+      expect(payload["post_url"]).to eq("/u/#{target.username}")
+      expect(payload["excerpt"]).to include(admin.username).and include(target.username)
+    end
+
+    it "does not raise when a nil actor's push notification is delivered (auto-promotion)" do
+      Fabricate(:push_subscription, user: cohort_moderator)
+
       expect {
         described_class.notify_moderator_status_change(
           actor: nil,
