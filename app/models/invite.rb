@@ -21,6 +21,8 @@ class Invite < ActiveRecord::Base
   DOMAIN_REGEX =
     /\A(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)+([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])\z/
   DESCRIPTION_MAX_LENGTH = 100
+  RECIPIENT_NAME_MAX_LENGTH = 100
+  RECIPIENT_KEYWORDS_MAX_LENGTH = 255
 
   rate_limit :limit_invites_per_day
 
@@ -38,6 +40,8 @@ class Invite < ActiveRecord::Base
   validates :custom_message, length: { maximum: 1000 }
   validates :domain, length: { maximum: 500 }
   validates :description, length: { maximum: DESCRIPTION_MAX_LENGTH }
+  validates :recipient_name, length: { maximum: RECIPIENT_NAME_MAX_LENGTH }
+  validates :recipient_keywords, length: { maximum: RECIPIENT_KEYWORDS_MAX_LENGTH }
   validate :ensure_max_redemptions_allowed
   validate :valid_redemption_count
   validate :valid_domain, if: :will_save_change_to_domain?
@@ -52,7 +56,10 @@ class Invite < ActiveRecord::Base
   end
 
   before_save do
-    self.email_token = email.present? ? SecureRandom.hex : nil if will_save_change_to_email?
+    if will_save_change_to_email?
+      self.email_token = email.present? ? SecureRandom.hex : nil
+      self.email_domain = email.present? ? email.split("@").last : nil
+    end
   end
 
   before_validation { self.email = Email.downcase(email) unless email.nil? }
@@ -203,6 +210,10 @@ class Invite < ActiveRecord::Base
           :admin,
           :custom_message,
           :max_redemptions_allowed,
+          :recipient_name,
+          :recipient_keywords,
+          :skip_personalization,
+          :allow_any_email,
         )
       create_args[:invited_by] = invited_by
       create_args[:email] = email
@@ -279,38 +290,47 @@ class Invite < ActiveRecord::Base
     User.with_email(Email.downcase(email)).where(staged: false).first
   end
 
-  def self.pending(inviter)
-    Invite
-      .distinct
-      .joins("LEFT JOIN invited_users ON invites.id = invited_users.invite_id")
-      .joins("LEFT JOIN users ON invited_users.user_id = users.id")
-      .where(invited_by_id: inviter.id)
-      .where("redemption_count < max_redemptions_allowed")
-      .where("expires_at > ?", Time.zone.now)
-      .order("invites.updated_at DESC")
+  def self.pending(inviter, domain: nil)
+    invites =
+      Invite
+        .distinct
+        .joins("LEFT JOIN invited_users ON invites.id = invited_users.invite_id")
+        .joins("LEFT JOIN users ON invited_users.user_id = users.id")
+        .where(invited_by_id: inviter.id)
+        .where("redemption_count < max_redemptions_allowed")
+        .where("expires_at > ?", Time.zone.now)
+        .order("invites.updated_at DESC")
+    invites = invites.where(email_domain: domain) if domain.present?
+    invites
   end
 
-  def self.expired(inviter)
-    Invite
-      .distinct
-      .joins("LEFT JOIN invited_users ON invites.id = invited_users.invite_id")
-      .joins("LEFT JOIN users ON invited_users.user_id = users.id")
-      .where(invited_by_id: inviter.id)
-      .where("redemption_count < max_redemptions_allowed")
-      .where("expires_at < ?", Time.zone.now)
-      .order("invites.expires_at ASC")
+  def self.expired(inviter, domain: nil)
+    invites =
+      Invite
+        .distinct
+        .joins("LEFT JOIN invited_users ON invites.id = invited_users.invite_id")
+        .joins("LEFT JOIN users ON invited_users.user_id = users.id")
+        .where(invited_by_id: inviter.id)
+        .where("redemption_count < max_redemptions_allowed")
+        .where("expires_at < ?", Time.zone.now)
+        .order("invites.expires_at ASC")
+    invites = invites.where(email_domain: domain) if domain.present?
+    invites
   end
 
-  def self.redeemed_users(inviter)
-    InvitedUser
-      .joins("LEFT JOIN invites ON invites.id = invited_users.invite_id")
-      .includes(user: :user_stat)
-      .where.not(user_id: nil)
-      .where("invites.invited_by_id = ?", inviter.id)
-      .order("invited_users.redeemed_at DESC")
-      .references("invite")
-      .references("user")
-      .references("user_stat")
+  def self.redeemed_users(inviter, domain: nil)
+    invited_users =
+      InvitedUser
+        .joins("LEFT JOIN invites ON invites.id = invited_users.invite_id")
+        .includes(user: :user_stat)
+        .where.not(user_id: nil)
+        .where("invites.invited_by_id = ?", inviter.id)
+        .order("invited_users.redeemed_at DESC")
+        .references("invite")
+        .references("user")
+        .references("user_stat")
+    invited_users = invited_users.where("invites.email_domain = ?", domain) if domain.present?
+    invited_users
   end
 
   def self.invalidate_for_email(email)
@@ -476,11 +496,13 @@ end
 #
 #  id                      :integer          not null, primary key
 #  admin                   :boolean          default(FALSE), not null
+#  allow_any_email         :boolean          default(FALSE), not null
 #  custom_message          :text
 #  deleted_at              :datetime
 #  description             :string(100)
 #  domain                  :string
 #  email                   :string
+#  email_domain            :string
 #  email_token             :string
 #  emailed_status          :integer
 #  expires_at              :datetime         not null
@@ -488,7 +510,10 @@ end
 #  invite_key              :string(32)       not null
 #  max_redemptions_allowed :integer          default(1), not null
 #  moderator               :boolean          default(FALSE), not null
+#  recipient_keywords      :string(255)
+#  recipient_name          :string(100)
 #  redemption_count        :integer          default(0), not null
+#  skip_personalization    :boolean          default(FALSE), not null
 #  created_at              :datetime         not null
 #  updated_at              :datetime         not null
 #  deleted_by_id           :integer
@@ -496,8 +521,9 @@ end
 #
 # Indexes
 #
-#  index_invites_on_email_and_invited_by_id  (email,invited_by_id)
-#  index_invites_on_emailed_status           (emailed_status)
-#  index_invites_on_invite_key               (invite_key) UNIQUE
-#  index_invites_on_invited_by_id            (invited_by_id)
+#  index_invites_on_email_and_invited_by_id         (email,invited_by_id)
+#  index_invites_on_emailed_status                  (emailed_status)
+#  index_invites_on_invite_key                      (invite_key) UNIQUE
+#  index_invites_on_invited_by_id                   (invited_by_id)
+#  index_invites_on_invited_by_id_and_email_domain  (invited_by_id,email_domain) WHERE (email_domain IS NOT NULL)
 #

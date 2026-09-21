@@ -28,6 +28,17 @@ RSpec.describe BulkInvitePersonalization::Generator do
       end
     end
 
+    context "when the invite has skip_personalization set" do
+      before do
+        invite.update!(skip_personalization: true)
+        SiteSetting.bulk_invite_ai_personalization_enabled = true
+      end
+
+      it "returns nil even though the feature is otherwise enabled" do
+        expect(described_class.personalize(invite)).to eq(nil)
+      end
+    end
+
     context "when the base template is blank" do
       before do
         SiteSetting.bulk_invite_ai_personalization_enabled = true
@@ -45,7 +56,13 @@ RSpec.describe BulkInvitePersonalization::Generator do
       if defined?(DiscourseAi)
         fab!(:llm_model, :fake_model)
 
-        before { SiteSetting.ai_default_llm_model = llm_model.id }
+        before do
+          SiteSetting.ai_default_llm_model = llm_model.id
+          # resolve_llm re-queries by id rather than reusing this fab!, so
+          # stubbing methods directly on llm_model (below) would silently no-op
+          # without this -- LlmModel.find_by returns a distinct AR instance.
+          allow(LlmModel).to receive(:find_by).and_return(llm_model)
+        end
 
         it "returns nil when no LlmModel can be resolved" do
           SiteSetting.ai_default_llm_model = ""
@@ -63,6 +80,17 @@ RSpec.describe BulkInvitePersonalization::Generator do
           end
 
           expect(result).to eq(compliant)
+        end
+
+        it "extracts only the text parts when the LLM returns an Array (e.g. Gemini interactions endpoints mixing text with a Thinking object)" do
+          compliant = "A few of us from your college network hang out here. Worth a look?"
+          llm = instance_double(DiscourseAi::Completions::Llm)
+          allow(llm_model).to receive(:to_llm).and_return(llm)
+          allow(llm).to receive(:generate).and_return(
+            [compliant, DiscourseAi::Completions::Thinking.new(message: nil, partial: false)],
+          )
+
+          expect(described_class.personalize(invite)).to eq(compliant)
         end
 
         it "returns nil when the LLM response violates the anti-spam rules" do
@@ -88,6 +116,57 @@ RSpec.describe BulkInvitePersonalization::Generator do
           skip "discourse-ai plugin not loaded in this spec run"
         end
       end
+    end
+  end
+
+  describe ".user_message" do
+    it "sends only the email domain when no recipient context is given" do
+      expect(described_class.send(:user_message, invite)).to eq(
+        "Recipient email domain: iitb.ac.in",
+      )
+    end
+
+    it "appends the recipient name when present" do
+      invite.update!(recipient_name: "Priya")
+
+      expect(described_class.send(:user_message, invite)).to eq(
+        "Recipient email domain: iitb.ac.in\nRecipient name: Priya",
+      )
+    end
+
+    it "appends additional context when keywords are present" do
+      invite.update!(recipient_keywords: "robotics club, class of 2022")
+
+      expect(described_class.send(:user_message, invite)).to eq(
+        "Recipient email domain: iitb.ac.in\nAdditional context: robotics club, class of 2022",
+      )
+    end
+
+    it "appends both name and keywords when both are present" do
+      invite.update!(recipient_name: "Priya", recipient_keywords: "robotics club")
+
+      expect(described_class.send(:user_message, invite)).to eq(
+        "Recipient email domain: iitb.ac.in\nRecipient name: Priya\nAdditional context: robotics club",
+      )
+    end
+  end
+
+  describe ".system_message" do
+    it "interpolates SiteSetting.bulk_invite_ai_personalization_rules" do
+      SiteSetting.bulk_invite_ai_personalization_rules = "- A custom test-only rule."
+
+      message = described_class.send(:system_message, "Come check out our forum.")
+
+      expect(message).to include("- A custom test-only rule.")
+      expect(message).to include("Come check out our forum.")
+    end
+
+    it "reproduces the original hardcoded rule content via the setting's default value" do
+      message = described_class.send(:system_message, "Come check out our forum.")
+
+      expect(message).to include("Under 75 words total, 3-4 sentences max.")
+      expect(message).to include("No exclamation points. No ALL CAPS words. No dollar signs.")
+      expect(message).to include("never invent or guess a specific name")
     end
   end
 end

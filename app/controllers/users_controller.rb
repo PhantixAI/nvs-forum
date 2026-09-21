@@ -557,14 +557,19 @@ class UsersController < ApplicationController
           include_inactive: current_user.staff? || SiteSetting.show_inactive_accounts,
         )
       can_see_invite_details = guardian.can_see_invite_details?(inviter)
+      # params[:domain] is client-supplied -- only accept it if it's actually
+      # shaped like a domain, so a crafted value can't do anything beyond
+      # "no invites match" (and can't reach the rate-limiter key in
+      # InvitesController#resend_all_invites via a bogus, ever-growing value).
+      domain = params[:domain].presence if params[:domain].to_s.match?(Invite::DOMAIN_REGEX)
 
       invites =
         if filter == "pending" && can_see_invite_details
-          Invite.includes(:topics, :groups).pending(inviter)
+          Invite.includes(:topics, :groups).pending(inviter, domain:)
         elsif filter == "expired" && can_see_invite_details
-          Invite.includes(:topics, :groups).expired(inviter)
+          Invite.includes(:topics, :groups).expired(inviter, domain:)
         elsif filter == "redeemed"
-          Invite.redeemed_users(inviter)
+          Invite.redeemed_users(inviter, domain:)
         else
           Invite.none
         end
@@ -583,9 +588,29 @@ class UsersController < ApplicationController
         invites = invites.where(filter_sql, filter: "%#{params[:search].downcase}%")
       end
 
-      pending_count = can_see_invite_details ? Invite.pending(inviter).reorder(nil).count.to_i : 0
-      expired_count = can_see_invite_details ? Invite.expired(inviter).reorder(nil).count.to_i : 0
-      redeemed_count = Invite.redeemed_users(inviter).reorder(nil).count.to_i
+      # The domain filter (unlike search) also narrows the tab counts, so an
+      # admin filtering by domain sees how many pending/expired/redeemed
+      # invites exist *for that domain*, not the inviter's totals.
+      pending_count =
+        can_see_invite_details ? Invite.pending(inviter, domain:).reorder(nil).count.to_i : 0
+      expired_count =
+        can_see_invite_details ? Invite.expired(inviter, domain:).reorder(nil).count.to_i : 0
+      redeemed_count = Invite.redeemed_users(inviter, domain:).reorder(nil).count.to_i
+      # Same gate as pending_count/expired_count above -- without it, a viewer who can't
+      # see this inviter's invite details (e.g. a TL2 user viewing someone else's invited
+      # page) could still learn every domain the inviter has invited to, via a field that
+      # isn't visibility-checked itself.
+      available_domains =
+        if can_see_invite_details
+          Invite
+            .where(invited_by_id: inviter.id)
+            .where.not(email_domain: nil)
+            .distinct
+            .order(:email_domain)
+            .pluck(:email_domain)
+        else
+          []
+        end
 
       invite_list = invites.to_a
       # Only pending/expired invites are rendered through InviteSerializer
@@ -613,6 +638,7 @@ class UsersController < ApplicationController
                      email_logs_by_invite_id: email_logs_by_invite_id,
                      inviter: inviter,
                      type: filter,
+                     available_domains: available_domains,
                      counts: {
                        pending: pending_count,
                        expired: expired_count,

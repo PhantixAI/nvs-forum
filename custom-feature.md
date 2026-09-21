@@ -42,6 +42,8 @@ feat : Code review fixes
 | 10 | AI-personalised, paced bulk invite emails, sent-email preview | §10 |
 | 11 | Name-based usernames, locked full-name requirement | §11 |
 | 12 | Code-review follow-ups | §12 |
+| 13 | Invite email delivery status (SES) | §13 |
+| 14 | Cursor-forum look: header search, Cursor colours and type | §14 |
 
 ---
 
@@ -723,6 +725,23 @@ limiting it like any other invite.
 - A `bulk_pending` invite's delivery is deliberately *not* double-triggered
   here — `Jobs::ProcessBulkInviteEmails` already re-enqueues those on its own
   throttle, and `Jobs::InviteEmail` already has the `description` fallback.
+- The Bulk Invite modal's help text
+  (`config/locales/client.en.yml`, `user.invited.bulk_invite.instructions`)
+  documents every CSV column the backend accepts. It had drifted behind the
+  columns added later (`locale`, `name`, `keywords`, `skip_personalization` —
+  see the Extensions under §10) until this was noticed and the text was
+  extended to cover all of them, with a combined example row. **Gotcha**: this
+  key also had a `TranslationOverride` row (Admin > Customize > Text) already
+  set on every site from an earlier hand-edit, and a `TranslationOverride`
+  always wins over the YAML default — editing `client.en.yml` alone had no
+  visible effect until the override was brought back in sync
+  (`script/nvs-features/sync-bulk-invite-instructions-override.rb`, dry-run by
+  default, `APPLY=1`/`SITES=`). Re-run that script after any future edit to
+  this locale key, or the override will keep masking it again. Like the
+  Cursor-look script (§14), the running app process caches the compiled
+  locale bundle in memory (`ExtraLocalesController.js_digests`), so a
+  `pkill -USR2 -f 'ruby bin/pitchfork'` restart is needed locally before the
+  new text shows up even after the override is synced.
 
 ### 3b. Invite acceptance page redesign
 
@@ -808,6 +827,46 @@ never arrives, and the signup and login screens should link to each other.
   yet — if a submit is genuinely just slow (not stuck), the timeout check
   early-returns so the user can't race a slow in-flight request with a second
   manual one.
+
+### Extension: `allow_any_email` Bypasses the Site's Domain Allowlist
+
+**Requirement**: an `allow_any_email` invite (3a) is redeemable with any email
+address, but the site's `SiteSetting.allowed_email_domains` allowlist (this
+fork's custom college-domain restriction) still rejected the new account at
+creation time, contradicting the "any email" promise.
+
+**Root cause**: `allow_any_email` only ever controlled invite-side matching
+(`Invite#email`/`#is_invite_link?`); it wasn't a persisted attribute, so nothing
+carried it through to `InviteRedeemer.create_user_from_invite`'s `user.save!`,
+where `UserEmail`'s `email: true` validator (`lib/validators/email_validator.rb`)
+runs the domain check unconditionally for every non-staged user, regardless of
+how the invite matched.
+
+**Implementation**:
+- `allow_any_email` is now a real persisted column on `invites`
+  (`AddAllowAnyEmailToInvites`, `default: false, not null`), added to
+  `Invite.generate`'s `opts.slice(...)` allowlist and to
+  `Jobs::BulkInvite#send_invite`'s `invite_opts` — same pattern as
+  `recipient_name`/`recipient_keywords`/`skip_personalization`.
+- A new, narrower bypass than the existing `User#skip_email_validation` (which
+  skips format/blocklist checks too): `User#skip_email_domain_validation` /
+  `UserEmail#skip_email_domain_validation`, propagated from `User` to its
+  `primary_email` by a `before_validation` callback
+  (`set_skip_email_domain_validation`) mirroring how
+  `set_skip_validate_email` already propagates its own flag. `EmailValidator
+  #validate_each` checks `record.try(:skip_email_domain_validation)` before
+  running the domain check only — format and `ScreenedEmail` blocklist checks
+  are untouched.
+- `InviteRedeemer.create_user_from_invite` sets
+  `user.skip_email_domain_validation = true if invite.allow_any_email?` right
+  before `user.save!`.
+
+**Edge cases**:
+- Only the invite-redemption path is affected — plain signup
+  (`UsersController#create`) has no `Invite` in scope, so it's never bypassed
+  by this flag; the site's domain allowlist still applies to organic signups.
+- Format validation and `ScreenedEmail` blocking still apply to an
+  `allow_any_email` redemption — only the domain-allowlist check is skipped.
 
 ---
 
@@ -1230,6 +1289,27 @@ of total CSV size, instead of bursting.
   (deliberately not disabled, unlike `Jobs::BulkInvite`'s
   `sidekiq_options retry: false`) — safe because `FOR UPDATE SKIP LOCKED`
   means a retry can't double-claim an already-`:sending`/`:sent` row.
+- **Gemini `gemini_interactions` provider quirks**, found and fixed while
+  validating the first real LLM configured for this feature (production,
+  `gemini-3.8-flash`):
+  - A Google AI Studio Free Tier key caps this model at 20 requests/day —
+    an apparent "hang" (a real DiscourseAi retry-with-backoff loop, ~130s,
+    surfacing a `429` only after retrying) was actually quota exhaustion,
+    not a code or provider bug. Needs a billed tier for any real use.
+  - This provider spends part of `max_tokens` on an internal reasoning step
+    before emitting visible text; the original `MAX_TOKENS = 220` let
+    reasoning consume the whole budget, truncating replies mid-sentence.
+    Raised to `1200`, empirically the smallest value that reliably left
+    room for a complete, rule-compliant reply in testing.
+  - When reasoning is on, `llm.generate` returns an `Array` mixing response
+    text with `DiscourseAi::Completions::Thinking` objects instead of a
+    plain `String`. `ResponseValidator.clean` assumed a `String`; on an
+    `Array` it silently sanitized the array's own `#inspect` output (HTML
+    entity stripping ate the `<...>` part of a `Thinking` object's default
+    inspect, leaving literal `["real text", #]` garbage as the "cleaned"
+    result — this would have been sent to real invite recipients).
+    `Generator.call_llm` now extracts only the `String` parts of the
+    response before handing it to the validator.
 
 ### Extension: Paced Resend All Invites
 
@@ -1321,6 +1401,126 @@ email an invite produced.
   and `invite.emailed`), so a moderator or an inviter viewing their own invites
   gets a permission error when they click it. Gating the item on
   `currentUser.admin` would close it.
+
+### Extension: Per-Row Recipient Context + Configurable Personalization Rules
+
+**Requirement**: the AI prompt only ever had the recipient's email domain to work
+with, producing generic notes, and the formatting/anti-spam rule set was a hardcoded
+Ruby heredoc, so tuning it needed a code deploy.
+
+**Implementation**:
+
+- **`invites`** gains two nullable columns, `recipient_name` (`string`, 100) and
+  `recipient_keywords` (`string`, 255) (`AddRecipientContextToInvites`), with
+  matching length validations in `app/models/invite.rb` and added to
+  `Invite.generate`'s `opts.slice(...)` allowlist -- without that allowlist entry
+  they'd be silently dropped even though `invite_opts` carries them.
+- **`InvitesController::ALLOWED_BULK_INVITE_COLUMNS`** gains `name`/`keywords`, so a
+  bulk-invite CSV header can include them like any other supported column
+  (`email,groups,topic_id,locale,allow_any_email,name,keywords`, any subset, any
+  order).
+- **`Jobs::BulkInvite#send_invite`** reads `invite[:name]`/`invite[:keywords]` into
+  `recipient_name`/`recipient_keywords` on `invite_opts`, and excludes both from the
+  hash handed to `get_user_fields` -- otherwise they'd be misread as custom User
+  Field keys and log spurious `"Invalid User Field 'name'"` warnings on every row.
+- **`BulkInvitePersonalization::Generator#user_message`** appends a `Recipient
+  name: ...` / `Additional context: ...` line per field only when present -- a CSV
+  without these columns behaves exactly as before.
+- **`BulkInvitePersonalization::Generator#system_message`** now interpolates
+  `SiteSetting.bulk_invite_ai_personalization_rules` instead of a hardcoded rules
+  block; the new setting's default is that same rules text verbatim (plus two new
+  bullets covering how to use the name/keywords fields), so no site's output changes
+  until an admin edits the setting. Declared in core `config/site_settings.yml`
+  alongside its four `bulk_invite_ai_personalization_*` siblings (`area: "users"`,
+  same `depends_on` gating) -- deliberately not inside the vendored `discourse-ai`
+  plugin's own `settings.yml`, so a future plugin update can't silently drop the
+  customization.
+
+**Edge cases**:
+
+- A site with a custom User Field literally named `name` or `keywords` would have
+  that field's CSV column shadowed by these new reserved columns -- same category of
+  tradeoff the existing reserved names (`email`/`groups`/`topic_id`/`locale`/
+  `allow_any_email`) already carry.
+- `recipient_name`/`recipient_keywords` are admin-uploaded free text fed into the LLM
+  prompt -- a theoretical prompt-injection vector, but not a new gap:
+  `ResponseValidator.clean`'s hardcoded URL/Markdown/shouting checks
+  (`lib/bulk_invite_personalization/response_validator.rb`, untouched by this
+  change) still run on whatever the LLM produces, so an injected instruction can at
+  most cause that one row to fail validation and fall back to the plain template --
+  it can't make the pipeline actually emit a link or markdown.
+- Same safety property applies to `bulk_invite_ai_personalization_rules` itself: an
+  admin loosening or blanking it changes what the model is *asked* to do, not what
+  `ResponseValidator` *enforces* -- the fixed validation is independent code, not
+  sourced from this setting.
+- CSV-upload only for v1: neither field is exposed in `InvitesController#update`,
+  `InviteSerializer`, or the invited-users list -- set once at upload time, not
+  hand-editable afterward.
+
+### Extension: Per-Row Skip-Personalization Flag + Domain Filter/Resend
+
+**Requirement**: two more gaps found after the above shipped -- no way to opt a
+specific CSV row out of AI personalization when the site-wide setting is on (e.g. a
+faculty row where the plain template reads better), and no way to view or act on
+invites grouped by the recipient's email domain for a 10K+, multi-institution
+campaign.
+
+**Implementation**:
+
+- **`skip_personalization`**: a `skip_personalization` boolean column
+  (`AddSkipPersonalizationToInvites`, `default: false, not null`), added to
+  `ALLOWED_BULK_INVITE_COLUMNS`, parsed in `Jobs::BulkInvite#send_invite` with the
+  same defensive truthy-string check as `allow_any_email`, threaded through
+  `invite_opts` → `Invite.generate`'s `opts.slice` allowlist exactly like
+  `recipient_name`/`recipient_keywords`. `BulkInvitePersonalization::Generator
+  .personalize` checks it first, ahead of the site-wide `enabled?` check -- falls
+  back to the plain template exactly like every other "not applicable" case.
+- **`email_domain`**: a new stored, indexed column on `invites`
+  (`AddEmailDomainToInvites` + `AddIndexToInvitesEmailDomain`, concurrent partial
+  index on `(invited_by_id, email_domain)`, + `BackfillInvitesEmailDomain` for
+  existing rows), kept in sync by a `before_save` callback whenever `email` changes
+  -- covers every invite-creation path (manual, CSV, resend) uniformly, no special
+  casing needed in `Jobs::BulkInvite`. Stored rather than derived at query time
+  because the domain filter also drives three `COUNT` queries per request (tab
+  counts, scoped to the selected domain) on top of the list query, at the scale this
+  project already deals with.
+- **`Invite.pending`/`.expired`/`.redeemed_users`** each take an optional `domain:`
+  keyword. `redeemed_users` reaches `invites.email_domain` through the join it
+  already has for the existing `search` filter.
+- **`UsersController#invited`**: `params[:domain]` is validated against
+  `Invite::DOMAIN_REGEX` before use (client-supplied, and it also feeds a
+  rate-limiter key in `resend_all_invites` -- reject anything not domain-shaped
+  rather than pass it through). Threaded into all three scope calls; tab counts are
+  recomputed *with* the domain filter applied (deliberately different from `search`,
+  which leaves counts alone); a new `available_domains` field (all of the inviter's
+  distinct domains, computed *without* the filter, so the dropdown's own option list
+  stays stable while filtering) rides along in the same response `InvitedSerializer`
+  already builds.
+- **`InvitesController#resend_all_invites`** ("Resend Invites", renamed from "Resend
+  All Invites"): same `domain` validation; the daily rate limit is keyed per domain
+  (`"bulk-reinvite-per-day-#{domain}"` vs. the existing `"bulk-reinvite-per-day"`),
+  so resending nit.ac.in and iitb.ac.in the same day are independent, while
+  resending nit.ac.in twice the same day still isn't. One button, no new UI element
+  -- it always acts on whichever domain is currently selected in the dropdown (or
+  everyone, if none is).
+- Frontend: a searchable `ComboBox` (select-kit, same pattern as the cohort-filter
+  dropdowns elsewhere in this codebase, not their code) between "Bulk Invite" and
+  "Resend Invites", on all three tabs, gated on `showDomainFilter` -- deliberately
+  *not* gated on the current invite list being non-empty like `showBulkActionButtons`
+  is, since a domain filter that narrows the list to zero results must stay visible
+  or there's no way to clear it. `selectedDomain` resets on tab switch, matching how
+  `searchTerm` already behaves.
+
+**Edge cases**:
+
+- Unbound invites (`email: nil` -- domain-restricted invite links, or an
+  `allow_any_email` row before its intended recipient is known) get
+  `email_domain: nil` and never match any domain filter or count toward any domain's
+  count -- only visible in the unfiltered view, same exclusion `allow_any_email`
+  already has from the *unrelated* existing `domain` invite-link column.
+- That existing `Invite#domain` column (invite-link redemption restriction, mutually
+  exclusive with `email` via `email_xor_domain`) is untouched -- this feature only
+  reads/writes the new `email_domain` column.
 
 ## 11. Name-Based Usernames at Email-Code Signup + Locked Full-Name Requirement
 
@@ -1503,3 +1703,180 @@ notifications; `"Delivery"` and `"Complaint"` were silently ignored.
   proceeds for allowlisted topics). Verify with SES's simulator addresses
   (`bounce@`/`complaint@`/`success@simulator.amazonses.com`). Not done yet as
   of this writing — infrastructure work, not code.
+
+## 14. Cursor-Forum Look: Header Search, Cursor's Colours and Type (Foundation)
+
+### Requirement
+
+Make the web app resemble forum.cursor.com with as little change as possible: the search box
+in the top bar instead of behind an icon, Cursor's colours (warm page, darker sidebar, dark
+text), Cursor's type sizes, and a similar sans-serif font, on every screen size including the
+mobile app. It can be limited to 768px and up (`DESKTOP_ONLY=1`), which leaves phones on the
+site's old colour scheme. No repository code changes: everything is per-site configuration (theme data lives in
+each site's database).
+
+### Why Foundation, not Horizon
+
+The bundled Horizon theme also puts search in the header and derives a warm palette, but it draws
+a white rounded content panel with card-style topic rows, which does not look like the Cursor
+forum. Foundation (the theme the sites already use) keeps the flat topic rows and sidebar layout
+the reference has, so the look is built on Foundation and no theme is switched.
+
+### What is configured, per site
+
+1. **Header search**: Foundation's theme setting `search_experience = search_field`
+   (themeable, stored in `theme_site_settings`), which renders
+   `frontend/discourse/app/components/header/header-search.gjs`.
+2. **Welcome banner off** for Foundation (`enable_welcome_banner = false`). The banner has its
+   own search box, and the header field is hidden while that banner is on screen. The setting is
+   site-wide, so phones lose the banner too.
+3. **Theme component `nvs-cursor-look`**, attached to Foundation, whose common SCSS is one block
+   scoped to `@media (prefers-color-scheme: light)`; with `DESKTOP_ONLY=1` it is
+   `(min-width: 48rem) and (prefers-color-scheme: light)` (Discourse's `md` breakpoint) and
+   phones keep the default palette. **No palette is assigned to Foundation**: a palette is one
+   stylesheet for every device and cannot vary by screen size, which is why the colours are CSS
+   variables in the component. The block holds:
+   - Cursor's palette as custom properties: its ten base colours (`primary` `#26251e`,
+     `secondary` `#f7f7f4`, dark `tertiary` `#3b3a33`, `quaternary` `#e45735`, `header_background`
+     `#f7f7f4`, `header_primary` `#7a7974`, `highlight`, `danger` `#eb5600`, `success`, `love`)
+     compiled by this Discourse into the ~84 derived properties that differ from the default
+     palette. It is a static, generated copy: regenerate it if the colours change (create a
+     temporary scheme from the ten colours, fetch its compiled `color_definitions_*.css` and the
+     default's, keep the properties that differ, drop the `csstools` polyfill artefacts, delete
+     the scheme);
+   - Cursor's theme tokens, measured from forum.cursor.com's public CSS: `--base-font-size:
+     93.75%`, sidebar `#f0efea` with muted `#7a7974` icons and headers, active sidebar item and
+     active nav in orange `#eb5600` with no fill, 2px nav underline, weight 500 for sidebar
+     headers and active items, transparent default buttons with a `primary-300` border and
+     dark (`var(--primary)`) primary buttons, and tightened `h1`-`h3` letter-spacing and
+     line-height;
+   - the outlined header pills (Sign Up / Log In).
+   The custom properties are set on `:root, body`: the "modernize Foundation theme" upcoming
+   change sets the same variables at zero specificity on the element that carries its class,
+   which beats a plain `:root` value.
+4. **Font family**: Inter, unchanged (`base_font` and `heading_font` default to it). Cursor's own
+   font, "Cursor Gothic", is their proprietary brand font and is deliberately not used or
+   hotlinked; size, weight and colour are matched instead.
+
+`script/nvs-features/apply-cursor-look.rb` (defaults to iitians only; `SITES=`
+overrides; applies on all screen sizes unless `DESKTOP_ONLY=1`) applies all of this idempotently. It is read-only by default and prints each site's
+state first (palette, components, theme settings, fonts, users with a personal theme).
+`APPLY=1` writes, and also unassigns and deletes the older "Cursor Flat" palette so a site that
+had it returns to the default palette on phones; `ROLLBACK=1` removes the component link and the
+two theme settings, returning the site to an untouched state.
+
+### Edge cases
+
+- **Anonymous visitors get no search.** The sites set `allow_anonymous_search = false`, so
+  `Guardian#can_search?` is false for logged-out visitors and no search UI renders for them,
+  whether icon or field. Logged-in members get the field. Enabling it is a policy decision, not
+  part of this change.
+- The header field is desktop only. Phones and narrow desktop windows keep the icon
+  (`header/contents.gjs`), and it is hidden while a topic title is shown in the header. It sits
+  centred in the header, where Cursor's is left-aligned next to the logo.
+- With the default (all screens) the look also applies on phones and in the mobile app; the site
+  was switched from desktop-only to all screens to try it in the app. With `DESKTOP_ONLY=1` the
+  limit follows **screen width, not device**: a desktop browser narrower than 768px shows the old
+  scheme and tablets at 768px or wider get Cursor's. Re-running with `DESKTOP_ONLY=1 APPLY=1`
+  switches back.
+- `theme-color` (a mobile browser's toolbar tint) is taken from the active palette's header
+  colour, which is now the default palette's white, so a browser's toolbar does not follow
+  `#f7f7f4`. The mobile app does not use it: the app (nvs-mobile `js/headerColor.js`) reads the
+  header's real background colour from the page and paints the strip above the header with it,
+  so the app follows `#f7f7f4` and any later colour change. The same app also hides the site's
+  own bottom navigation bar (nvs-mobile `js/hideSiteFooterNav.js`), which the site shows
+  whenever a page can reach `window.ReactNativeWebView`.
+- On phones the header keeps the search icon (the field is desktop only) and the welcome banner
+  stays off, since the setting is site-wide.
+- Dark mode is not touched (the block is light-mode only); it has not been visually exercised.
+- Checked as an anonymous visitor at 390 and 1440px (local copy and live iitians.in): page and
+  header `#f7f7f4` on both, `#f0efea` sidebar, `#26251e` text and `#eb5600` active items on
+  desktop. With `DESKTOP_ONLY=1`, 390 and 767px stay white and 768px switches, as tested earlier. Logged-in screens (directory and cohort filters, user card,
+  invited list, admin lists, calendar) were not screenshotted and need a look.
+- **navodians.com is served by the `default` multisite connection**, which shares navodians'
+  database but keeps its own caches, and its web workers only hear about a change through a
+  message on the connection it was made on. A change made through the `navodians` connection is
+  stored correctly, but the live site keeps showing the old theme **and the old theme settings**
+  until the `default` connection is told too. Clearing only the theme cache fixes the colours
+  and leaves the settings stale: after the first apply the colours were right but the welcome
+  banner was still on and the search field was still in the banner, not the header. The apply
+  script therefore, for every connection that shares the site's database
+  (`SHARED_DATABASE_CONNECTIONS`), clears the theme and theme-setting caches, reloads the site
+  settings and notifies that connection's workers, after apply and after rollback. If a site
+  looks unchanged (or half-changed) right after a change the database reports as applied, this is
+  the first thing to check.
+- Users with a personal theme choice would ignore these settings; there were none on any site
+  when checked.
+- Theme rows are per database, so a site that is skipped stays as it was, which is harmless.
+- **Regression found and fixed: plain links were invisible until hovered.** Discourse styles
+  every link purely by colour (`--d-link-color`, defaulting to `var(--tertiary)`;
+  `text-decoration` is `none` by default) — no other differentiation. This palette's `--primary`
+  (body text) and `--tertiary` are both near-black, near-identical neutrals (~1.35:1 contrast),
+  so a link (in a post, or plain help text like the Bulk Invite modal's "CSV file" link) read as
+  indistinguishable body text until the cursor changed on hover. Fixed by overriding
+  `--d-link-color` directly (not `--tertiary` itself, which other rules in this same block
+  intentionally reuse for buttons/icons) to the palette's orange accent (`#eb5600`, already used
+  above for active sidebar/nav state) — this is the only place `--d-link-color` is consumed
+  (`app/assets/stylesheets/common/foundation/base.scss`), so the one variable override fixes
+  every link site-wide, not just inside posts. Light mode only, same as the rest of this block.
+
+## 15. Chat and Channels Hidden From the Left Sidebar (Configurable)
+
+### Requirement
+
+Chat and its channel list should not live in the left sidebar. The header's own chat icon already
+opens chat, so nothing is lost by removing it from the sidebar. No repository code changes: this
+is more configuration in the same `nvs-cursor-look` theme component described in section 14,
+applied by the same script.
+
+An earlier version of this moved chat into a custom right-hand rail instead of just hiding it
+(reusing Discourse's own sidebar-section components so it would inherit the sidebar's styling
+rather than needing separate CSS). It was built, fixed through two real bugs (a `<template>` tag
+needing a `.gjs` field name to compile; an unscoped hide-rule hiding its own rendered copy), and
+worked — rail visible, styled to match, chat drawer functional, verified locally — but the
+resulting user experience wasn't good enough to ship, so it was dropped in favour of this
+simpler, hide-only version.
+
+### What is configured
+
+Chat's left-sidebar sections (channels, DMs, starred, threads, search) are registered through the
+sidebar plugin API in `plugins/chat/.../initializers/chat-sidebar.js`. A single CSS rule, added to
+`nvs-cursor-look`'s `scss` field, independent of the light/dark, `DESKTOP_ONLY` block described in
+section 14 (this is visibility, not colour scheme):
+
+```scss
+.sidebar-section[data-section-name^="chat-"] {
+  display: none !important;
+}
+```
+
+Unconditional on screen size — applies at every width, including the phone slide-out sidebar and
+the mobile app.
+
+**Behind a real theme-component setting**, `hide_channels_and_chat_from_sidebar` (boolean,
+`target: :settings`, visible and toggleable at Admin > Customize > Themes > nvs-cursor-look >
+Settings — defaulted to on by the script, but an admin can flip it off afterwards without
+re-running anything, which fully restores stock behaviour). The CSS rule above is wrapped in
+`@if $hide_channels_and_chat_from_sidebar == "true" { ... }` in the component's SCSS. A component
+boolean setting compiles to an *unquoted string* SCSS variable (`Theme#to_scss_variable`), not a
+real boolean, hence the `== "true"` comparison rather than a bare `@if`.
+
+### Edge cases
+
+- **A running dev server does not pick up a theme change made by a separate one-off `bin/rails
+  runner` process on its own.** `Theme#save!`'s `after_save` callback does call
+  `notify_theme_change` (clears `Stylesheet::Manager`'s cache and publishes a refresh message),
+  but already-running pitchfork workers can keep serving the old compiled stylesheet by its old,
+  unchanged-looking digest until they are restarted (`pkill -USR2 -f 'ruby bin/pitchfork'`). A
+  hard browser reload alone is not enough. If a theme change applies cleanly (the database and
+  `theme_field.value` show the new content) but a running local site still looks unchanged,
+  restart the dev server before assuming the apply failed.
+- The abandoned right-rail version left behind an `extra_js` theme field
+  (`discourse/api-initializers/nvs-chat-rail.gjs`) on already-applied sites. The script now
+  destroys that field by name on every apply, since nothing sets it any more and it would
+  otherwise linger (Discourse doesn't remove fields a script stops writing to on its own).
+- Same delivery mechanism as section 14: `APPLY=1`/`ROLLBACK=1` on the same component, same
+  script, same per-connection cache-expiry handling for `default`/`navodians`. Rolling back
+  section 14's look also rolls back this setting (the component unlinks entirely), and vice
+  versa — they are not independently toggleable via `ROLLBACK=1`, only via the theme setting
+  itself once applied.

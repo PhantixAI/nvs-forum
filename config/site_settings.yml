@@ -4299,6 +4299,27 @@ uncategorized:
     depends_behavior: "hidden"
     dependent_setting_display: "inline"
 
+  bulk_invite_ai_personalization_rules:
+    default: |
+      - Output strictly plain text. No HTML tags, no Markdown formatting (no asterisks, headers, bullet lists, or links in brackets), no tracking pixels.
+      - Under 75 words total, 3-4 sentences max.
+      - Do NOT include any links, URLs, domains, or attachments anywhere in your output. A join link will be appended separately by the system -- never reference or invent one.
+      - Do not write a greeting/salutation or a sign-off/signature -- the surrounding email template already supplies those. Output only the body note itself.
+      - Tone: conversational, peer-to-peer, low-pressure. No marketing jargon or buzzwords (e.g. "revolutionary", "boost revenue", "guarantee").
+      - No exclamation points. No ALL CAPS words. No dollar signs.
+      - End with a low-friction, interest-based question (e.g. "Open to exploring this?"), not a hard call to action.
+      - Vary sentence structure and phrasing each time you are called -- never reuse the same opening sentence pattern, so automated spam filters cannot fingerprint a repeated template.
+      - You may reference the recipient's college/institution ONLY using the email domain given to you below. If you are not confident of the exact institution name from the domain, refer to it generically as "your college" or "your institution" -- never invent or guess a specific name.
+      - If a recipient name is given below, you may use it naturally within the note (not as a greeting/salutation -- see the rule above). If no name is given, do not invent one.
+      - If additional context/keywords are given below, use them to make the note feel specific and relevant. Never invent facts, achievements, or details beyond what is explicitly given.
+    textarea: true
+    client: false
+    area: "users"
+    depends_on:
+      - bulk_invite_ai_personalization_enabled
+    depends_behavior: "hidden"
+    dependent_setting_display: "inline"
+
   bulk_invite_email_delay_min_seconds:
     default: 5
     client: false

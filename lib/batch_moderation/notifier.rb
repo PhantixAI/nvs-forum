@@ -37,6 +37,8 @@ module BatchModeration
           reason: reason,
         )
       end
+
+      push_notification_for_action(staff_ids, actor: actor, target: target, action: action)
     end
 
     # A user joined or left a cohort group (via GroupSync.sync, on signup or
@@ -75,6 +77,8 @@ module BatchModeration
           joined: joined,
         )
       end
+
+      push_notification_for_cohort_change(recipient_ids, user: user, group: group, joined: joined)
     end
 
     # A user's Batch Moderator status was granted or revoked (via
@@ -115,6 +119,14 @@ module BatchModeration
           granted: granted,
         )
       end
+
+      push_notification_for_status_change(
+        recipient_ids,
+        actor: actor,
+        user: user,
+        group: group,
+        granted: granted,
+      )
     end
 
     def self.broad_recipients_for(group, exclude_user_ids:)
@@ -130,6 +142,80 @@ module BatchModeration
       Notification.where(id: notification_ids).index_by(&:user_id)
     end
     private_class_method :bulk_create_and_index_by_user_id
+
+    # Notification::Action::BulkCreate (insert_all!) only replicates the
+    # after_commit work a normal Notification#create would trigger --
+    # MessageBus, email, the :notification_created event -- and mobile push
+    # was never one of those; PostAlerter triggers it explicitly, as a
+    # sibling action, only for post-based notifications. These three methods
+    # are the mobile-push equivalent of the *_email jobs above, so these
+    # three notification types reach the mobile app the same way every other
+    # notification type already does.
+    def self.push_notification_for_action(recipient_ids, actor:, target:, action:)
+      description =
+        I18n.t("js.notifications.batch_moderation_action.#{action}", username: target.username)
+      deliver_push(
+        recipient_ids,
+        notification_type: :batch_moderation_action,
+        translated_title: push_title(:batch_moderation_action),
+        excerpt: "#{actor.username} #{description}",
+        post_url: "/u/#{target.username}",
+      )
+    end
+    private_class_method :push_notification_for_action
+
+    def self.push_notification_for_cohort_change(recipient_ids, user:, group:, joined:)
+      description =
+        I18n.t(
+          "js.notifications.batch_moderation_cohort_change.#{joined ? "joined" : "left"}",
+          group_name: group.full_name,
+        )
+      deliver_push(
+        recipient_ids,
+        notification_type: :batch_moderation_cohort_change,
+        translated_title: push_title(:batch_moderation_cohort_change),
+        excerpt: "#{user.username} #{description}",
+        post_url: "/u/#{user.username}",
+      )
+    end
+    private_class_method :push_notification_for_cohort_change
+
+    def self.push_notification_for_status_change(recipient_ids, actor:, user:, group:, granted:)
+      description =
+        I18n.t(
+          "js.notifications.batch_moderation_status_change.#{granted ? "granted" : "revoked"}",
+          username: user.username,
+          group_name: group.full_name,
+        )
+      actor_label = actor&.username || I18n.t("batch_moderation.system_actor")
+      deliver_push(
+        recipient_ids,
+        notification_type: :batch_moderation_status_change,
+        translated_title: push_title(:batch_moderation_status_change),
+        excerpt: "#{actor_label} #{description}",
+        post_url: "/u/#{user.username}",
+      )
+    end
+    private_class_method :push_notification_for_status_change
+
+    def self.push_title(notification_type_key)
+      "#{I18n.t("js.notifications.titles.#{notification_type_key}").capitalize} - #{SiteSetting.title}"
+    end
+    private_class_method :push_title
+
+    # Reuses the same entry point PostAlerter itself calls for every other
+    # push notification, so Do Not Disturb, registered
+    # push_notification_filters, and the push_notification_time_window_mins
+    # delay all apply here exactly as they do for ordinary post
+    # notifications -- this only supplies the payload, not a parallel
+    # delivery mechanism.
+    def self.deliver_push(recipient_ids, notification_type:, **payload)
+      payload = payload.merge(notification_type: Notification.types[notification_type])
+      User
+        .where(id: recipient_ids)
+        .find_each { |user| PostAlerter.push_notification(user, payload) }
+    end
+    private_class_method :deliver_push
 
     # These three notification types are emailed via their own dedicated jobs
     # (above) rather than NotificationEmailer -- its EmailUser dispatches by

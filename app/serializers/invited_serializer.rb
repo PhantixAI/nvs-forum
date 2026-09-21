@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class InvitedSerializer < ApplicationSerializer
-  attributes :invites, :can_see_invite_details, :counts
+  attributes :invites, :can_see_invite_details, :counts, :available_domains
 
   def invites
     ActiveModel::ArraySerializer.new(
@@ -27,5 +27,9 @@ class InvitedSerializer < ApplicationSerializer
 
   def counts
     object.counts
+  end
+
+  def available_domains
+    object.available_domains
   end
 end

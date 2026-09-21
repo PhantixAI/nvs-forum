@@ -174,6 +174,7 @@ class User < ActiveRecord::Base
   after_initialize :add_trust_level
 
   before_validation :set_skip_validate_email
+  before_validation :set_skip_email_domain_validation
 
   before_save :update_usernames
   before_save :match_primary_group_changes
@@ -253,6 +254,9 @@ class User < ActiveRecord::Base
 
   # Skip validating email, for example from a particular auth provider plugin
   attr_accessor :skip_email_validation
+  # Narrower than skip_email_validation: skips only the domain-allowlist check, not
+  # format/blocklist -- see set_skip_email_domain_validation below.
+  attr_accessor :skip_email_domain_validation
   attr_accessor :enforce_username_restrictions
 
   # Whether we need to be sending a system message after creation
@@ -2415,6 +2419,12 @@ class User < ActiveRecord::Base
 
   def set_skip_validate_email
     primary_email.skip_validate_email = !should_validate_email_address? if primary_email
+
+    true
+  end
+
+  def set_skip_email_domain_validation
+    primary_email.skip_email_domain_validation = skip_email_domain_validation if primary_email
 
     true
   end

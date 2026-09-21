@@ -16,7 +16,7 @@ export default class Invite extends EmberObject {
     return result;
   }
 
-  static async findInvitedBy(user, filter, search, offset) {
+  static async findInvitedBy(user, filter, search, offset, domain) {
     if (!user) {
       return;
     }
@@ -27,6 +27,9 @@ export default class Invite extends EmberObject {
     }
     if (!isNone(search)) {
       data.search = search;
+    }
+    if (!isNone(domain)) {
+      data.domain = domain;
     }
     data.offset = offset || 0;
 
@@ -39,8 +42,12 @@ export default class Invite extends EmberObject {
     return EmberObject.create(result);
   }
 
-  static reinviteAll() {
-    return ajax("/invites/reinvite-all", { type: "POST" });
+  static reinviteAll(domain) {
+    const data = {};
+    if (!isNone(domain)) {
+      data.domain = domain;
+    }
+    return ajax("/invites/reinvite-all", { type: "POST", data });
   }
 
   static destroyAllExpired(user) {

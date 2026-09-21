@@ -290,6 +290,52 @@ RSpec.describe InviteRedeemer do
       expect(user.active).to eq(true)
       expect(ReviewableUser.count).to eq(0)
     end
+
+    context "with allow_any_email" do
+      # Create the invite (and its invited_by user) before restricting
+      # allowed_email_domains -- otherwise the fabricator's own user/invite creation gets
+      # blocked by the same validator this context is testing against redemption.
+      it "bypasses the site's domain allowlist" do
+        invite = Fabricate(:invite, email: nil, allow_any_email: true)
+        SiteSetting.allowed_email_domains = "allowed.example"
+
+        user =
+          InviteRedeemer.create_user_from_invite(
+            invite: invite,
+            email: "someone@not-allowed.example",
+            username: "someone",
+          )
+
+        expect(user).to be_persisted
+        expect(user.email).to eq("someone@not-allowed.example")
+      end
+
+      it "still enforces the domain allowlist for a normal (non allow_any_email) invite" do
+        invite = Fabricate(:invite, email: "someone@allowed.example", allow_any_email: false)
+        SiteSetting.allowed_email_domains = "allowed.example"
+
+        expect {
+          InviteRedeemer.create_user_from_invite(
+            invite: invite,
+            email: "someone@not-allowed.example",
+            username: "someone",
+          )
+        }.to raise_error(ActiveRecord::RecordInvalid)
+      end
+
+      it "still enforces email format even when the domain check is bypassed" do
+        invite = Fabricate(:invite, email: nil, allow_any_email: true)
+        SiteSetting.allowed_email_domains = "allowed.example"
+
+        expect {
+          InviteRedeemer.create_user_from_invite(
+            invite: invite,
+            email: "not-an-email",
+            username: "someone",
+          )
+        }.to raise_error(ActiveRecord::RecordInvalid)
+      end
+    end
   end
 
   describe "#redeem" do

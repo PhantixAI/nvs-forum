@@ -2745,6 +2745,41 @@ RSpec.describe UsersController do
       expect(statuses["scheduled@example.com"]).to eq("scheduled")
     end
 
+    it "filters invites by domain and recomputes tab counts for that domain" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      Fabricate(:invite, email: "student@nit.ac.in", invited_by: inviter)
+      Fabricate(:invite, email: "student2@nit.ac.in", invited_by: inviter)
+      Fabricate(:invite, email: "student@iitb.ac.in", invited_by: inviter)
+
+      get "/u/#{inviter.username}/invited.json", params: { filter: "pending", domain: "nit.ac.in" }
+      expect(response.status).to eq(200)
+
+      emails = response.parsed_body["invites"].map { |i| i["email"] }
+      expect(emails).to contain_exactly("student@nit.ac.in", "student2@nit.ac.in")
+      expect(response.parsed_body["counts"]["pending"]).to eq(2)
+      expect(response.parsed_body["available_domains"]).to contain_exactly(
+        "nit.ac.in",
+        "iitb.ac.in",
+      )
+    end
+
+    it "ignores a domain param that isn't shaped like a domain" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      Fabricate(:invite, email: "student@nit.ac.in", invited_by: inviter)
+
+      get "/u/#{inviter.username}/invited.json",
+          params: {
+            filter: "pending",
+            domain: "'; DROP TABLE invites; --",
+          }
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["invites"].size).to eq(1)
+    end
+
     it "hides last seen timestamps for hidden profiles" do
       SiteSetting.allow_users_to_hide_profile = true
 
@@ -2973,6 +3008,7 @@ RSpec.describe UsersController do
             "expired" => 0,
             "total" => 0,
           )
+          expect(response.parsed_body["available_domains"]).to eq([])
         end
       end
     end

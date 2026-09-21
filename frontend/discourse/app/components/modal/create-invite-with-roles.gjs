@@ -335,6 +335,10 @@ export default class CreateInviteWithRoles extends Component {
     return !this.inviteCreated && !this.isEmailDelivery;
   }
 
+  get emailFieldDisabled() {
+    return this.inviteCreated && !this.model.editing;
+  }
+
   get emailFieldLabel() {
     return this.isAdminInvite
       ? i18n("user.invited.invite_roles.admin_email_label")
@@ -673,7 +677,7 @@ export default class CreateInviteWithRoles extends Component {
                       @description={{i18n
                         "user.invited.invite_roles.member_email_help"
                       }}
-                      @disabled={{this.inviteCreated}}
+                      @disabled={{this.emailFieldDisabled}}
                       @format="full"
                       @name="email"
                       @title={{this.emailFieldLabel}}
@@ -801,7 +805,7 @@ export default class CreateInviteWithRoles extends Component {
                       @description={{i18n
                         "user.invited.invite_roles.member_email_help"
                       }}
-                      @disabled={{this.inviteCreated}}
+                      @disabled={{this.emailFieldDisabled}}
                       @format="full"
                       @name="email"
                       @title={{this.emailFieldLabel}}

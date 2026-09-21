@@ -14,7 +14,11 @@ class EmailValidator < ActiveModel::EachValidator
       invalid = true
     end
 
-    if !EmailValidator.allowed?(value)
+    # `record.try(...)` lets a specific caller opt a record out of just the domain check
+    # (e.g. InviteRedeemer.create_user_from_invite for an allow_any_email invite) without
+    # touching the format/blocklist checks above and below. Other records validated by this
+    # validator (e.g. Invite itself) don't define the accessor, so this is a no-op for them.
+    if !record.try(:skip_email_domain_validation) && !EmailValidator.allowed?(value)
       record.errors.add(attribute, I18n.t(:"user.email.not_allowed"))
       invalid = true
     end

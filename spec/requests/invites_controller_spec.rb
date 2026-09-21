@@ -2322,6 +2322,42 @@ RSpec.describe InvitesController do
       expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
     end
 
+    it "only resends invites matching the given domain" do
+      freeze_time
+
+      # Distinct from the 30-day expiry a resend would set, and still in the
+      # future (pending), so "moved to 30 days" is a reliable was-resent signal.
+      nit_invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      nit_invite.update!(expires_at: 5.days.from_now)
+      iitb_invite = Fabricate(:invite, invited_by: admin, email: "student@iitb.ac.in")
+      iitb_invite.update!(expires_at: 5.days.from_now)
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { domain: "nit.ac.in" }
+
+      expect(response.status).to eq(200)
+      expect(nit_invite.reload.expires_at).to eq_time(30.days.from_now)
+      expect(iitb_invite.reload.expires_at).to eq_time(5.days.from_now)
+    end
+
+    it "rate limits per domain independently, so two different domains can each resend the same day" do
+      start = Time.now
+      freeze_time(start)
+
+      Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      Fabricate(:invite, invited_by: admin, email: "student@iitb.ac.in")
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { domain: "nit.ac.in" }
+      expect(response.parsed_body["errors"]).to_not be_present
+
+      post "/invites/reinvite-all", params: { domain: "iitb.ac.in" }
+      expect(response.parsed_body["errors"]).to_not be_present
+
+      post "/invites/reinvite-all", params: { domain: "nit.ac.in" }
+      expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
+    end
+
     it "returns an error when allow_email_invites is disabled" do
       SiteSetting.allow_email_invites = false
       sign_in(admin)
@@ -2447,6 +2483,12 @@ RSpec.describe InvitesController do
       let(:file_with_allow_any_email) do
         Rack::Test::UploadedFile.new(File.open(csv_file_with_allow_any_email))
       end
+      let(:csv_file_with_recipient_context) do
+        File.new("#{Rails.root.join("spec/fixtures/csv/invites_with_recipient_context.csv")}")
+      end
+      let(:file_with_recipient_context) do
+        Rack::Test::UploadedFile.new(File.open(csv_file_with_recipient_context))
+      end
 
       it "fails if you cannot bulk invite to the forum" do
         sign_in(Fabricate(:user))
@@ -2546,6 +2588,26 @@ RSpec.describe InvitesController do
 
         user2 = User.where(staged: true).find_by_email("test2@example.com")
         expect(user2.locale).to eq("pl")
+      end
+
+      it "can pre-set recipient_name and recipient_keywords for AI personalization" do
+        Jobs.run_immediately!
+        sign_in(admin)
+
+        post "/invites/upload_csv.json",
+             params: {
+               file: file_with_recipient_context,
+               name: "invites_with_recipient_context.csv",
+             }
+        expect(response.status).to eq(200)
+
+        invite = Invite.find_by(email: "test@example.com")
+        expect(invite.recipient_name).to eq("Priya")
+        expect(invite.recipient_keywords).to eq("robotics club")
+
+        invite2 = Invite.find_by(email: "test2@example.com")
+        expect(invite2.recipient_name).to eq(nil)
+        expect(invite2.recipient_keywords).to eq(nil)
       end
 
       it "strips arbitrary CSV header columns that are not allowed" do

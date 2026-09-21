@@ -168,6 +168,12 @@ class InviteRedeemer
       raise ActiveRecord::RecordNotSaved.new(I18n.t("login.incorrect_username_email_or_password"))
     end
 
+    # An allow_any_email invite already lets the redeemer sign up with any address (see
+    # Invite#can_redeem_invite?/#is_invite_link?) -- without this, the site's domain
+    # allowlist (SiteSetting.allowed_email_domains) would still reject that address here,
+    # silently contradicting the "any email" promise.
+    user.skip_email_domain_validation = true if invite.allow_any_email?
+
     user.save!
     authenticator.finish
 
