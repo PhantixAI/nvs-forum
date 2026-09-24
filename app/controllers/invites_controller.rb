@@ -534,18 +534,16 @@ class InvitesController < ApplicationController
     # DOMAIN_REGEX rather than used as-is -- it also becomes part of the
     # rate-limiter key below.
     domain = params[:domain].presence if params[:domain].to_s.match?(Invite::DOMAIN_REGEX)
+    status = params[:status].presence if Invite::DELIVERY_STATUSES.include?(params[:status])
 
     begin
       # Keyed per domain so resending nit.ac.in and iitb.ac.in the same day
       # are independent, while resending nit.ac.in twice the same day (or
-      # resending everyone) still only gets one shot each.
-      RateLimiter.new(
-        current_user,
-        domain.present? ? "bulk-reinvite-per-day-#{domain}" : "bulk-reinvite-per-day",
-        1,
-        1.day,
-        apply_limit_to_staff: true,
-      ).performed!
+      # resending everyone) still only gets one shot each. Status is part of
+      # the key too, so retrying the "skipped" invites after a provider
+      # outage isn't blocked by an ordinary resend earlier the same day.
+      rate_limit_key = ["bulk-reinvite-per-day", domain, status].compact.join("-")
+      RateLimiter.new(current_user, rate_limit_key, 1, 1.day, apply_limit_to_staff: true).performed!
     rescue RateLimiter::LimitExceeded
       return render_json_error(I18n.t("rate_limiter.slow_down"))
     end
@@ -555,7 +553,7 @@ class InvitesController < ApplicationController
     # (see Jobs::BulkInvite) without sweeping in ordinary never-emailed link invites,
     # which stay at :not_required.
     invites_to_resend =
-      Invite.pending(current_user, domain:).where(
+      Invite.pending(current_user, domain:, status:).where(
         "email IS NOT NULL OR emailed_status != ?",
         Invite.emailed_status_types[:not_required],
       )

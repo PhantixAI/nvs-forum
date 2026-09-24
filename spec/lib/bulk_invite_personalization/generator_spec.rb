@@ -104,12 +104,19 @@ RSpec.describe BulkInvitePersonalization::Generator do
           expect(result).to eq(nil)
         end
 
-        it "returns nil and does not raise when the LLM call errors" do
+        it "raises GenerationFailed with the underlying error when the LLM call errors" do
           llm = instance_double(DiscourseAi::Completions::Llm)
           allow(llm_model).to receive(:to_llm).and_return(llm)
-          allow(llm).to receive(:generate).and_raise(StandardError.new("boom"))
+          allow(llm).to receive(:generate).and_raise(
+            DiscourseAi::Completions::Endpoints::Base::CompletionFailed.new(
+              '{"error":{"code":"too_many_requests"}}',
+            ),
+          )
 
-          expect(described_class.personalize(invite)).to eq(nil)
+          expect { described_class.personalize(invite) }.to raise_error(
+            described_class::GenerationFailed,
+            /CompletionFailed.*too_many_requests/,
+          )
         end
       else
         it "skips discourse-ai-dependent examples (run with LOAD_PLUGINS=1 to cover them)" do

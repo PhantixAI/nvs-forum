@@ -2765,6 +2765,63 @@ RSpec.describe UsersController do
       )
     end
 
+    it "filters invites by delivery status and recomputes tab counts for it" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      Fabricate(
+        :invite,
+        email: "skipped@nit.ac.in",
+        invited_by: inviter,
+        emailed_status: Invite.emailed_status_types[:skipped],
+      )
+      delivered =
+        Fabricate(
+          :invite,
+          email: "delivered@nit.ac.in",
+          invited_by: inviter,
+          emailed_status: Invite.emailed_status_types[:sent],
+        )
+      Fabricate(
+        :email_log,
+        invite_id: delivered.id,
+        email_type: "invite",
+        delivered_at: Time.current,
+      )
+      Fabricate(
+        :invite,
+        email: "sent@iitb.ac.in",
+        invited_by: inviter,
+        emailed_status: Invite.emailed_status_types[:sent],
+      )
+
+      get "/u/#{inviter.username}/invited.json", params: { filter: "pending", status: "skipped" }
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["invites"].map { |i| i["email"] }).to eq(["skipped@nit.ac.in"])
+      expect(response.parsed_body["invites"].first["delivery_status"]).to eq("skipped")
+      expect(response.parsed_body["counts"]["pending"]).to eq(1)
+      expect(response.parsed_body["available_statuses"]).to eq(Invite::DELIVERY_STATUSES)
+
+      get "/u/#{inviter.username}/invited.json",
+          params: {
+            filter: "pending",
+            status: "delivered",
+            domain: "nit.ac.in",
+          }
+      expect(response.parsed_body["invites"].map { |i| i["email"] }).to eq(["delivered@nit.ac.in"])
+    end
+
+    it "ignores a status param that isn't a known delivery status" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      Fabricate(:invite, email: "student@nit.ac.in", invited_by: inviter)
+
+      get "/u/#{inviter.username}/invited.json", params: { filter: "pending", status: "bogus" }
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["invites"].size).to eq(1)
+    end
+
     it "ignores a domain param that isn't shaped like a domain" do
       inviter = Fabricate(:user, trust_level: TrustLevel[2])
       sign_in(inviter)

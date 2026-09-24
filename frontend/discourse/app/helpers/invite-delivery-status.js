@@ -1,7 +1,15 @@
 import { trustHTML } from "@ember/template";
 import { i18n } from "discourse-i18n";
 
-const STATUSES = ["scheduled", "pending", "delivered", "bounced", "complained"];
+const STATUSES = [
+  "scheduled",
+  "pending",
+  "skipped",
+  "sent",
+  "delivered",
+  "bounced",
+  "complained",
+];
 
 /**
  * Returns a safe HTML pill for an invite's delivery_status (see

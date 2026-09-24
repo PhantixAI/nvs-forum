@@ -30,6 +30,7 @@ export default class UserInvitedShow extends DiscourseRoute {
       filter: this.inviteFilter,
       searchTerm: "",
       selectedDomain: null,
+      selectedStatus: null,
     });
   }
 

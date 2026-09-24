@@ -189,6 +189,44 @@ RSpec.describe Invite do
         expect(invite2.skip_personalization).to eq(false)
       end
 
+      it "updates the personalization context of a reused invite from the new row" do
+        Invite.generate(
+          user,
+          email: "test@example.com",
+          recipient_name: "Old Name",
+          recipient_keywords: "old",
+          skip_personalization: false,
+        )
+
+        invite =
+          Invite.generate(
+            user,
+            email: "test@example.com",
+            recipient_name: "Priya",
+            recipient_keywords: "robotics",
+            skip_personalization: true,
+          )
+
+        expect(Invite.where(email: "test@example.com").count).to eq(1)
+        expect(invite.recipient_name).to eq("Priya")
+        expect(invite.recipient_keywords).to eq("robotics")
+        expect(invite.skip_personalization).to eq(true)
+      end
+
+      it "leaves the personalization context of a reused invite alone when not passed" do
+        Invite.generate(
+          user,
+          email: "test@example.com",
+          recipient_name: "Priya",
+          skip_personalization: true,
+        )
+
+        invite = Invite.generate(user, email: "test@example.com")
+
+        expect(invite.recipient_name).to eq("Priya")
+        expect(invite.skip_personalization).to eq(true)
+      end
+
       it "persists allow_any_email when given, defaulting to false" do
         invite = Invite.generate(user, email: "test@example.com", allow_any_email: true)
         expect(invite.allow_any_email).to eq(true)
@@ -643,6 +681,27 @@ RSpec.describe Invite do
         expect(Invite.pending(inviter, domain: "nit.ac.in")).to contain_exactly(nit_invite)
         expect(Invite.pending(inviter, domain: "example.com")).to contain_exactly(pending_invite)
       end
+
+      it "filters by delivery status when given, combined with domain" do
+        skipped =
+          Fabricate(
+            :invite,
+            invited_by: inviter,
+            email: "skipped@nit.ac.in",
+            emailed_status: Invite.emailed_status_types[:skipped],
+          )
+        Fabricate(
+          :invite,
+          invited_by: inviter,
+          email: "other@example.com",
+          emailed_status: Invite.emailed_status_types[:skipped],
+        )
+
+        expect(Invite.pending(inviter, status: "skipped").count).to eq(2)
+        expect(Invite.pending(inviter, domain: "nit.ac.in", status: "skipped")).to contain_exactly(
+          skipped,
+        )
+      end
     end
 
     describe "#expired" do
@@ -796,6 +855,12 @@ RSpec.describe Invite do
       expect(invite.delivery_status).to eq("pending")
     end
 
+    it "returns skipped, ignoring any earlier EmailLog, when a send was held back" do
+      Fabricate(:email_log, invite_id: invite.id, email_type: "invite", delivered_at: Time.current)
+      invite.update!(emailed_status: Invite.emailed_status_types[:skipped])
+      expect(invite.delivery_status).to eq("skipped")
+    end
+
     context "when emailed_status is sent" do
       before { invite.update!(emailed_status: Invite.emailed_status_types[:sent]) }
 
@@ -850,6 +915,70 @@ RSpec.describe Invite do
         # explicitly passing nil means "no email log", even if one exists
         expect(invite.delivery_status(nil)).to eq("sent")
       end
+    end
+  end
+
+  describe ".with_delivery_status" do
+    fab!(:inviter, :user)
+
+    def invite_with(status, *logs)
+      invite =
+        Fabricate(
+          :invite,
+          invited_by: inviter,
+          emailed_status: Invite.emailed_status_types.fetch(status),
+        )
+      logs.each_with_index do |attrs, index|
+        Fabricate(
+          :email_log,
+          {
+            invite_id: invite.id,
+            email_type: "invite",
+            created_at: (logs.size - index).hours.ago,
+          }.merge(attrs),
+        )
+      end
+      invite
+    end
+
+    fab!(:invites) do
+      [
+        invite_with(:not_required),
+        invite_with(:pending),
+        invite_with(:bulk_pending),
+        invite_with(:sending),
+        invite_with(:skipped, { delivered_at: Time.current }),
+        invite_with(:sent),
+        invite_with(:sent, {}),
+        invite_with(:sent, { delivered_at: Time.current }),
+        invite_with(:sent, { bounced: true }),
+        invite_with(:sent, { complained_at: Time.current }),
+        invite_with(:sent, { bounced: true, complained_at: Time.current }),
+        # resent after a bounce: only the latest log counts
+        invite_with(:sent, { bounced: true }, { delivered_at: Time.current }),
+        # a non-invite email log must not affect the outcome
+        invite_with(:sent, { email_type: "signup", bounced: true }),
+      ]
+    end
+
+    it "matches #delivery_status for every status" do
+      Invite::DELIVERY_STATUSES.each do |status|
+        expected = invites.select { |invite| invite.reload.delivery_status == status }
+
+        expect(Invite.with_delivery_status(Invite.all, status)).to contain_exactly(*expected),
+        "mismatch for #{status}"
+      end
+    end
+
+    it "covers every invite that has a delivery status" do
+      matched =
+        Invite::DELIVERY_STATUSES.sum { |s| Invite.with_delivery_status(Invite.all, s).count }
+
+      expect(matched).to eq(invites.count { |invite| invite.reload.delivery_status.present? })
+    end
+
+    it "returns nothing for an unknown status" do
+      expect(Invite.with_delivery_status(Invite.all, "nope")).to be_empty
     end
   end
 

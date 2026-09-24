@@ -49,11 +49,18 @@ module Jobs
     def deliver(invite)
       personalized_text = BulkInvitePersonalization::Generator.personalize(invite)
 
-      # A nil result means personalization is off or failed. That must not
-      # wipe a note the inviter wrote, which resend-all reaches.
+      # A nil result means personalization doesn't apply. That must not wipe a
+      # note the inviter wrote, which resend-all reaches.
       invite.update_columns(custom_message: personalized_text) if personalized_text.present?
 
       ::Jobs.enqueue(:invite_email, invite_id: invite.id)
+    rescue BulkInvitePersonalization::Generator::GenerationFailed => e
+      # Handled here rather than in #execute's rescue, which would put the
+      # invite back to :pending and out of this queue for good. :skipped also
+      # moves it off :sending, so recover_stale_sending_invites won't retry it
+      # against a provider that is still failing; an admin resends it instead.
+      Rails.logger.error("[ProcessBulkInviteEmails] invite #{invite.id} skipped -- #{e.message}")
+      invite.update_columns(emailed_status: Invite.emailed_status_types[:skipped])
     end
 
     def reschedule

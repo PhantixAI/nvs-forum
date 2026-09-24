@@ -2358,6 +2358,61 @@ RSpec.describe InvitesController do
       expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
     end
 
+    it "only resends invites with the given delivery status" do
+      freeze_time
+
+      skipped =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          email: "skipped@nit.ac.in",
+          emailed_status: Invite.emailed_status_types[:skipped],
+        )
+      skipped.update!(expires_at: 5.days.from_now)
+      sent =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          email: "sent@nit.ac.in",
+          emailed_status: Invite.emailed_status_types[:sent],
+        )
+      sent.update!(expires_at: 5.days.from_now)
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { status: "skipped" }
+
+      expect(response.status).to eq(200)
+      expect(skipped.reload.expires_at).to eq_time(30.days.from_now)
+      expect(sent.reload.expires_at).to eq_time(5.days.from_now)
+    end
+
+    it "rate limits a status-filtered resend separately from a plain resend of the same domain" do
+      freeze_time
+      Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { domain: "nit.ac.in" }
+      expect(response.parsed_body["errors"]).to_not be_present
+
+      post "/invites/reinvite-all", params: { domain: "nit.ac.in", status: "skipped" }
+      expect(response.parsed_body["errors"]).to_not be_present
+
+      post "/invites/reinvite-all", params: { domain: "nit.ac.in", status: "skipped" }
+      expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
+    end
+
+    it "ignores an unknown status param" do
+      freeze_time
+      invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      invite.update!(expires_at: 5.days.from_now)
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { status: "'; DROP TABLE invites; --" }
+
+      expect(response.status).to eq(200)
+      expect(invite.reload.expires_at).to eq_time(30.days.from_now)
+    end
+
     it "returns an error when allow_email_invites is disabled" do
       SiteSetting.allow_email_invites = false
       sign_in(admin)

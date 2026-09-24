@@ -28,6 +28,7 @@ export default class UserInvitedShowController extends Controller {
   @tracked invitesLoading = false;
   @tracked filter = null;
   @tracked selectedDomain = null;
+  @tracked selectedStatus = null;
 
   user = null;
   model = null;
@@ -104,13 +105,17 @@ export default class UserInvitedShowController extends Controller {
     return this.model.invites.length > 0 && this.currentUser.staff;
   }
 
-  @computed("invitesCount", "filter", "selectedDomain")
+  @computed("invitesCount", "filter", "selectedDomain", "selectedStatus")
   get showSearch() {
-    // Keep visible once a domain is selected even if it narrows the count to
+    // Keep visible once a filter is selected even if it narrows the count to
     // <=5 (or 0) -- otherwise .user-invite-search's margin-right: auto (the
     // flex anchor that right-aligns .user-invite-buttons) disappears along
     // with it, and the whole button row snaps to the left.
-    return this.invitesCount[this.filter] > 5 || Boolean(this.selectedDomain);
+    return (
+      this.invitesCount[this.filter] > 5 ||
+      Boolean(this.selectedDomain) ||
+      Boolean(this.selectedStatus)
+    );
   }
 
   @computed("model.available_domains")
@@ -127,6 +132,25 @@ export default class UserInvitedShowController extends Controller {
     // a domain filter that narrows the current tab to zero results must stay
     // visible, or there would be no way to clear it again.
     return this.currentUser?.staff && this.domainOptions.length > 0;
+  }
+
+  @computed("model.available_statuses")
+  get statusOptions() {
+    return (this.model?.available_statuses || []).map((status) => ({
+      id: status,
+      name: i18n(`user.invited.delivery_status_${status}`),
+    }));
+  }
+
+  @computed("statusOptions", "currentUser.staff", "filter")
+  get showStatusFilter() {
+    // Redeemed invites don't show a delivery status, so there's nothing to
+    // filter by on that tab.
+    return (
+      this.currentUser?.staff &&
+      this.filter !== "redeemed" &&
+      this.statusOptions.length > 0
+    );
   }
 
   @observes("searchTerm")
@@ -195,21 +219,30 @@ export default class UserInvitedShowController extends Controller {
   @action
   reinviteAll() {
     const domain = this.selectedDomain;
+    const status = this.selectedStatus;
     this.dialog.yesNoConfirm({
-      message: domain
-        ? i18n("user.invited.reinvite_all_confirm_domain", { domain })
-        : i18n("user.invited.reinvite_all_confirm"),
+      message: this.#reinviteAllConfirmMessage(domain, status),
       didConfirm: () => {
-        return Invite.reinviteAll(domain)
+        return Invite.reinviteAll(domain, status)
           .then(() => this.set("reinvitedAll", true))
           .catch(popupAjaxError);
       },
     });
   }
 
+  // A resend is rate-limited per domain and status, so a new filter gets its
+  // own "Resend invites" button back.
   @action
   domainChanged(domain) {
     this.selectedDomain = domain;
+    this.set("reinvitedAll", false);
+    this._refetch();
+  }
+
+  @action
+  statusChanged(status) {
+    this.selectedStatus = status;
+    this.set("reinvitedAll", false);
     this._refetch();
   }
 
@@ -226,7 +259,8 @@ export default class UserInvitedShowController extends Controller {
           this.filter,
           this.searchTerm,
           model.invites.length,
-          this.selectedDomain
+          this.selectedDomain,
+          this.selectedStatus
         );
         const inviteList = result.invites;
 
@@ -245,6 +279,25 @@ export default class UserInvitedShowController extends Controller {
     }
   }
 
+  #reinviteAllConfirmMessage(domain, status) {
+    const statusLabel =
+      status && i18n(`user.invited.delivery_status_${status}`);
+
+    if (domain && status) {
+      return i18n("user.invited.reinvite_all_confirm_domain_status", {
+        domain,
+        status: statusLabel,
+      });
+    } else if (status) {
+      return i18n("user.invited.reinvite_all_confirm_status", {
+        status: statusLabel,
+      });
+    } else if (domain) {
+      return i18n("user.invited.reinvite_all_confirm_domain", { domain });
+    }
+    return i18n("user.invited.reinvite_all_confirm");
+  }
+
   @debounce(INPUT_DELAY)
   _refetch() {
     Invite.findInvitedBy(
@@ -252,19 +305,20 @@ export default class UserInvitedShowController extends Controller {
       this.filter,
       this.searchTerm,
       null,
-      this.selectedDomain
+      this.selectedDomain,
+      this.selectedStatus
     ).then((invites) => {
       this.set("model", invites);
-      // Unlike searchTerm, a domain filter also narrows the tab counts
-      // (see UsersController#invited). The visible "Pending (n)" tab labels
-      // are rendered by the parent user-invited controller's own
+      // Unlike searchTerm, the domain and status filters also narrow the tab
+      // counts (see UsersController#invited). The visible "Pending (n)" tab
+      // labels are rendered by the parent user-invited controller's own
       // invitesCount (set once by the route on initial load), not this
       // controller's -- both need updating, this one for showSearch.
       this.set("invitesCount", invites.counts);
       this.userInvitedController.set("invitesCount", invites.counts);
       this.userInvitedController.set(
         "domainFilterActive",
-        Boolean(this.selectedDomain)
+        Boolean(this.selectedDomain || this.selectedStatus)
       );
     });
   }

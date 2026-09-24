@@ -20,6 +20,8 @@ class Invite < ActiveRecord::Base
   BULK_INVITE_EMAIL_LIMIT = 200
   DOMAIN_REGEX =
     /\A(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)+([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])\z/
+  # Every value Invite#delivery_status can return, in pipeline order.
+  DELIVERY_STATUSES = %w[scheduled pending skipped sent delivered bounced complained].freeze
   DESCRIPTION_MAX_LENGTH = 100
   RECIPIENT_NAME_MAX_LENGTH = 100
   RECIPIENT_KEYWORDS_MAX_LENGTH = 255
@@ -74,7 +76,7 @@ class Invite < ActiveRecord::Base
 
   def self.emailed_status_types
     @emailed_status_types ||=
-      Enum.new(not_required: 0, pending: 1, bulk_pending: 2, sending: 3, sent: 4)
+      Enum.new(not_required: 0, pending: 1, bulk_pending: 2, sending: 3, sent: 4, skipped: 5)
   end
 
   def user_doesnt_already_exist
@@ -189,6 +191,11 @@ class Invite < ActiveRecord::Base
 
     if invite
       was_admin = invite.admin?
+      # A re-upload (or resend) of an existing invite must be able to change
+      # the per-row personalization context. Only keys actually passed are
+      # touched, so callers that don't know about them leave them alone.
+      context = opts.slice(:recipient_name, :recipient_keywords, :skip_personalization)
+      invite.update!(context) if context.present?
       invite.update_columns(
         created_at: Time.zone.now,
         updated_at: Time.zone.now,
@@ -290,7 +297,7 @@ class Invite < ActiveRecord::Base
     User.with_email(Email.downcase(email)).where(staged: false).first
   end
 
-  def self.pending(inviter, domain: nil)
+  def self.pending(inviter, domain: nil, status: nil)
     invites =
       Invite
         .distinct
@@ -301,10 +308,11 @@ class Invite < ActiveRecord::Base
         .where("expires_at > ?", Time.zone.now)
         .order("invites.updated_at DESC")
     invites = invites.where(email_domain: domain) if domain.present?
+    invites = with_delivery_status(invites, status) if status.present?
     invites
   end
 
-  def self.expired(inviter, domain: nil)
+  def self.expired(inviter, domain: nil, status: nil)
     invites =
       Invite
         .distinct
@@ -315,6 +323,7 @@ class Invite < ActiveRecord::Base
         .where("expires_at < ?", Time.zone.now)
         .order("invites.expires_at ASC")
     invites = invites.where(email_domain: domain) if domain.present?
+    invites = with_delivery_status(invites, status) if status.present?
     invites
   end
 
@@ -398,12 +407,60 @@ class Invite < ActiveRecord::Base
       "scheduled"
     when Invite.emailed_status_types[:sending]
       "pending"
+    when Invite.emailed_status_types[:skipped]
+      "skipped"
     else
       return "sent" if email_log.nil?
       return "complained" if email_log.complained_at
       return "bounced" if email_log.bounced?
       return "delivered" if email_log.delivered_at
       "sent"
+    end
+  end
+
+  # SQL counterpart of #delivery_status for filtering a relation of invites.
+  # The two must stay in step -- spec/models/invite_spec.rb checks every
+  # status against both.
+  def self.with_delivery_status(relation, status)
+    types = emailed_status_types
+
+    case status.to_s
+    when "scheduled"
+      relation.where(emailed_status: [types[:pending], types[:bulk_pending]])
+    when "pending"
+      relation.where(emailed_status: types[:sending])
+    when "skipped"
+      relation.where(emailed_status: types[:skipped])
+    when "sent", "delivered", "bounced", "complained"
+      outcome =
+        case status.to_s
+        when "complained"
+          "latest_log.complained_at IS NOT NULL"
+        when "bounced"
+          "latest_log.complained_at IS NULL AND latest_log.bounced"
+        when "delivered"
+          "latest_log.complained_at IS NULL AND NOT latest_log.bounced AND latest_log.delivered_at IS NOT NULL"
+        when "sent"
+          "latest_log.id IS NULL OR (latest_log.complained_at IS NULL AND NOT latest_log.bounced AND latest_log.delivered_at IS NULL)"
+        end
+
+      relation
+        .joins(<<~SQL)
+          LEFT JOIN LATERAL (
+            SELECT email_logs.id, email_logs.complained_at, email_logs.bounced, email_logs.delivered_at
+            FROM email_logs
+            WHERE email_logs.invite_id = invites.id AND email_logs.email_type = 'invite'
+            ORDER BY email_logs.created_at DESC
+            LIMIT 1
+          ) latest_log ON TRUE
+        SQL
+        .where(
+          "invites.emailed_status IS NULL OR invites.emailed_status NOT IN (?)",
+          types.values_at(:not_required, :pending, :bulk_pending, :sending, :skipped),
+        )
+        .where(outcome)
+    else
+      relation.none
     end
   end
 
