@@ -7,11 +7,14 @@ module BulkInvitePersonalization
   # Jobs::ProcessBulkInviteEmails -- never from Jobs::BulkInvite, which can be
   # processing thousands of rows in a single job run.
   #
-  # Fails safe at every step: any missing prerequisite (plugin disabled,
-  # feature off, no template, no LLM configured) or any error from the LLM
-  # call itself returns nil rather than raising, so a bulk invite always still
-  # sends via the plain, non-personalized template as a fallback.
+  # A missing prerequisite (plugin disabled, feature off, no template, no LLM
+  # configured) or a response the validator rejects returns nil, and the
+  # invite sends with the plain template. An error from the LLM call itself
+  # raises GenerationFailed instead, so the caller can hold the invite back
+  # rather than quietly sending it unpersonalized during an outage.
   module Generator
+    GenerationFailed = Class.new(StandardError)
+
     # Gemini's "interactions" endpoints spend part of this budget on an
     # internal reasoning step before any visible text is produced -- a small
     # budget lets reasoning consume the whole allowance and truncates the
@@ -35,9 +38,9 @@ module BulkInvitePersonalization
       ResponseValidator.clean(response)
     rescue StandardError => e
       Rails.logger.warn(
-        "[BulkInvitePersonalization] failed to personalize invite #{invite.id}: #{e.message}",
+        "[BulkInvitePersonalization] failed to personalize invite #{invite.id}: #{e.class}: #{e.message}",
       )
-      nil
+      raise GenerationFailed, "#{e.class}: #{e.message}"
     end
 
     def self.enabled?
