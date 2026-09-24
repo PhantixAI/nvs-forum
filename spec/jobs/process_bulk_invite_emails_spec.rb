@@ -99,6 +99,42 @@ RSpec.describe Jobs::ProcessBulkInviteEmails do
       expect(invite.reload.custom_message).to eq("Looking forward to having you.")
     end
 
+    it "skips an invite whose personalization fails, without sending it, and keeps the chain going" do
+      invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
+      later_invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
+
+      BulkInvitePersonalization::Generator.stubs(:personalize).raises(
+        BulkInvitePersonalization::Generator::GenerationFailed,
+        "spend cap exceeded",
+      )
+
+      described_class.new.execute({})
+
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:skipped])
+      expect(invite.delivery_status).to eq("skipped")
+      expect(Jobs::InviteEmail.jobs.size).to eq(0)
+      expect(later_invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+      expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
+    end
+
+    it "does not retry a skipped invite on the next run" do
+      invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
+
+      BulkInvitePersonalization::Generator.stubs(:personalize).raises(
+        BulkInvitePersonalization::Generator::GenerationFailed,
+        "spend cap exceeded",
+      )
+
+      described_class.new.execute({})
+      Jobs::ProcessBulkInviteEmails.jobs.clear
+      described_class.new.execute({})
+
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:skipped])
+      expect(Jobs::InviteEmail.jobs.size).to eq(0)
+    end
+
+    # Covers an unexpected error elsewhere in #deliver, which #execute's own
+    # rescue still handles.
     it "moves an invite that fails to send to pending and keeps the chain going" do
       invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
       later_invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
