@@ -1522,6 +1522,69 @@ campaign.
   exclusive with `email` via `email_xor_domain`) is untouched -- this feature only
   reads/writes the new `email_domain` column.
 
+### Extension: Skip on Personalization Failure + Delivery Status Filter
+
+**Requirement**: the Gemini key hit its monthly spend cap mid-campaign. Every
+call returned a 429, the generator swallowed it, and each invite quietly went
+out with the plain template, with nothing visible to the admin. When the AI
+call itself fails, the invite should be held back, marked, and easy to find
+and resend once the provider is working again. Admins also need to filter the
+invite list by the delivery status they already see as a pill.
+
+**Implementation**:
+
+- **New `emailed_status` value `skipped: 5`**. It's a plain integer column with
+  no check constraint, so no migration.
+- **`Generator.personalize`** still returns `nil` for every "doesn't apply"
+  case (row opted out, feature off, blank template, no LLM, validator rejected
+  the output). Only an exception from the LLM call now raises
+  `Generator::GenerationFailed` (after the existing warn log). A 429 can't be
+  told apart from other failures cleanly: discourse-ai's `CompletionFailed`
+  only carries the raw response body. So any failed call counts.
+- **`ProcessBulkInviteEmails#deliver`** rescues `GenerationFailed` itself,
+  logs `[ProcessBulkInviteEmails] invite <id> skipped -- <error>` and sets
+  `:skipped` without enqueueing `:invite_email`. It has to be caught there:
+  `#execute`'s generic rescue sets `:pending`, which drops the invite out of
+  the `:bulk_pending` queue. Leaving `:sending` right away also stops
+  `recover_stale_sending_invites` from retrying it against a provider that's
+  still failing.
+- **`Invite#delivery_status`** returns `"skipped"` for it, ahead of the
+  catch-all branch that would otherwise report it as sent.
+- **`Invite::DELIVERY_STATUSES`** lists every value `#delivery_status` can
+  return. **`Invite.with_delivery_status(relation, status)`** is the SQL
+  version of the same mapping. The four pipeline statuses are plain column
+  filters. `sent`/`delivered`/`bounced`/`complained` join the invite's latest
+  `invite`-type `EmailLog` with a `LEFT JOIN LATERAL`, covered by the existing
+  `index_email_logs_on_invite_id`. A parity spec checks the two
+  implementations agree for every status.
+- `emailed_status` and `email_logs` stay separate on purpose (see the comment
+  above `Invite#delivery_status`): they're written by different code at
+  different times (the mailer vs. SES webhooks, possibly days apart), and an
+  invite can have several logs from resends. The filter joins them at read
+  time instead.
+- **`UsersController#invited`**: `params[:status]` is validated against
+  `DELIVERY_STATUSES` and passed to `Invite.pending`/`.expired` and their tab
+  counts. The Redeemed tab has no delivery status, so it ignores it.
+  `available_statuses` is the fixed list, not a query.
+- **`InvitesController#resend_all_invites`** takes the same `status`, so
+  "Resend invites" with "Skipped" selected resends only those. Status is part
+  of the daily rate-limit key (`bulk-reinvite-per-day[-domain][-status]`).
+  Retrying skipped invites after an outage isn't blocked by an ordinary resend
+  earlier that day. Existing keys are unchanged.
+- Frontend: a second `ComboBox` ("All statuses") next to the domain filter on
+  the Pending and Expired tabs, wired like the domain one through
+  `findInvitedBy`, `loadMore`, `reinviteAll` and the confirm dialog. The pill
+  helper now also renders "Sent" and "Skipped".
+
+**Edge cases**:
+
+- A skipped invite stays skipped until someone resends it; nothing retries it
+  automatically. A resend with paced resend off sends it immediately, without
+  personalization. With `bulk_invite_paced_resend_enabled` on, it goes back
+  through the queue and is personalized again.
+- A failure to reach the LLM at all (e.g. `LlmModel` lookup raising) also
+  counts as a failed call, since it happens inside the same rescue.
+
 ## 11. Name-Based Usernames at Email-Code Signup + Locked Full-Name Requirement
 
 ### Requirement
@@ -1689,9 +1752,10 @@ notifications; `"Delivery"` and `"Complaint"` were silently ignored.
 ### Edge cases
 
 - Until the AWS-side SNS/SES wiring below is done for a site,
-  `delivery_status` for a sent invite stays `"sent"` — the pill helper
-  deliberately renders nothing for that state, so the new column is blank for
-  existing data until wiring lands, rather than showing a misleading pill.
+  `delivery_status` for a sent invite stays `"sent"`. The pill helper
+  originally rendered nothing for that state, but a blank column looked the
+  same as "nothing happened", so it now shows a neutral "Sent" pill (§10
+  extension: Skip on Personalization Failure).
 - The allowlist/authenticity checks run twice (once in
   `WebhooksController#aws` before enqueueing, again inside the job) —
   intentional defense-in-depth, left as-is.
@@ -1701,8 +1765,17 @@ notifications; `"Delivery"` and `"Complaint"` were silently ignored.
   Delivery and Complaint events to it, and set `aws_sns_topic_arn_allowlist`
   *before* confirming the subscription (`Jobs::ConfirmSnsSubscription` only
   proceeds for allowlisted topics). Verify with SES's simulator addresses
-  (`bounce@`/`complaint@`/`success@simulator.amazonses.com`). Not done yet as
-  of this writing — infrastructure work, not code.
+  (`bounce@`/`complaint@`/`success@simulator.amazonses.com`).
+- Status as of 2026-09-23 (checked with `aws ses
+  get-identity-notification-attributes`): all three identities (`nitians.in`,
+  `iitians.in`, `navodians.com`) publish Bounce and Complaint to their
+  `*-ses-bounces` topic, the HTTPS subscriptions are confirmed, and the topics
+  are allowlisted. **Delivery is not configured** (no `DeliveryTopic`, no
+  configuration sets), so `delivered_at` is never set and no invite has ever
+  shown "Delivered". Fix, per identity, reusing the same topic:
+  `aws ses set-identity-notification-topic --identity nitians.in
+  --notification-type Delivery --sns-topic <that site's *-ses-bounces ARN>`.
+  Only emails sent after the change are affected.
 
 ## 14. Cursor-Forum Look: Header Search, Cursor's Colours and Type (Foundation)
 

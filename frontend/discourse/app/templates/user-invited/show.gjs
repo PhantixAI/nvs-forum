@@ -77,6 +77,15 @@ export default <template>
               @value={{@controller.selectedDomain}}
             />
           {{/if}}
+          {{#if @controller.showStatusFilter}}
+            <ComboBox
+              class="invite-status-filter"
+              @content={{@controller.statusOptions}}
+              @onChange={{@controller.statusChanged}}
+              @options={{hash none="user.invited.all_statuses"}}
+              @value={{@controller.selectedStatus}}
+            />
+          {{/if}}
           {{#if @controller.showBulkActionButtons}}
             {{#if @controller.inviteExpired}}
               <DButton
