@@ -24,7 +24,7 @@ class UserApiKey::DeviceAuth::RequestValidator
     validate_requested_scopes!(scopes)
     validate_client_scopes!(client, scopes)
     validate_padding!(params[:padding])
-    validate_platform!(params[:platform])
+    validate_platform!(params[:platform], scopes)
     validate_public_key_constraints!(
       UserApiKey::DeviceAuth::Crypto.parse_public_key!(public_key_str(params, client)),
     )
@@ -56,10 +56,22 @@ class UserApiKey::DeviceAuth::RequestValidator
     raise Discourse::InvalidParameters.new(:padding)
   end
 
-  def self.validate_platform!(platform)
-    return if platform.blank? || UserApiKey::ALLOWED_PUSH_PLATFORMS.include?(platform)
+  # A push/notifications scope requires a platform -- KeyCreator writes
+  # push_url: grant.platform with no other fallback, so a push-scoped grant
+  # with a blank platform (e.g. a legacy client still sending the old
+  # push_url param instead) would otherwise silently create a UserApiKey
+  # that can never pass UserApiKey#has_push?.
+  def self.validate_platform!(platform, scopes)
+    if platform.blank?
+      if (UserApiKey::PUSH_SCOPE_NAMES & scopes).present?
+        raise Discourse::InvalidParameters.new(:platform)
+      end
+      return
+    end
 
-    raise Discourse::InvalidParameters.new(:platform)
+    if UserApiKey::ALLOWED_PUSH_PLATFORMS.exclude?(platform)
+      raise Discourse::InvalidParameters.new(:platform)
+    end
   end
 
   def self.validate_public_key_constraints!(public_key)

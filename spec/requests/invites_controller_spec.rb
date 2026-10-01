@@ -2375,6 +2375,41 @@ RSpec.describe InvitesController do
       expect(iitb_invite.reload.expires_at).to eq_time(5.days.from_now)
     end
 
+    it "resends across multiple institute domains when the ac.in umbrella domain is given" do
+      freeze_time
+
+      nit_invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      nit_invite.update!(expires_at: 5.days.from_now)
+      iitb_invite = Fabricate(:invite, invited_by: admin, email: "student@iitb.ac.in")
+      iitb_invite.update!(expires_at: 5.days.from_now)
+      other_invite = Fabricate(:invite, invited_by: admin, email: "student@example.com")
+      other_invite.update!(expires_at: 5.days.from_now)
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { domain: "ac.in" }
+
+      expect(response.status).to eq(200)
+      expect(nit_invite.reload.expires_at).to eq_time(30.days.from_now)
+      expect(iitb_invite.reload.expires_at).to eq_time(30.days.from_now)
+      expect(other_invite.reload.expires_at).to eq_time(5.days.from_now)
+    end
+
+    it "rate limits the ac.in umbrella resend independently from an individual institute's resend" do
+      start = Time.now
+      freeze_time(start)
+
+      Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { domain: "nit.ac.in" }
+      expect(response.parsed_body["errors"]).to_not be_present
+
+      # Deliberately independent, same as any other two distinct domain
+      # strings -- see the rate_limit_key comment in #resend_all_invites.
+      post "/invites/reinvite-all", params: { domain: "ac.in" }
+      expect(response.parsed_body["errors"]).to_not be_present
+    end
+
     it "rate limits per domain independently, so two different domains can each resend the same day" do
       start = Time.now
       freeze_time(start)
@@ -2593,11 +2628,15 @@ RSpec.describe InvitesController do
         expect(Jobs::BulkInvite.jobs.size).to eq(1)
       end
 
-      it "allows moderator to bulk invite" do
-        sign_in(Fabricate(:moderator))
+      it "allows a moderator to bulk invite, but holds it for review instead of enqueuing it directly" do
+        moderator = Fabricate(:moderator)
+        sign_in(moderator)
         post "/invites/upload_csv.json", params: { file: file, name: "discourse.csv" }
+
         expect(response.status).to eq(200)
-        expect(Jobs::BulkInvite.jobs.size).to eq(1)
+        expect(response.parsed_body["pending_review"]).to eq(true)
+        expect(Jobs::BulkInvite.jobs).to be_empty
+        expect(ReviewableBulkInvite.where(created_by_id: moderator.id)).to be_present
       end
 
       it "holds a batch moderator's upload for review instead of enqueuing it directly" do

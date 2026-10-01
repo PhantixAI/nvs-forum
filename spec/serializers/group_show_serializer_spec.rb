@@ -47,9 +47,25 @@ RSpec.describe GroupShowSerializer do
       # same as `false`) rather than explicitly overridden.
       expect(owner_json[:group_show][:can_admin_group]).to eq(nil)
       expect(owner_json[:group_show][:is_group_owner]).to eq(false)
-      # `is_group_owner_display` is a separate, informational-only field (not
-      # a permission gate) and should keep reflecting real ownership.
+      # `is_group_owner_display` keeps reflecting real ownership -- it's what
+      # the owner-gated notification-preference attributes below key off of,
+      # precisely so this group-management-UI override doesn't also strip
+      # those unrelated attributes for a real owner.
       expect(owner_json[:group_show][:is_group_owner_display]).to eq(true)
+    end
+
+    it "still serializes the group's own owner-gated notification defaults for its real owner" do
+      category = Fabricate(:category)
+      GroupCategoryNotificationDefault.create!(
+        group: group,
+        category: category,
+        notification_level: GroupCategoryNotificationDefault.notification_levels[:watching],
+      )
+
+      owner_json = GroupShowSerializer.new(group, scope: owner.guardian).as_json
+
+      expect(owner_json[:group_show][:is_group_owner]).to eq(false)
+      expect(owner_json[:group_show][:watching_category_ids]).to eq([category.id])
     end
 
     it "reports false (not omitted) for a moderator who can normally manage groups" do

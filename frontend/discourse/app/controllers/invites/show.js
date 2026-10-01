@@ -220,14 +220,16 @@ export default class InvitesShowController extends Controller {
   }
 
   // Mirrors signup.js's `showRightSide`: offer social login alongside the
-  // form whenever a provider is configured, not only when it's the sole
-  // option (externalAuthsOnly) -- redemption itself is unaffected either
-  // way, since `submit()` only cares that the user is authenticated.
+  // form whenever a provider is configured. externalAuthsOnly is excluded
+  // because that case already renders its own exclusive LoginButtons block
+  // above the form (see the `externalAuthsOnly` block in the template) --
+  // without this exclusion, both blocks would render at once there.
   // DiscourseConnect is excluded because it forces its own SSO redirect
   // flow (see the `discourseConnectEnabled` block below), which social
   // login buttons would just be a confusing, non-functional alternative to.
   @computed(
     "externalAuthsEnabled",
+    "externalAuthsOnly",
     "authOptions",
     "discourseConnectEnabled",
     "successMessage"
@@ -235,6 +237,7 @@ export default class InvitesShowController extends Controller {
   get showSocialLoginButtons() {
     return (
       this.externalAuthsEnabled &&
+      !this.externalAuthsOnly &&
       !this.authOptions &&
       !this.discourseConnectEnabled &&
       !this.successMessage

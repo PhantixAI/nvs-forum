@@ -108,7 +108,12 @@ module BulkInvitePersonalization
     private_class_method :system_message
 
     def self.user_message(invite)
-      lines = ["Recipient email domain: #{invite.email.to_s.split("@").last}"]
+      # allow_any_email rows store the real address in `description`, not
+      # `email` (which is nil so the invite is redeemable by anyone -- see
+      # Jobs::BulkInvite#send_invite) -- fall back to it so these rows don't
+      # silently lose domain context from the prompt.
+      recipient_address = invite.email.presence || invite.description
+      lines = ["Recipient email domain: #{recipient_address.to_s.split("@").last}"]
       lines << "Recipient name: #{invite.recipient_name}" if invite.recipient_name.present?
       if invite.recipient_keywords.present?
         lines << "Additional context: #{invite.recipient_keywords}"

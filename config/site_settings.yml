@@ -4300,6 +4300,17 @@ uncategorized:
     depends_behavior: "hidden"
     dependent_setting_display: "inline"
 
+  institute_acronyms:
+    default: "NIT|IIT|MNIT|VNIT|SVNIT|MANIT|NITK|NITT|NITW|NITJ|NITP|NITH|NITD|NITC|IIIT|IIM|IISC|BITS"
+    type: list
+    list_type: compact
+    client: false
+    area: "users"
+    depends_on:
+      - bulk_invite_ai_personalization_enabled
+    depends_behavior: "hidden"
+    dependent_setting_display: "inline"
+
   bulk_invite_ai_personalization_rules:
     default: |
       - Output strictly plain text. No HTML tags, no Markdown formatting (no asterisks, headers, bullet lists, or links in brackets), no tracking pixels.

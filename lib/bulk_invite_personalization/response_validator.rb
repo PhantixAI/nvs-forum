@@ -11,7 +11,8 @@ module BulkInvitePersonalization
 
     URL_PATTERN = %r{https?://|www\.|\b[a-z0-9-]+\.(?:com|org|net|edu|io|co|ac\.in|in)\b}i
     MARKDOWN_PATTERN = /\*\*|`|\[.+?\]\(|^\s*[-*]\s|^\#{1,6}\s/
-    SHOUTING_PATTERN = /!|\$|\b[A-Z]{4,}\b/
+    PUNCTUATION_SHOUTING_PATTERN = /!|\$/
+    ALL_CAPS_WORD_PATTERN = /\b[A-Z]{4,}\b/
     SENTENCE_BOUNDARY = /[.?]/
 
     def self.clean(text)
@@ -23,10 +24,18 @@ module BulkInvitePersonalization
 
       return nil if text.match?(URL_PATTERN)
       return nil if text.match?(MARKDOWN_PATTERN)
-      return nil if text.match?(SHOUTING_PATTERN)
+      return nil if shouting?(text)
 
       truncate_to_word_limit(text)
     end
+
+    def self.shouting?(text)
+      return true if text.match?(PUNCTUATION_SHOUTING_PATTERN)
+
+      allowlist = SiteSetting.institute_acronyms.split("|")
+      text.scan(ALL_CAPS_WORD_PATTERN).any? { |word| !allowlist.include?(word) }
+    end
+    private_class_method :shouting?
 
     def self.truncate_to_word_limit(text)
       words = text.split(" ")
