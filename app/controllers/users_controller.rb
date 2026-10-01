@@ -617,12 +617,23 @@ class UsersController < ApplicationController
       # isn't visibility-checked itself.
       available_domains =
         if can_see_invite_details
-          Invite
-            .where(invited_by_id: inviter.id)
-            .where.not(email_domain: nil)
-            .distinct
-            .order(:email_domain)
-            .pluck(:email_domain)
+          domains =
+            Invite
+              .where(invited_by_id: inviter.id)
+              .where.not(email_domain: nil)
+              .distinct
+              .order(:email_domain)
+              .pluck(:email_domain)
+          # "ac.in" is an umbrella option (see Invite.domain_filter_condition)
+          # that never appears verbatim as its own email_domain row -- only
+          # offer it when the inviter actually has a matching *.ac.in invite.
+          if domains.any? { |d|
+               d == Invite::AC_IN_UMBRELLA_DOMAIN ||
+                 d.end_with?(".#{Invite::AC_IN_UMBRELLA_DOMAIN}")
+             }
+            domains = [Invite::AC_IN_UMBRELLA_DOMAIN] + domains
+          end
+          domains
         else
           []
         end

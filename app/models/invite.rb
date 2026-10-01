@@ -20,6 +20,10 @@ class Invite < ActiveRecord::Base
   BULK_INVITE_EMAIL_LIMIT = 200
   DOMAIN_REGEX =
     /\A(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)+([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])\z/
+  # Selecting this in the domain filter is an umbrella match (see
+  # domain_filter_condition) covering every *.ac.in institute domain in one
+  # view, not just a literal "ac.in" address.
+  AC_IN_UMBRELLA_DOMAIN = "ac.in"
   # Every value Invite#delivery_status can return, in pipeline order.
   DELIVERY_STATUSES = %w[scheduled pending skipped sent delivered bounced complained].freeze
   DESCRIPTION_MAX_LENGTH = 100
@@ -58,9 +62,19 @@ class Invite < ActiveRecord::Base
   end
 
   before_save do
-    if will_save_change_to_email?
-      self.email_token = email.present? ? SecureRandom.hex : nil
-      self.email_domain = email.present? ? email.split("@").last : nil
+    self.email_token = email.present? ? SecureRandom.hex : nil if will_save_change_to_email?
+
+    if will_save_change_to_email? || will_save_change_to_description?
+      # allow_any_email rows (and legacy rows predating that column) leave
+      # email nil and stash the real intended address in description
+      # instead -- fall back to it so the domain filter/resend feature can
+      # still find these invites. Only when description actually looks like
+      # an email address, so a generic invite-link's free-text description
+      # doesn't get misread as a domain.
+      domain_source =
+        email.presence ||
+          (description if description.present? && EmailAddressValidator.valid_value?(description))
+      self.email_domain = domain_source&.split("@")&.last&.downcase
     end
   end
 
@@ -307,7 +321,7 @@ class Invite < ActiveRecord::Base
         .where("redemption_count < max_redemptions_allowed")
         .where("expires_at > ?", Time.zone.now)
         .order("invites.updated_at DESC")
-    invites = invites.where(email_domain: domain) if domain.present?
+    invites = invites.where(*domain_filter_condition(domain)) if domain.present?
     invites = with_delivery_status(invites, status) if status.present?
     invites
   end
@@ -322,7 +336,7 @@ class Invite < ActiveRecord::Base
         .where("redemption_count < max_redemptions_allowed")
         .where("expires_at < ?", Time.zone.now)
         .order("invites.expires_at ASC")
-    invites = invites.where(email_domain: domain) if domain.present?
+    invites = invites.where(*domain_filter_condition(domain)) if domain.present?
     invites = with_delivery_status(invites, status) if status.present?
     invites
   end
@@ -338,9 +352,26 @@ class Invite < ActiveRecord::Base
         .references("invite")
         .references("user")
         .references("user_stat")
-    invited_users = invited_users.where("invites.email_domain = ?", domain) if domain.present?
+    invited_users = invited_users.where(*domain_filter_condition(domain)) if domain.present?
     invited_users
   end
+
+  # Shared by pending/expired/redeemed_users so the "ac.in" umbrella special
+  # case lives in exactly one place. The LIKE branch has a leading wildcard,
+  # so it can't use a standard btree index on email_domain -- a sequential
+  # scan per inviter is acceptable at current scale (thousands, not millions,
+  # of invites), but worth knowing if that scale changes.
+  def self.domain_filter_condition(domain)
+    if domain == AC_IN_UMBRELLA_DOMAIN
+      [
+        "invites.email_domain = :domain OR invites.email_domain LIKE :suffix",
+        { domain: domain, suffix: "%.#{domain}" },
+      ]
+    else
+      ["invites.email_domain = :domain", { domain: domain }]
+    end
+  end
+  private_class_method :domain_filter_condition
 
   def self.invalidate_for_email(email)
     Invite.find_by(email: Email.downcase(email))&.invalidate!

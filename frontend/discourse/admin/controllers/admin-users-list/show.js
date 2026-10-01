@@ -1,6 +1,7 @@
 import { tracked } from "@glimmer/tracking";
 import Controller from "@ember/controller";
-import { action } from "@ember/object";
+import { action, computed } from "@ember/object";
+import { dependentKeyCompat } from "@ember/object/compat";
 import { trackedArray } from "@ember/reactive/collections";
 import { service } from "@ember/service";
 import BulkUserDeleteConfirmation from "discourse/admin/components/bulk-user-delete-confirmation";

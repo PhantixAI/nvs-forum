@@ -6,6 +6,7 @@ class UserApiKey < ActiveRecord::Base
   # source of truth so the write-side validators and this read-side filter
   # can't drift apart again.
   ALLOWED_PUSH_PLATFORMS = %w[ios android].freeze
+  PUSH_SCOPE_NAMES = %w[push notifications].freeze
 
   self.ignored_columns = [
     "client_id", # TODO: Add post-migration to remove column after 3.4.0 stable release (not before early 2025)
@@ -66,7 +67,7 @@ class UserApiKey < ActiveRecord::Base
   end
 
   def has_push?
-    scopes.any? { |s| s.name == "push" || s.name == "notifications" } &&
+    scopes.any? { |s| PUSH_SCOPE_NAMES.include?(s.name) } &&
       ALLOWED_PUSH_PLATFORMS.include?(push_url)
   end
 

@@ -542,6 +542,10 @@ class InvitesController < ApplicationController
       # resending everyone) still only gets one shot each. Status is part of
       # the key too, so retrying the "skipped" invites after a provider
       # outage isn't blocked by an ordinary resend earlier the same day.
+      # The "ac.in" umbrella domain (see Invite.domain_filter_condition)
+      # forms its own independent bucket here too, same as any other domain
+      # string -- resending it doesn't double-count against (or get blocked
+      # by) an individual institute's own bucket, by design.
       rate_limit_key = ["bulk-reinvite-per-day", domain, status].compact.join("-")
       RateLimiter.new(current_user, rate_limit_key, 1, 1.day, apply_limit_to_staff: true).performed!
     rescue RateLimiter::LimitExceeded
@@ -627,12 +631,15 @@ class InvitesController < ApplicationController
           )
         end
 
-        pending_review = !guardian.is_staff?
+        # Only admins skip review. Regular moderators can reach this action
+        # (can_bulk_invite_to_forum? was widened to is_staff? to let them
+        # bulk-invite at all -- see "Allow moderators to bulk invite users
+        # via CSV"), and Batch Moderators can reach it too (see
+        # BatchModeration::GuardianExtension#can_bulk_invite_to_forum?), but
+        # neither is trusted to skip review the way an admin is -- the
+        # review step is the access control for everyone except admins.
+        pending_review = !guardian.is_admin?
         if pending_review
-          # Batch Moderators can reach this action (see
-          # BatchModeration::GuardianExtension#can_bulk_invite_to_forum?),
-          # but their invites are held for staff approval instead of being
-          # processed immediately -- the review step is the access control.
           ReviewableBulkInvite.submit!(actor: current_user, invites: invites, raw_csv: raw_csv)
         else
           Jobs.enqueue(:bulk_invite, invites: invites, current_user_id: current_user.id)

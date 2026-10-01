@@ -62,6 +62,24 @@ RSpec.describe BulkInvitePersonalization::ResponseValidator do
       expect(described_class.clean(text)).to eq(text)
     end
 
+    it "does not reject allow-listed institute acronyms" do
+      text = "A few of us from MNIT and other NIT campuses connect here, worth a look?"
+      expect(described_class.clean(text)).to eq(text)
+    end
+
+    it "still rejects a non-allow-listed ALL CAPS word alongside an allow-listed acronym" do
+      text = "This is AMAZING for MNIT folks, worth a look?"
+      expect(described_class.clean(text)).to eq(nil)
+    end
+
+    it "reads the acronym allowlist from the site setting, not a fixed list" do
+      text = "A few of us from ACME folks connect here, worth a look?"
+      expect(described_class.clean(text)).to eq(nil)
+
+      SiteSetting.institute_acronyms = "ACME"
+      expect(described_class.clean(text)).to eq(text)
+    end
+
     it "truncates text over 75 words at the last sentence boundary" do
       sentence = "This is one short sentence about the community."
       long_text = ([sentence] * 10).join(" ") + " Worth a look?"
