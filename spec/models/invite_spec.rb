@@ -100,6 +100,35 @@ RSpec.describe Invite do
       invite.update!(email: nil)
       expect(invite.email_token).to eq(nil)
     end
+
+    it "derives email_domain from description when email is blank and description looks like an email" do
+      invite =
+        Fabricate(:invite, email: nil, description: "student@nit.ac.in", max_redemptions_allowed: 5)
+      expect(invite.email_domain).to eq("nit.ac.in")
+    end
+
+    it "does not derive email_domain from a description that isn't email-shaped" do
+      invite =
+        Fabricate(
+          :invite,
+          email: nil,
+          description: "shared at the career fair",
+          max_redemptions_allowed: 5,
+        )
+      expect(invite.email_domain).to eq(nil)
+    end
+
+    it "prefers email over description when both are present" do
+      invite = Fabricate(:invite, email: "bound@example.com", description: "other@nit.ac.in")
+      expect(invite.email_domain).to eq("example.com")
+    end
+
+    it "updates email_domain when description changes on an otherwise-unbound invite" do
+      invite =
+        Fabricate(:invite, email: nil, description: "student@nit.ac.in", max_redemptions_allowed: 5)
+      invite.update!(description: "other@mnit.ac.in")
+      expect(invite.email_domain).to eq("mnit.ac.in")
+    end
   end
 
   describe ".generate" do
@@ -702,6 +731,34 @@ RSpec.describe Invite do
           skipped,
         )
       end
+
+      it "treats ac.in as an umbrella domain matching every *.ac.in invite" do
+        nit_invite = Fabricate(:invite, invited_by: inviter, email: "student@nit.ac.in")
+        mnit_invite = Fabricate(:invite, invited_by: inviter, email: "student@mnit.ac.in")
+        bare_ac_in_invite = Fabricate(:invite, invited_by: inviter, email: "student@ac.in")
+
+        expect(Invite.pending(inviter, domain: "ac.in")).to contain_exactly(
+          nit_invite,
+          mnit_invite,
+          bare_ac_in_invite,
+        )
+        expect(Invite.pending(inviter, domain: "nit.ac.in")).to contain_exactly(nit_invite)
+      end
+
+      it "combines the ac.in umbrella domain with a status filter" do
+        skipped_at_nit =
+          Fabricate(
+            :invite,
+            invited_by: inviter,
+            email: "skipped@nit.ac.in",
+            emailed_status: Invite.emailed_status_types[:skipped],
+          )
+        Fabricate(:invite, invited_by: inviter, email: "sent@mnit.ac.in")
+
+        expect(Invite.pending(inviter, domain: "ac.in", status: "skipped")).to contain_exactly(
+          skipped_at_nit,
+        )
+      end
     end
 
     describe "#expired" do
@@ -715,6 +772,13 @@ RSpec.describe Invite do
       it "filters by domain when given" do
         expect(Invite.expired(inviter, domain: "example.com")).to contain_exactly(expired_invite)
         expect(Invite.expired(inviter, domain: "nit.ac.in")).to be_empty
+      end
+
+      it "treats ac.in as an umbrella domain matching every *.ac.in invite" do
+        nit_invite =
+          Fabricate(:invite, invited_by: inviter, email: "student@nit.ac.in", expires_at: 1.day.ago)
+
+        expect(Invite.expired(inviter, domain: "ac.in")).to contain_exactly(nit_invite)
       end
     end
 
@@ -733,6 +797,15 @@ RSpec.describe Invite do
           redeemed_invite_user,
         )
         expect(Invite.redeemed_users(inviter, domain: "nit.ac.in")).to be_empty
+      end
+
+      it "treats ac.in as an umbrella domain matching every *.ac.in invite" do
+        nit_invite = Fabricate(:invite, invited_by: inviter, email: "student@nit.ac.in")
+        nit_invite_user = nit_invite.redeem
+
+        expect(Invite.redeemed_users(inviter, domain: "ac.in").map(&:user)).to contain_exactly(
+          nit_invite_user,
+        )
       end
 
       it "returns redeemed users for trashed invites" do

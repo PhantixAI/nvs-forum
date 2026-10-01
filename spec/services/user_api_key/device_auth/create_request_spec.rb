@@ -92,6 +92,26 @@ RSpec.describe UserApiKey::DeviceAuth::CreateRequest do
       end
     end
 
+    context "when requesting a push scope without a platform" do
+      let(:params) { super().merge(scopes: "push") }
+
+      it { is_expected.to fail_with_exception(Discourse::InvalidParameters) }
+    end
+
+    context "when requesting a push scope with a legacy push_url but no platform" do
+      let(:params) do
+        super().merge(scopes: "notifications", push_url: "https://old-relay.example.com")
+      end
+
+      it { is_expected.to fail_with_exception(Discourse::InvalidParameters) }
+    end
+
+    context "when requesting a push scope with a valid platform" do
+      let(:params) { super().merge(scopes: "push", platform: "android") }
+
+      it { is_expected.to run_successfully }
+    end
+
     context "with a registered client" do
       let!(:client) do
         UserApiKeyClient.create!(

@@ -50,11 +50,15 @@ class GroupShowSerializer < BasicGroupSerializer
                    :allow_unknown_sender_topic_replies,
                    :associated_group_ids
 
+  # Deliberately gated on the *real* ownership flag (is_group_owner_display),
+  # not the batch-moderation-aware is_group_owner -- these are a member's own
+  # notification preferences for the group, unrelated to the group-management
+  # UI that is_group_owner intentionally hides for batch-moderation groups.
   def self.admin_or_owner_attributes(*attrs)
     attributes(*attrs)
     attrs.each do |attr|
       define_method "include_#{attr}?" do
-        scope.is_admin? || (include_is_group_owner? && is_group_owner)
+        scope.is_admin? || (include_is_group_owner? && is_group_owner_display)
       end
     end
   end
@@ -120,11 +124,11 @@ class GroupShowSerializer < BasicGroupSerializer
   end
 
   def include_flair_icon?
-    flair_icon.present? && (is_group_owner || scope.is_admin?)
+    flair_icon.present? && (is_group_owner_display || scope.is_admin?)
   end
 
   def include_flair_type?
-    flair_type.present? && (is_group_owner || scope.is_admin?)
+    flair_type.present? && (is_group_owner_display || scope.is_admin?)
   end
 
   %i[watching regular tracking watching_first_post muted].each do |level|
@@ -133,7 +137,8 @@ class GroupShowSerializer < BasicGroupSerializer
     end
 
     define_method("include_#{level}_tags?") do
-      SiteSetting.tagging_enabled? && scope.is_admin? || (include_is_group_owner? && is_group_owner)
+      SiteSetting.tagging_enabled? && scope.is_admin? ||
+        (include_is_group_owner? && is_group_owner_display)
     end
 
     define_method("#{level}_tags") { group_tag_notifications[NotificationLevels.all[level]] || [] }

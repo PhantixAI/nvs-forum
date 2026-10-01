@@ -156,6 +156,14 @@ RSpec.describe BulkInvitePersonalization::Generator do
         "Recipient email domain: iitb.ac.in\nRecipient name: Priya\nAdditional context: robotics club",
       )
     end
+
+    it "falls back to description for the email domain on allow_any_email invites" do
+      invite.update!(email: nil, description: "student@iitb.ac.in", allow_any_email: true)
+
+      expect(described_class.send(:user_message, invite)).to eq(
+        "Recipient email domain: iitb.ac.in",
+      )
+    end
   end
 
   describe ".system_message" do

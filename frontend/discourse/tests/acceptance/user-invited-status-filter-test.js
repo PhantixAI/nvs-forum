@@ -60,7 +60,7 @@ acceptance("User invited - delivery status filter", function (needs) {
         invites: status ? all.filter((i) => i.delivery_status === status) : all,
         can_see_invite_details: true,
         counts: { pending: 2, expired: 0, redeemed: 0, total: 2 },
-        available_domains: ["nit.ac.in"],
+        available_domains: ["ac.in", "nit.ac.in"],
         available_statuses: STATUSES,
       });
     });
@@ -97,6 +97,21 @@ acceptance("User invited - delivery status filter", function (needs) {
 
     assert.strictEqual(reinviteAllRequests.length, 1);
     assert.strictEqual(reinviteAllRequests[0].status, "skipped");
+  });
+
+  test("offers the ac.in umbrella domain alongside specific institute domains", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    const domainFilter = selectKit(".invite-domain-filter");
+    await domainFilter.expand();
+
+    assert.true(
+      domainFilter.rowByValue("ac.in").exists(),
+      "ac.in is offered as a domain filter option"
+    );
+
+    await domainFilter.selectRowByValue("ac.in");
+    assert.strictEqual(invitedRequests.at(-1).domain, "ac.in");
   });
 
   test("hides the status filter on the redeemed tab", async function (assert) {

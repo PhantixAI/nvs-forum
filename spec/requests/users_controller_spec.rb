@@ -2836,10 +2836,39 @@ RSpec.describe UsersController do
       emails = response.parsed_body["invites"].map { |i| i["email"] }
       expect(emails).to contain_exactly("student@nit.ac.in", "student2@nit.ac.in")
       expect(response.parsed_body["counts"]["pending"]).to eq(2)
+      # "ac.in" is the umbrella option (see Invite::AC_IN_UMBRELLA_DOMAIN),
+      # included because this inviter has *.ac.in invites.
       expect(response.parsed_body["available_domains"]).to contain_exactly(
+        "ac.in",
         "nit.ac.in",
         "iitb.ac.in",
       )
+    end
+
+    it "treats ac.in as an umbrella domain filter across every *.ac.in invite" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      Fabricate(:invite, email: "student@nit.ac.in", invited_by: inviter)
+      Fabricate(:invite, email: "student@iitb.ac.in", invited_by: inviter)
+      Fabricate(:invite, email: "student@example.com", invited_by: inviter)
+
+      get "/u/#{inviter.username}/invited.json", params: { filter: "pending", domain: "ac.in" }
+      expect(response.status).to eq(200)
+
+      emails = response.parsed_body["invites"].map { |i| i["email"] }
+      expect(emails).to contain_exactly("student@nit.ac.in", "student@iitb.ac.in")
+      expect(response.parsed_body["counts"]["pending"]).to eq(2)
+    end
+
+    it "omits the ac.in umbrella option when the inviter has no *.ac.in invites" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      Fabricate(:invite, email: "student@example.com", invited_by: inviter)
+
+      get "/u/#{inviter.username}/invited.json", params: { filter: "pending" }
+      expect(response.parsed_body["available_domains"]).to contain_exactly("example.com")
     end
 
     it "filters invites by delivery status and recomputes tab counts for it" do
