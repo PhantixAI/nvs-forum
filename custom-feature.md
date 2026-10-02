@@ -734,14 +734,32 @@ limiting it like any other invite.
   key also had a `TranslationOverride` row (Admin > Customize > Text) already
   set on every site from an earlier hand-edit, and a `TranslationOverride`
   always wins over the YAML default — editing `client.en.yml` alone had no
-  visible effect until the override was brought back in sync
-  (`script/nvs-features/sync-bulk-invite-instructions-override.rb`, dry-run by
-  default, `APPLY=1`/`SITES=`). Re-run that script after any future edit to
-  this locale key, or the override will keep masking it again. Like the
+  visible effect until the override was brought back in sync. Like the
   Cursor-look script (§14), the running app process caches the compiled
   locale bundle in memory (`ExtraLocalesController.js_digests`), so a
   `pkill -USR2 -f 'ruby bin/pitchfork'` restart is needed locally before the
   new text shows up even after the override is synced.
+  - **Second gotcha, found later**: on production, this key's override had
+    since been *deleted* entirely (not just stale), which routes it through
+    `ExtraLocalesController::MAIN_BUNDLE` — a bundle shared verbatim across
+    every multisite site (`SHARED_BUNDLES`, unlike `OVERRIDES_BUNDLE`, which
+    is in `SITE_SPECIFIC_BUNDLES` and gets a `?__ws=<hostname>` query param
+    on its CDN URL). A production CDN (`cdn.navodians.com`) kept serving a
+    stale cached copy of that shared bundle even after a full deploy,
+    fresh `assets:precompile`, and fresh Pitchfork workers all confirmed
+    correct content server-side — the exact mechanism wasn't fully pinned
+    down (worth a follow-up with CDN console access), but setting an
+    explicit per-site override sidesteps it entirely, since overrides
+    always get a fresh, site-distinct CDN cache key.
+  - `script/nvs-features/sync-site-text-overrides.rb` (renamed and
+    generalized from `sync-bulk-invite-instructions-override.rb`, which
+    only handled this one key) fixes both gotchas for any `js.*` key: dry-run
+    by default, `APPLY=1`/`SITES=`/`KEYS=` (comma-separated; defaults to just
+    this key for backward compatibility). Re-run it — with `KEYS=` covering
+    whichever key(s) changed — after any future edit to a `client.en.yml`
+    `js.*` string that needs to reliably show up on production, since
+    neither gotcha is a one-time fix: a key can always lose its override
+    again, and the shared-bundle/CDN interaction isn't specific to this key.
 
 ### 3b. Invite acceptance page redesign
 
