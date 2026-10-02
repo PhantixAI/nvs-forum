@@ -109,12 +109,25 @@ module DiscourseAi
         end
 
         def prepare_request(payload)
-          headers = {
-            "Content-Type" => "application/json",
-            "Authorization" => "Bearer #{access_token}",
-          }
+          headers = { "Content-Type" => "application/json" }.merge(auth_headers)
 
           Net::HTTP::Post.new(model_uri, headers).tap { |r| r.body = payload }
+        end
+
+        # A configured api_key (including a service-account-bound "auth
+        # key") must be sent via x-goog-api-key -- Google rejects it over
+        # Authorization: Bearer with 401 API_KEY_SERVICE_BLOCKED, since
+        # that header is reserved for a genuine OAuth2 access token.
+        # Confirmed empirically against a live aiplatform.googleapis.com
+        # request: the same key succeeds via x-goog-api-key and fails via
+        # Authorization: Bearer. The ADC metadata-server token IS a real
+        # OAuth2 access token, so it keeps using Authorization: Bearer.
+        def auth_headers
+          if llm_model.api_key.present?
+            { "x-goog-api-key" => access_token }
+          else
+            { "Authorization" => "Bearer #{access_token}" }
+          end
         end
 
         def access_token

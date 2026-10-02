@@ -72,6 +72,24 @@ pre-push:
       runner: bash
       use_stdin: true
 
+# Keeps the code-review-graph MCP knowledge graph (see CLAUDE.md) current
+# without anyone having to remember to run `code-review-graph update` by
+# hand. Backgrounded and fire-and-forget: a stale graph for a few seconds
+# is harmless (every graph tool reports its own staleness via `_graph`),
+# but blocking commit/checkout/pull/rebase on a graph rebuild would not be.
+# No-ops silently if code-review-graph isn't installed (e.g. a contributor
+# who hasn't set it up), so this never breaks anyone's git workflow.
+post-commit: &code_review_graph_update
+  commands:
+    code-review-graph-update:
+      run: >-
+        command -v code-review-graph >/dev/null 2>&1 &&
+        (code-review-graph update --repo "$(git rev-parse --show-toplevel)" --quiet >/dev/null 2>&1 &) || true
+
+post-checkout: *code_review_graph_update
+post-merge: *code_review_graph_update
+post-rewrite: *code_review_graph_update
+
 fix-staged:
   parallel: false
   commands:
