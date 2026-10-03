@@ -1,13 +1,18 @@
 # frozen_string_literal: true
 
 module BulkInvitePersonalization
-  # Defensive post-processing for AI-generated bulk invite note text. Returns a
-  # sanitized String, or nil if the response violates one of the hard anti-spam
-  # rules -- rejecting is deliberate here (vs. stripping and continuing), since
-  # e.g. stripping a link out of a sentence can leave a broken fragment behind.
+  # Defensive post-processing for an AI-generated bulk invite email (subject
+  # and body are validated separately -- see Generator). Returns a sanitized
+  # String, or nil if the response violates one of the hard anti-spam rules
+  # -- rejecting is deliberate here (vs. stripping and continuing), since
+  # e.g. stripping a link out of a sentence can leave a broken fragment
+  # behind. Every rejection is logged (info level -- routine content
+  # filtering, not a system error) so a silently-skipped personalization is
+  # diagnosable from the logs, which it was not before.
   module ResponseValidator
     MAX_WORDS = 75
     MIN_TRUNCATED_WORDS = 5
+    MAX_SUBJECT_WORDS = 12
 
     URL_PATTERN = %r{https?://|www\.|\b[a-z0-9-]+\.(?:com|org|net|edu|io|co|ac\.in|in)\b}i
     MARKDOWN_PATTERN = /\*\*|`|\[.+?\]\(|^\s*[-*]\s|^\#{1,6}\s/
@@ -15,27 +20,120 @@ module BulkInvitePersonalization
     ALL_CAPS_WORD_PATTERN = /\b[A-Z]{4,}\b/
     SENTENCE_BOUNDARY = /[.?]/
 
-    def self.clean(text)
+    # required_link must survive verbatim, exactly once, somewhere in the
+    # body -- checked again after truncation (not just before), since
+    # truncating to the word limit could otherwise cut the link off even
+    # though it was present in the full response.
+    def self.clean_body(text, required_link:, invite_id: nil)
       return nil if text.blank?
 
-      text = ActionView::Base.full_sanitizer.sanitize(text)
-      text = text.to_s.gsub(/\s+/, " ").strip
-      return nil if text.blank?
+      sanitized = ActionView::Base.full_sanitizer.sanitize(text).to_s
+      return nil if sanitized.blank?
 
-      return nil if text.match?(URL_PATTERN)
-      return nil if text.match?(MARKDOWN_PATTERN)
-      return nil if shouting?(text)
+      # Checked against the original line breaks, before they're collapsed below --
+      # collapsing first would merge every line into one, so Ruby's per-line ^/$
+      # anchors in MARKDOWN_PATTERN could then only ever match a bullet/heading
+      # that happened to be the very first character of the whole response. A
+      # model that appends a self-check list after the real note (observed in
+      # production: "* 3-4 sentences max? Exactly 3 sentences. * No links...")
+      # starts those bullets partway through the text, so they'd slip through.
+      if sanitized.match?(MARKDOWN_PATTERN)
+        log_rejection(:body, "markdown formatting", invite_id:, text: sanitized)
+        return nil
+      end
 
-      truncate_to_word_limit(text)
+      flattened = sanitized.gsub(/\s+/, " ").strip
+      return nil if flattened.blank?
+
+      # The expected link is exempted from the URL check (it's required, not
+      # forbidden) -- but anything else URL/domain-shaped in the remainder
+      # still gets rejected, same as before.
+      if flattened.sub(required_link, "").match?(URL_PATTERN)
+        log_rejection(:body, "unexpected additional link or domain", invite_id:, text: flattened)
+        return nil
+      end
+
+      if (word = shouting_word(flattened))
+        log_rejection(:body, "shouting (word: #{word.inspect})", invite_id:, text: flattened)
+        return nil
+      end
+
+      truncated = truncate_to_word_limit(flattened)
+      if truncated.nil?
+        log_rejection(
+          :body,
+          "over the word limit with no clean sentence boundary",
+          invite_id:,
+          text: flattened,
+        )
+        return nil
+      end
+
+      if truncated.exclude?(required_link)
+        log_rejection(
+          :body,
+          "required join link missing or altered (expected #{required_link.inspect})",
+          invite_id:,
+          text: truncated,
+        )
+        return nil
+      end
+
+      truncated
     end
 
-    def self.shouting?(text)
-      return true if text.match?(PUNCTUATION_SHOUTING_PATTERN)
+    def self.clean_subject(text, invite_id: nil)
+      return nil if text.blank?
+
+      sanitized = ActionView::Base.full_sanitizer.sanitize(text).to_s
+      return nil if sanitized.blank?
+
+      if sanitized.match?(MARKDOWN_PATTERN)
+        log_rejection(:subject, "markdown formatting", invite_id:, text: sanitized)
+        return nil
+      end
+
+      flattened = sanitized.gsub(/\s+/, " ").strip
+      return nil if flattened.blank?
+
+      if flattened.match?(URL_PATTERN)
+        log_rejection(:subject, "contains a link or domain", invite_id:, text: flattened)
+        return nil
+      end
+
+      if (word = shouting_word(flattened))
+        log_rejection(:subject, "shouting (word: #{word.inspect})", invite_id:, text: flattened)
+        return nil
+      end
+
+      if flattened.split(" ").length > MAX_SUBJECT_WORDS
+        log_rejection(:subject, "over #{MAX_SUBJECT_WORDS} words", invite_id:, text: flattened)
+        return nil
+      end
+
+      flattened
+    end
+
+    # Returns the specific offending word (for the log line) rather than a
+    # bare true/false, so a rejection log says *what* tripped it instead of
+    # just that something did -- the difference between re-running this by
+    # hand to find out and reading it straight off the log line.
+    def self.shouting_word(text)
+      return "!/$" if text.match?(PUNCTUATION_SHOUTING_PATTERN)
 
       allowlist = SiteSetting.institute_acronyms.split("|")
-      text.scan(ALL_CAPS_WORD_PATTERN).any? { |word| !allowlist.include?(word) }
+      text
+        .scan(ALL_CAPS_WORD_PATTERN)
+        .find do |word|
+          # Confirmed in production: the model routinely writes the natural
+          # plural ("NITS" for an allow-listed "NIT") rather than the bare
+          # acronym -- an otherwise-compliant response was being rejected as
+          # shouting for that alone. Tolerate a simple trailing-S plural of
+          # any allow-listed acronym rather than requiring an exact match.
+          !allowlist.include?(word) && !allowlist.include?(word.chomp("S"))
+        end
     end
-    private_class_method :shouting?
+    private_class_method :shouting_word
 
     def self.truncate_to_word_limit(text)
       words = text.split(" ")
@@ -51,5 +149,15 @@ module BulkInvitePersonalization
       sentence
     end
     private_class_method :truncate_to_word_limit
+
+    # text is truncated in the log line, not omitted -- enough to recognize
+    # the response without the log line itself becoming the next thing that
+    # needs truncating. Full text is still in AiApiAuditLog if needed.
+    def self.log_rejection(field, reason, invite_id:, text:)
+      Rails.logger.info(
+        "[BulkInvitePersonalization] invite #{invite_id}: rejected (#{field}): #{reason} -- text[0..150]=#{text[0..150].inspect}",
+      )
+    end
+    private_class_method :log_rejection
   end
 end

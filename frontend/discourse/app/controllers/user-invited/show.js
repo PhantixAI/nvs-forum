@@ -6,6 +6,7 @@ import { dependentKeyCompat } from "@ember/object/compat";
 import { service } from "@ember/service";
 import { observes } from "@ember-decorators/object";
 import CreateInviteBulk from "discourse/components/modal/create-invite-bulk";
+import ResendInviteModal from "discourse/components/modal/resend-invite";
 import SentInviteEmail from "discourse/components/modal/sent-invite-email";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import { removeValueFromArray } from "discourse/lib/array-tools";
@@ -211,21 +212,32 @@ export default class UserInvitedShowController extends Controller {
   }
 
   @action
-  reinvite(invite) {
-    invite.reinvite();
-    return false;
+  openResendInvite(invite) {
+    this.modal.show(ResendInviteModal, {
+      model: {
+        bulk: false,
+        onResend: ({ keywords, aiPersonalization }) =>
+          invite.reinvite({ keywords, aiPersonalization }),
+      },
+    });
   }
 
   @action
   reinviteAll() {
     const domain = this.selectedDomain;
     const status = this.selectedStatus;
-    this.dialog.yesNoConfirm({
-      message: this.#reinviteAllConfirmMessage(domain, status),
-      didConfirm: () => {
-        return Invite.reinviteAll(domain, status)
-          .then(() => this.set("reinvitedAll", true))
-          .catch(popupAjaxError);
+    const search = this.searchTerm;
+    this.modal.show(ResendInviteModal, {
+      model: {
+        bulk: true,
+        confirmMessage: this.#reinviteAllConfirmMessage(domain, status),
+        onResend: async ({ keywords, aiPersonalization }) => {
+          await Invite.reinviteAll(domain, status, search, {
+            keywords,
+            aiPersonalization,
+          });
+          this.set("reinvitedAll", true);
+        },
       },
     });
   }

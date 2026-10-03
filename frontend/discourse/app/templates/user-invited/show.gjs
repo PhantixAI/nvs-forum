@@ -395,6 +395,17 @@ export default <template>
                                       @label="user.invited.invite.preview_sent_email"
                                     />
                                   </dropdown.item>
+                                  <dropdown.item>
+                                    <DButton
+                                      class="btn-transparent resend-invite"
+                                      @action={{fn
+                                        @controller.openResendInvite
+                                        invite
+                                      }}
+                                      @icon="paper-plane"
+                                      @label="user.invited.reinvite"
+                                    />
+                                  </dropdown.item>
                                 {{/if}}
                               </DDropdownMenu>
                             </:content>

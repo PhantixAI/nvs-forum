@@ -995,6 +995,22 @@
   }
 }
 
+.sent-invite-email-modal {
+  .sent-invite-email-body {
+    // A <p> doesn't preserve the generated email's line breaks the way the
+    // <textarea> it replaced did -- this is the CSS equivalent.
+    white-space: pre-wrap;
+  }
+
+  .sent-invite-email-headers {
+    // The <textarea wrap="off"> this replaced never wrapped long header
+    // lines (Message-ID, Received, etc.) -- preserve line breaks without
+    // wrapping, and let long lines scroll horizontally instead.
+    white-space: pre;
+    overflow-x: auto;
+  }
+}
+
 .wrap-attributes-modal {
   .wrap-modal__attribute-row {
     display: flex;

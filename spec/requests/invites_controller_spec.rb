@@ -2308,11 +2308,95 @@ RSpec.describe InvitesController do
         expect(Jobs::InviteEmail.jobs.size).to eq(1)
       end
 
+      it "resends by invite_id, which also works for a bound invite" do
+        post "/invites/reinvite.json", params: { invite_id: invite.id }
+        expect(response.status).to eq(200)
+        expect(Jobs::InviteEmail.jobs.first["args"].first["invite_id"]).to eq(invite.id)
+      end
+
+      it "raises an error when invite_id belongs to someone else" do
+        post "/invites/reinvite.json", params: { invite_id: another_invite.id }
+        expect(response.status).to eq(400)
+      end
+
+      it "resends an allow_any_email invite by invite_id, since it has no bound email to look up" do
+        # Mirrors Jobs::BulkInvite#send_invite's shape for these rows.
+        unbound_invite =
+          Invite.generate(
+            user,
+            email: nil,
+            description: "asharani@ee.nits.ac.in",
+            allow_any_email: true,
+            max_redemptions_allowed: 1,
+          )
+        unbound_invite.update_column(:emailed_status, Invite.emailed_status_types[:sent])
+
+        post "/invites/reinvite.json", params: { invite_id: unbound_invite.id }
+
+        expect(response.status).to eq(200)
+        job_args = Jobs::InviteEmail.jobs.first["args"].first
+        expect(job_args["invite_id"]).to eq(unbound_invite.id)
+      end
+
       it "returns an error when allow_email_invites is disabled" do
         SiteSetting.allow_email_invites = false
         post "/invites/reinvite.json", params: { email: invite.email }
         expect(response.status).to eq(422)
         expect(response.parsed_body["errors"]).to include(I18n.t("invite.email_invites_disabled"))
+      end
+
+      it "regenerates the custom_subject and custom_message with the given keywords by default" do
+        allow(BulkInvitePersonalization::Generator).to receive(:personalize).and_return(
+          subject: "A fresh subject",
+          body: "A freshly generated note.",
+        )
+
+        post "/invites/reinvite.json", params: { email: invite.email, keywords: "robotics club" }
+
+        expect(response.status).to eq(200)
+        expect(invite.reload.custom_subject).to eq("A fresh subject")
+        expect(invite.custom_message).to eq("A freshly generated note.")
+        expect(BulkInvitePersonalization::Generator).to have_received(:personalize).with(
+          invite,
+          extra_keywords: "robotics club",
+        )
+      end
+
+      it "clears a previously-personalized custom_subject/custom_message when ai_personalization is false" do
+        # InviteMailer#send_invite picks the AI/custom template purely from
+        # these columns -- leaving the old ones in place would silently keep
+        # sending the AI-personalized email despite "No".
+        invite.update!(
+          custom_subject: "a previously AI-generated subject",
+          custom_message: "a previously AI-personalized note",
+        )
+        allow(BulkInvitePersonalization::Generator).to receive(:personalize)
+
+        post "/invites/reinvite.json",
+             params: {
+               email: invite.email,
+               keywords: "robotics club",
+               ai_personalization: "false",
+             }
+
+        expect(response.status).to eq(200)
+        expect(invite.reload.custom_subject).to eq(nil)
+        expect(invite.custom_message).to eq(nil)
+        expect(BulkInvitePersonalization::Generator).not_to have_received(:personalize)
+      end
+
+      it "still resends when personalization fails" do
+        invite.update!(custom_message: "original note")
+        allow(BulkInvitePersonalization::Generator).to receive(:personalize).and_raise(
+          BulkInvitePersonalization::Generator::GenerationFailed,
+          "provider outage",
+        )
+
+        post "/invites/reinvite.json", params: { email: invite.email }
+
+        expect(response.status).to eq(200)
+        expect(invite.reload.custom_message).to eq("original note")
+        expect(Jobs::InviteEmail.jobs.size).to eq(1)
       end
     end
   end
@@ -2489,6 +2573,81 @@ RSpec.describe InvitesController do
       post "/invites/reinvite-all"
       expect(response.status).to eq(422)
       expect(response.parsed_body["errors"]).to include(I18n.t("invite.email_invites_disabled"))
+    end
+
+    it "only resends invites matching the given search term" do
+      freeze_time
+
+      matching = Fabricate(:invite, invited_by: admin, email: "priya@nit.ac.in")
+      matching.update!(expires_at: 5.days.from_now)
+      other = Fabricate(:invite, invited_by: admin, email: "rahul@nit.ac.in")
+      other.update!(expires_at: 5.days.from_now)
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { search: "priya" }
+
+      expect(response.status).to eq(200)
+      expect(matching.reload.expires_at).to eq_time(30.days.from_now)
+      expect(other.reload.expires_at).to eq_time(5.days.from_now)
+    end
+
+    it "enqueues the keyword-regeneration job instead of resending directly when keywords are given" do
+      freeze_time
+      invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      invite.update!(expires_at: 5.days.from_now)
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { keywords: "robotics club" }
+
+      expect(response.status).to eq(200)
+      expect(invite.reload.expires_at).to eq_time(5.days.from_now)
+      expect(Jobs::ResendInvitesWithKeywords.jobs.size).to eq(1)
+      job_args = Jobs::ResendInvitesWithKeywords.jobs.first["args"].first
+      expect(job_args["invite_ids"]).to eq([invite.id])
+      expect(job_args["extra_keywords"]).to eq("robotics club")
+    end
+
+    it "does not enqueue the keyword-regeneration job when ai_personalization is false" do
+      Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+
+      sign_in(admin)
+      post "/invites/reinvite-all",
+           params: {
+             keywords: "robotics club",
+             ai_personalization: "false",
+           }
+
+      expect(response.status).to eq(200)
+      expect(Jobs::ResendInvitesWithKeywords.jobs).to be_empty
+    end
+
+    it "clears previously-personalized custom_message and bypasses the paced AI pipeline when ai_personalization is false" do
+      # bulk_invite_paced_resend_enabled routes through
+      # Jobs::ProcessBulkInviteEmails, which always calls
+      # BulkInvitePersonalization::Generator.personalize with no knowledge
+      # of this per-request flag -- an explicit "No" has to skip that
+      # pipeline entirely, not just withhold keywords from it.
+      SiteSetting.bulk_invite_paced_resend_enabled = true
+      invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          email: "student@nit.ac.in",
+          custom_subject: "a previously AI-generated subject",
+          custom_message: "a previously AI-personalized note",
+        )
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { ai_personalization: "false" }
+
+      expect(response.status).to eq(200)
+      expect(invite.reload.custom_subject).to eq(nil)
+      expect(invite.custom_message).to eq(nil)
+      expect(invite.emailed_status).not_to eq(Invite.emailed_status_types[:bulk_pending])
+      expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
+      expect(Jobs::InviteEmail.jobs.map { |job| job["args"].first["invite_id"] }).to include(
+        invite.id,
+      )
     end
 
     it "resends an allow_any_email invite but not an ordinary never-emailed link invite" do

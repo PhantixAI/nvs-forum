@@ -102,6 +102,38 @@ RSpec.describe InviteSerializer do
     end
   end
 
+  describe "emailed/delivery_status for allow_any_email invites" do
+    fab!(:user)
+
+    it "includes emailed and delivery_status for a sent allow_any_email invite, using description as the recipient" do
+      # Mirrors Jobs::BulkInvite#send_invite: email: nil, description: the
+      # real address, emailed_status explicitly moved off :not_required once
+      # actually sent.
+      invite =
+        Invite.generate(
+          user,
+          email: nil,
+          description: "asharani@ee.nits.ac.in",
+          allow_any_email: true,
+          max_redemptions_allowed: 1,
+        )
+      invite.update_column(:emailed_status, Invite.emailed_status_types[:sent])
+
+      json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
+
+      expect(json[:emailed]).to eq(true)
+      expect(json[:delivery_status]).to eq("sent")
+    end
+
+    it "omits emailed and delivery_status for a never-emailed invite link with no description" do
+      invite = Invite.generate(user, email: nil, max_redemptions_allowed: 1)
+
+      json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
+
+      expect(json).not_to include(:emailed, :delivery_status)
+    end
+  end
+
   describe "#can_delete_invite" do
     fab!(:user)
     fab!(:admin)

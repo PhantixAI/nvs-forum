@@ -1,4 +1,4 @@
-import { click, visit } from "@ember/test-helpers";
+import { click, fillIn, visit } from "@ember/test-helpers";
 import { test } from "qunit";
 import { acceptance } from "discourse/tests/helpers/qunit-helpers";
 import selectKit from "discourse/tests/helpers/select-kit-helper";
@@ -38,10 +38,12 @@ acceptance("User invited - delivery status filter", function (needs) {
 
   let invitedRequests;
   let reinviteAllRequests;
+  let reinviteRequests;
 
   needs.hooks.beforeEach(() => {
     invitedRequests = [];
     reinviteAllRequests = [];
+    reinviteRequests = [];
   });
 
   needs.pretender((server, helper) => {
@@ -69,6 +71,11 @@ acceptance("User invited - delivery status filter", function (needs) {
       reinviteAllRequests.push(helper.parsePostData(request.requestBody));
       return helper.response({ success: "OK" });
     });
+
+    server.post("/invites/reinvite", (request) => {
+      reinviteRequests.push(helper.parsePostData(request.requestBody));
+      return helper.response({ success: "OK" });
+    });
   });
 
   test("renders a pill for sent and skipped invites", async function (assert) {
@@ -91,12 +98,57 @@ acceptance("User invited - delivery status filter", function (needs) {
 
     await click(".user-invite-buttons .btn .d-icon-arrows-rotate");
     assert
-      .dom(".dialog-body")
+      .dom(".resend-invite-modal")
       .includesText('with status "Skipped"', "confirm names the status");
-    await click(".dialog-footer .btn-primary");
+    await click(".resend-invite-modal .resend-invite-confirm");
 
     assert.strictEqual(reinviteAllRequests.length, 1);
     assert.strictEqual(reinviteAllRequests[0].status, "skipped");
+  });
+
+  test("includes the active search term when resending all invites", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    // The search box only renders once a filter is active or the tab count
+    // exceeds the always-visible threshold (see showSearch) -- select a
+    // domain first so `.user-invite-search input` exists to fill in.
+    const domainFilter = selectKit(".invite-domain-filter");
+    await domainFilter.expand();
+    await domainFilter.selectRowByValue("nit.ac.in");
+
+    await fillIn(".user-invite-search input", "nit");
+    await click(".user-invite-buttons .btn .d-icon-arrows-rotate");
+    await click(".resend-invite-modal .resend-invite-confirm");
+
+    assert.strictEqual(reinviteAllRequests.length, 1);
+    assert.strictEqual(reinviteAllRequests[0].search, "nit");
+  });
+
+  test("passes keywords and ai_personalization along with a bulk resend", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    await click(".user-invite-buttons .btn .d-icon-arrows-rotate");
+    await fillIn(".resend-invite-modal textarea", "robotics club");
+    await click(".resend-invite-modal .resend-invite-confirm");
+
+    assert.strictEqual(reinviteAllRequests.length, 1);
+    assert.strictEqual(reinviteAllRequests[0].keywords, "robotics club");
+    assert.strictEqual(reinviteAllRequests[0].ai_personalization, "true");
+  });
+
+  test("resends a single invite with its own keywords from the kebab menu", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    await click(
+      "table.user-invite-list tbody tr:nth-child(1) .d-icon-ellipsis-vertical"
+    );
+    await click(".resend-invite");
+    await fillIn(".resend-invite-modal textarea", "math olympiad");
+    await click(".resend-invite-modal .resend-invite-confirm");
+
+    assert.strictEqual(reinviteRequests.length, 1);
+    assert.strictEqual(reinviteRequests[0].keywords, "math olympiad");
+    assert.strictEqual(reinviteRequests[0].ai_personalization, "true");
   });
 
   test("offers the ac.in umbrella domain alongside specific institute domains", async function (assert) {
@@ -121,3 +173,60 @@ acceptance("User invited - delivery status filter", function (needs) {
     assert.dom(".invite-domain-filter").exists();
   });
 });
+
+acceptance(
+  "User invited - allow_any_email (unbound) invite row",
+  function (needs) {
+    needs.user();
+
+    needs.pretender((server, helper) => {
+      server.get("/u/eviltrout/invited.json", () => {
+        return helper.response({
+          // Mirrors Jobs::BulkInvite#send_invite's shape for an
+          // allow_any_email row once sent: email is nil, the real
+          // recipient lives in description, and the serializer now
+          // includes emailed/delivery_status for it too (see
+          // InviteSerializer#has_recipient?).
+          invites: [
+            {
+              id: 99,
+              invite_key: "key99",
+              link: "http://localhost:3000/invites/key99",
+              email: null,
+              description: "asharani@ee.nits.ac.in",
+              domain: null,
+              emailed: true,
+              delivery_status: "sent",
+              can_delete_invite: true,
+              custom_message: null,
+              max_redemptions_allowed: 1,
+              redemption_count: 0,
+              created_at: "2026-09-23T04:47:13.195Z",
+              updated_at: "2026-09-23T04:47:13.195Z",
+              expires_at: "2026-12-22T04:47:00.000Z",
+              expired: false,
+              topics: [],
+              groups: [],
+            },
+          ],
+          can_see_invite_details: true,
+          counts: { pending: 1, expired: 0, redeemed: 0, total: 1 },
+          available_domains: [],
+          available_statuses: STATUSES,
+        });
+      });
+    });
+
+    test("still shows the delivery pill and the preview/resend kebab items", async function (assert) {
+      await visit("/u/eviltrout/invited/pending");
+
+      assert.dom(".delivery-status-pill.--sent").exists();
+
+      await click(
+        "table.user-invite-list tbody tr:nth-child(1) .d-icon-ellipsis-vertical"
+      );
+      assert.dom(".preview-sent-email").exists();
+      assert.dom(".resend-invite").exists();
+    });
+  }
+);

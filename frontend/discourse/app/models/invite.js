@@ -45,13 +45,27 @@ export default class Invite extends EmberObject {
     return EmberObject.create(result);
   }
 
-  static reinviteAll(domain, status) {
+  static reinviteAll(
+    domain,
+    status,
+    search,
+    { keywords, aiPersonalization } = {}
+  ) {
     const data = {};
     if (!isNone(domain)) {
       data.domain = domain;
     }
     if (!isNone(status)) {
       data.status = status;
+    }
+    if (!isNone(search)) {
+      data.search = search;
+    }
+    if (!isNone(keywords)) {
+      data.keywords = keywords;
+    }
+    if (!isNone(aiPersonalization)) {
+      data.ai_personalization = aiPersonalization;
     }
     return ajax("/invites/reinvite-all", { type: "POST", data });
   }
@@ -122,10 +136,14 @@ export default class Invite extends EmberObject {
     }).then(() => this.set("destroyed", true));
   }
 
-  reinvite() {
+  reinvite({ keywords, aiPersonalization } = {}) {
     return ajax("/invites/reinvite", {
       type: "POST",
-      data: { email: this.email },
+      data: {
+        invite_id: this.id,
+        keywords,
+        ai_personalization: aiPersonalization,
+      },
     })
       .then(() => this.set("reinvited", true))
       .catch(popupAjaxError);

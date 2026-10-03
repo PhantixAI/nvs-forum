@@ -580,15 +580,8 @@ class UsersController < ApplicationController
       invites = invites.offset(params[:offset].to_i || 0).limit(SiteSetting.invites_per_page)
 
       show_emails = guardian.can_see_invite_emails?(inviter)
-      if params[:search].present? && invites.present?
-        filter_sql = "(LOWER(users.username) LIKE :filter)"
-        # allow_any_email invites have no bound invites.email -- their intended recipient
-        # lives in invites.description instead (see Jobs::BulkInvite), so search has to
-        # check both or those invites are invisible to search despite being real and
-        # findable by scrolling the unfiltered list.
-        filter_sql =
-          "(LOWER(invites.email) LIKE :filter) or (LOWER(invites.description) LIKE :filter) or (LOWER(users.username) LIKE :filter)" if show_emails
-        invites = invites.where(filter_sql, filter: "%#{params[:search].downcase}%")
+      if invites.present?
+        invites = Invite.search_filter(invites, params[:search], show_emails: show_emails)
       end
 
       # The domain and status filters (unlike search) also narrow the tab
