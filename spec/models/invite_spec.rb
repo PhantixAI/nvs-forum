@@ -826,6 +826,49 @@ RSpec.describe Invite do
     end
   end
 
+  describe ".search_filter" do
+    fab!(:inviter, :user)
+    fab!(:invite) { Fabricate(:invite, invited_by: inviter, email: "billybob@example.com") }
+    fab!(:other_invite) { Fabricate(:invite, invited_by: inviter, email: "jimtom@example.com") }
+
+    # Invite.pending (rather than a bare Invite.where) is the base relation
+    # here because search_filter's SQL references users.username, which
+    # requires the LEFT JOIN that pending/expired/redeemed_users already
+    # provide at every real call site (UsersController#invited,
+    # InvitesController#resend_all_invites).
+    it "returns the relation unchanged when search is blank" do
+      expect(
+        Invite.search_filter(Invite.pending(inviter), nil, show_emails: true),
+      ).to contain_exactly(invite, other_invite)
+    end
+
+    it "matches on email when show_emails is true" do
+      expect(
+        Invite.search_filter(Invite.pending(inviter), "billybob", show_emails: true),
+      ).to contain_exactly(invite)
+    end
+
+    it "only matches on username, not email, when show_emails is false" do
+      expect(
+        Invite.search_filter(Invite.pending(inviter), "billybob", show_emails: false),
+      ).to be_empty
+    end
+
+    it "matches allow_any_email invites via description" do
+      unbound =
+        Invite.generate(
+          inviter,
+          email: nil,
+          description: "priya@nit.ac.in",
+          max_redemptions_allowed: 1,
+        )
+
+      expect(
+        Invite.search_filter(Invite.pending(inviter), "priya", show_emails: true),
+      ).to contain_exactly(unbound)
+    end
+  end
+
   describe ".invalidate_for_email" do
     it "returns nil if there is no invite for the given email" do
       invite = Invite.invalidate_for_email("test@example.com")

@@ -603,6 +603,7 @@ en:
     existing_user_success: "Invite redeemed successfully"
     email_invites_disabled: "Sending invite emails is disabled"
     email_required_to_send: "This invite has no email address to send to"
+    ai_personalization_failed: "Couldn't generate a personalized email for this invite right now. Nothing was sent -- try resending again shortly."
 
   bulk_invite:
     file_should_be_csv: "The uploaded file should be of csv format."
@@ -2082,10 +2083,11 @@ en:
 
   site_settings:
     allow_bulk_invite: "Allow bulk invites by uploading a CSV file"
-    bulk_invite_ai_personalization_enabled: "Use an AI language model to rewrite each bulk invite email's body from {{setting:bulk_invite_ai_personalization_template}} into a distinct, personalized note per recipient, to reduce spam filtering on large sends. Requires an AI language model to be configured under AI plugin settings; when none is configured, invites send with the plain template as normal."
-    bulk_invite_ai_personalization_template: "Base pitch used as the starting point for each recipient's AI-personalized bulk invite note. Only used when {{setting:bulk_invite_ai_personalization_enabled}} is on."
-    bulk_invite_ai_personalization_rules: "Formatting and anti-spam rules the AI language model must follow when rewriting {{setting:bulk_invite_ai_personalization_template}} per recipient. Loosening or removing a rule here changes what the model is asked to do, but does not bypass the separate, fixed validation every generated note still has to pass (no links, no Markdown, no shouting) before it is used -- a note that fails validation falls back to the plain template. Only used when {{setting:bulk_invite_ai_personalization_enabled}} is on."
+    bulk_invite_ai_personalization_enabled: "Use an AI language model to rewrite each bulk invite email (subject and body) from {{setting:bulk_invite_ai_personalization_template}} into a distinct, personalized email per recipient, to reduce spam filtering on large sends. Requires an AI language model to be configured under AI plugin settings; when none is configured, invites send with the plain template as normal."
+    bulk_invite_ai_personalization_template: "Base email used as the starting point for each recipient's AI-personalized bulk invite -- write it as a complete, ready-to-send email. Supports placeholders %{site_title}, %{site_description}, and %{invite_link}. %{invite_link} here is for the AI's own context only, so it understands where a link naturally fits -- the real link is always appended to the final email automatically, verbatim, on its own line, regardless of whether you include this placeholder or where. Only used when {{setting:bulk_invite_ai_personalization_enabled}} is on."
+    bulk_invite_ai_personalization_rules: "Formatting and anti-spam rules the AI language model must follow when rewriting {{setting:bulk_invite_ai_personalization_template}} per recipient. Loosening or removing a rule here changes what the model is asked to do, but does not bypass the separate, fixed validation every generated email still has to pass (no link, URL, or domain of any kind from the model -- the real link is always appended separately and automatically, never left to the model to write or place; no Markdown; no shouting) before it is used -- an email that fails validation holds the invite back to retry rather than sending it. Only used when {{setting:bulk_invite_ai_personalization_enabled}} is on."
     institute_acronyms: "Acronyms exempt from the ALL CAPS shouting check that every AI-generated bulk invite note is validated against (see {{setting:bulk_invite_ai_personalization_rules}}). Add an acronym here (e.g. your institution's short name) if it is legitimately getting rejected and falling back to the plain template. Only used when {{setting:bulk_invite_ai_personalization_enabled}} is on."
+    bulk_invite_ai_personalization_max_tokens: "Maximum output tokens requested from the AI language model per bulk invite email. A value too low can cause the model to truncate mid-response (rejected, falls back to the plain template); raise this if that happens often. Capped separately by the configured AI language model's own max output tokens, whichever is lower. Only used when {{setting:bulk_invite_ai_personalization_enabled}} is on."
     bulk_invite_email_delay_min_seconds: "Minimum random delay, in seconds, between each bulk invite email being sent. Applies to every bulk invite, whether or not AI personalization is enabled."
     bulk_invite_email_delay_max_seconds: "Maximum random delay, in seconds, between each bulk invite email being sent. Applies to every bulk invite, whether or not AI personalization is enabled."
     bulk_invite_paced_resend_enabled: "When an admin uses Resend All Invites, re-queue matching invites through the same one-at-a-time, randomly-paced throttle a bulk invite CSV upload uses (governed by {{setting:bulk_invite_email_delay_min_seconds}} and {{setting:bulk_invite_email_delay_max_seconds}}), instead of emailing all of them immediately. Recommended for sites running large bulk invite campaigns, so a resend can't send a burst of emails that gets flagged as spam."
@@ -3840,6 +3842,16 @@ en:
       If you're interested, click the link below:
 
       %{invite_link}
+
+  ai_personalized_invite_forum_mailer:
+    title: "AI-Personalized Invite Forum Mailer"
+    # Safety net only -- InviteMailer always passes subject_override for
+    # this template, which wins over this. Matches invite_forum_mailer's
+    # subject so a future caller that selects this template without an
+    # override still gets a real subject, never a missing-translation one.
+    subject_template: "%{inviter_name} invited you to join %{site_domain_name}"
+    text_body_template: |
+      %{user_custom_message}
 
   invite_password_instructions:
     title: "Invite Password Instructions"

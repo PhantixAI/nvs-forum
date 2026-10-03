@@ -2663,6 +2663,17 @@ en:
           error: "There was an error generating Invite link"
         cannot_invite_to_forum: "Sorry, you don't have permission to create invites. Please contact an admin to grant you invite permission."
 
+        resend_invite:
+          modal:
+            title: "Resend invite"
+            title_all: "Resend invites"
+            keywords_label: "Keywords (optional)"
+            keywords_placeholder: "Add context to improve the generated email…"
+            ai_personalization_label: "AI Personalization"
+            ai_personalization_yes: "Yes"
+            ai_personalization_no: "No"
+            resend: "Resend"
+
         sent_email:
           modal:
             title: "Last Sent Email"
