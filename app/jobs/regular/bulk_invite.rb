@@ -167,6 +167,14 @@ module Jobs
       skip_personalization = %w[true t 1 yes y].include?(
         invite[:skip_personalization].to_s.strip.downcase,
       )
+      # Unlike the other boolean columns here, blank/absent defaults true
+      # (paced), not false -- so an existing CSV that predates this column
+      # keeps today's always-paced behavior rather than silently switching
+      # to a burst send the moment this ships. An explicit false is
+      # required to opt into a burst send.
+      schedule_send =
+        invite[:schedule_send].to_s.strip.blank? ||
+          %w[true t 1 yes y].include?(invite[:schedule_send].to_s.strip.downcase)
       recipient_name = invite[:name].presence
       recipient_keywords = invite[:keywords].presence
       user_fields =
@@ -177,6 +185,7 @@ module Jobs
             :topic_id,
             :locale,
             :allow_any_email,
+            :schedule_send,
             :skip_personalization,
             :name,
             :keywords,
@@ -249,20 +258,22 @@ module Jobs
             recipient_name: recipient_name,
             recipient_keywords: recipient_keywords,
             skip_personalization: skip_personalization,
+            schedule_send: schedule_send,
             allow_any_email: allow_any_email,
           }
 
           # allow_any_email rows keep their original immediate-send-under-the-limit
-          # behavior (delivered explicitly via to_override below); every bound
-          # invite is now always routed through :bulk_pending regardless of CSV
-          # size, so Jobs::ProcessBulkInviteEmails' one-at-a-time, randomly-paced
-          # throttle (and AI personalization) applies uniformly, not just to
-          # batches over the historical 200-row threshold.
+          # behavior (delivered explicitly via to_override below), unaffected by
+          # schedule_send. A bound invite's own routing is decided purely by
+          # schedule_send: true queues it through Jobs::ProcessBulkInviteEmails'
+          # one-at-a-time, randomly-paced throttle (and AI personalization);
+          # false leaves emailed_status unset, so Invite.generate's own default
+          # (:pending) sends it immediately instead, the same way it always has.
           if allow_any_email
             if @invites.length > Invite::BULK_INVITE_EMAIL_LIMIT
               invite_opts[:emailed_status] = Invite.emailed_status_types[:bulk_pending]
             end
-          else
+          elsif schedule_send
             invite_opts[:emailed_status] = Invite.emailed_status_types[:bulk_pending]
           end
 

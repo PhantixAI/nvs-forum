@@ -273,6 +273,96 @@ RSpec.describe Jobs::BulkInvite do
       end
     end
 
+    context "with a schedule_send column" do
+      it "routes through bulk_pending when true" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "faculty@college.edu", schedule_send: "true" }],
+        )
+
+        invite = Invite.find_by(email: "faculty@college.edu")
+        expect(invite.schedule_send).to eq(true)
+        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+        expect(Jobs::InviteEmail.jobs).to be_empty
+      end
+
+      it "sends immediately when false" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "faculty2@college.edu", schedule_send: "false" }],
+        )
+
+        invite = Invite.find_by(email: "faculty2@college.edu")
+        expect(invite.schedule_send).to eq(false)
+        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:sending])
+        expect(Jobs::InviteEmail.jobs.size).to eq(1)
+      end
+
+      it "defaults to true (paced) when the column is absent, unlike skip_personalization" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu" }],
+        )
+
+        invite = Invite.find_by(email: "student@college.edu")
+        expect(invite.schedule_send).to eq(true)
+        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+      end
+
+      it "only treats an explicit falsy spelling as false, failing closed to paced" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [
+            { email: "a@college.edu", schedule_send: "false" },
+            { email: "b@college.edu", schedule_send: "no" },
+            { email: "c@college.edu", schedule_send: "maybe" },
+          ],
+        )
+
+        expect(Invite.find_by(email: "a@college.edu").schedule_send).to eq(false)
+        expect(Invite.find_by(email: "b@college.edu").schedule_send).to eq(false)
+        expect(Invite.find_by(email: "c@college.edu").schedule_send).to eq(false)
+      end
+
+      it "does not misinterpret it as a user field" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "faculty@college.edu", schedule_send: "false" }],
+        )
+
+        post = Post.last
+        expect(post.raw).to include("0 warning")
+      end
+
+      it "is independent of skip_personalization/AI state" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [
+            { email: "d@college.edu", schedule_send: "false", skip_personalization: "true" },
+            { email: "e@college.edu", schedule_send: "true", skip_personalization: "false" },
+          ],
+        )
+
+        expect(Invite.find_by(email: "d@college.edu").emailed_status).to eq(
+          Invite.emailed_status_types[:sending],
+        )
+        expect(Invite.find_by(email: "e@college.edu").emailed_status).to eq(
+          Invite.emailed_status_types[:bulk_pending],
+        )
+      end
+
+      it "does not affect allow_any_email rows, which keep their own immediate-send branch" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [
+            { email: "student@college.edu", allow_any_email: "true", schedule_send: "false" },
+          ],
+        )
+
+        expect(Invite.last.emailed_status).not_to eq(Invite.emailed_status_types[:bulk_pending])
+      end
+    end
+
     it "shares one throttle chain between overlapping uploads" do
       2.times do |i|
         described_class.new.execute(

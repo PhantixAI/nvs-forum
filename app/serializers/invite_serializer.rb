@@ -44,7 +44,7 @@ class InviteSerializer < ApplicationSerializer
   end
 
   def include_emailed?
-    email.present? && can_see_invite_details?
+    has_recipient? && can_see_invite_details?
   end
 
   def emailed
@@ -52,7 +52,7 @@ class InviteSerializer < ApplicationSerializer
   end
 
   def include_delivery_status?
-    email.present? && can_see_invite_details?
+    has_recipient? && can_see_invite_details?
   end
 
   def delivery_status
@@ -120,6 +120,15 @@ class InviteSerializer < ApplicationSerializer
     return @can_see_invite_details if defined?(@can_see_invite_details)
 
     @can_see_invite_details = scope.can_see_invite_details?(object.invited_by)
+  end
+
+  # An allow_any_email invite is unbound (email: nil) by design -- its intended
+  # recipient lives in description instead (see Jobs::BulkInvite#send_invite,
+  # Invite.search_filter, Jobs::InviteEmail). Gating emailed/delivery_status on
+  # email.present? alone hid both for every such invite that was actually sent,
+  # even though bulk "Resend Invites" already resends them correctly.
+  def has_recipient?
+    email.present? || object.description.present?
   end
 
   def can_see_invite_emails?

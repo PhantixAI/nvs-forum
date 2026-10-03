@@ -109,6 +109,79 @@ RSpec.describe InviteMailer do
         end
       end
 
+      context "with an AI-personalized custom message" do
+        fab!(:invite)
+
+        before do
+          SiteSetting.bulk_invite_ai_personalization_enabled = true
+          # The real pipeline always has the real link somewhere in
+          # custom_message (see ResponseValidator, which appends it on its
+          # own line after the AI-authored text) -- the mailer itself
+          # doesn't care where within custom_message the link sits, just
+          # that it's there, so this fixture's exact placement is incidental.
+          invite.update!(
+            custom_message:
+              "A few of us from your college network hang out here, worth a look? #{invite.link}",
+            custom_subject: "Quick hello from campus",
+          )
+        end
+
+        let(:ai_invite_mail) { InviteMailer.send_invite(invite) }
+
+        it "uses custom_subject verbatim as the subject, not a template-derived one" do
+          expect(ai_invite_mail.subject).to eq("Quick hello from campus")
+        end
+
+        it "renders custom_message as the whole body, with no wrapper sentences" do
+          body = ai_invite_mail.body.encoded
+          expect(body).to match("A few of us from your college network hang out here")
+          expect(body).not_to match("invited you to join")
+          expect(body).not_to match("With this note")
+        end
+
+        it "still renders the real invite link" do
+          expect(ai_invite_mail.body.encoded).to match(
+            "#{Discourse.base_url}/invites/#{invite.invite_key}",
+          )
+        end
+
+        it "falls back to the wrapped custom template when skip_personalization is set on this row" do
+          invite.update!(skip_personalization: true)
+
+          mail = InviteMailer.send_invite(invite)
+
+          expect(mail.subject).not_to eq("Quick hello from campus")
+          expect(mail.body.encoded).to match("With this note")
+          expect(mail.body.encoded).to match("A few of us from your college network hang out here")
+        end
+
+        it "falls back to the wrapped custom template when AI personalization is disabled site-wide" do
+          SiteSetting.bulk_invite_ai_personalization_enabled = false
+
+          mail = InviteMailer.send_invite(invite)
+
+          expect(mail.subject).not_to eq("Quick hello from campus")
+          expect(mail.body.encoded).to match("With this note")
+        end
+
+        it "falls back to the wrapped custom template, rather than the subject-less AI one, when custom_subject is blank" do
+          # A stale row (custom_message set but custom_subject never
+          # populated -- seen in production from before custom_subject
+          # existed) must not select ai_personalized_invite_forum_mailer:
+          # it has no subject_template of its own and relies entirely on
+          # subject_override, which would be blank here, producing a
+          # missing-translation subject instead of a real one.
+          invite.update!(custom_subject: nil)
+
+          mail = InviteMailer.send_invite(invite)
+
+          expect(mail.subject).not_to include("translation missing")
+          expect(mail.subject).not_to eq("Quick hello from campus")
+          expect(mail.body.encoded).to match("With this note")
+          expect(mail.body.encoded).to match("A few of us from your college network hang out here")
+        end
+      end
+
       context "with template modifier" do
         fab!(:invite)
         let(:plugin) { Plugin::Instance.new }

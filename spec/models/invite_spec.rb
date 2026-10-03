@@ -263,6 +263,23 @@ RSpec.describe Invite do
         invite2 = Invite.generate(user, email: "test2@example.com")
         expect(invite2.allow_any_email).to eq(false)
       end
+
+      it "persists schedule_send when given, defaulting to true" do
+        invite = Invite.generate(user, email: "test@example.com", schedule_send: false)
+        expect(invite.schedule_send).to eq(false)
+
+        invite2 = Invite.generate(user, email: "test2@example.com")
+        expect(invite2.schedule_send).to eq(true)
+      end
+
+      it "updates schedule_send on a reused invite from the new row" do
+        Invite.generate(user, email: "test@example.com", schedule_send: true)
+
+        invite = Invite.generate(user, email: "test@example.com", schedule_send: false)
+
+        expect(Invite.where(email: "test@example.com").count).to eq(1)
+        expect(invite.schedule_send).to eq(false)
+      end
     end
 
     context "with link" do
@@ -823,6 +840,49 @@ RSpec.describe Invite do
           partially_redeemed_and_expired_invite_user,
         )
       end
+    end
+  end
+
+  describe ".search_filter" do
+    fab!(:inviter, :user)
+    fab!(:invite) { Fabricate(:invite, invited_by: inviter, email: "billybob@example.com") }
+    fab!(:other_invite) { Fabricate(:invite, invited_by: inviter, email: "jimtom@example.com") }
+
+    # Invite.pending (rather than a bare Invite.where) is the base relation
+    # here because search_filter's SQL references users.username, which
+    # requires the LEFT JOIN that pending/expired/redeemed_users already
+    # provide at every real call site (UsersController#invited,
+    # InvitesController#resend_all_invites).
+    it "returns the relation unchanged when search is blank" do
+      expect(
+        Invite.search_filter(Invite.pending(inviter), nil, show_emails: true),
+      ).to contain_exactly(invite, other_invite)
+    end
+
+    it "matches on email when show_emails is true" do
+      expect(
+        Invite.search_filter(Invite.pending(inviter), "billybob", show_emails: true),
+      ).to contain_exactly(invite)
+    end
+
+    it "only matches on username, not email, when show_emails is false" do
+      expect(
+        Invite.search_filter(Invite.pending(inviter), "billybob", show_emails: false),
+      ).to be_empty
+    end
+
+    it "matches allow_any_email invites via description" do
+      unbound =
+        Invite.generate(
+          inviter,
+          email: nil,
+          description: "priya@nit.ac.in",
+          max_redemptions_allowed: 1,
+        )
+
+      expect(
+        Invite.search_filter(Invite.pending(inviter), "priya", show_emails: true),
+      ).to contain_exactly(unbound)
     end
   end
 

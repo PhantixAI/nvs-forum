@@ -2,7 +2,6 @@ import EmberObject, { computed, set } from "@ember/object";
 import { trackedArray } from "@ember/reactive/collections";
 import { isNone } from "@ember/utils";
 import { ajax } from "discourse/lib/ajax";
-import { popupAjaxError } from "discourse/lib/ajax-error";
 import { userPath } from "discourse/lib/url";
 import Topic from "discourse/models/topic";
 import User from "discourse/models/user";
@@ -45,13 +44,30 @@ export default class Invite extends EmberObject {
     return EmberObject.create(result);
   }
 
-  static reinviteAll(domain, status) {
+  static reinviteAll(
+    domain,
+    status,
+    search,
+    { keywords, aiPersonalization, scheduleSend } = {}
+  ) {
     const data = {};
     if (!isNone(domain)) {
       data.domain = domain;
     }
     if (!isNone(status)) {
       data.status = status;
+    }
+    if (!isNone(search)) {
+      data.search = search;
+    }
+    if (!isNone(keywords)) {
+      data.keywords = keywords;
+    }
+    if (!isNone(aiPersonalization)) {
+      data.ai_personalization = aiPersonalization;
+    }
+    if (!isNone(scheduleSend)) {
+      data.schedule_send = scheduleSend;
     }
     return ajax("/invites/reinvite-all", { type: "POST", data });
   }
@@ -61,6 +77,20 @@ export default class Invite extends EmberObject {
       type: "POST",
       data: { username: user.username },
     });
+  }
+
+  static destroyAllInvites(domain, status, search) {
+    const data = {};
+    if (!isNone(domain)) {
+      data.domain = domain;
+    }
+    if (!isNone(status)) {
+      data.status = status;
+    }
+    if (!isNone(search)) {
+      data.search = search;
+    }
+    return ajax("/invites/destroy-all", { type: "POST", data });
   }
 
   static findLatestSentEmail(inviteId) {
@@ -122,12 +152,20 @@ export default class Invite extends EmberObject {
     }).then(() => this.set("destroyed", true));
   }
 
-  reinvite() {
+  reinvite({ keywords, aiPersonalization } = {}) {
+    // No .catch here, deliberately -- this is awaited from
+    // resend-invite.gjs's own try/catch (which calls popupAjaxError and
+    // keeps the modal open on failure), matching Invite.reinviteAll's
+    // behavior below. Swallowing the error here would resolve this
+    // promise regardless, so the modal would close looking successful
+    // even when the resend failed.
     return ajax("/invites/reinvite", {
       type: "POST",
-      data: { email: this.email },
-    })
-      .then(() => this.set("reinvited", true))
-      .catch(popupAjaxError);
+      data: {
+        invite_id: this.id,
+        keywords,
+        ai_personalization: aiPersonalization,
+      },
+    }).then(() => this.set("reinvited", true));
   }
 }

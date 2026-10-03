@@ -2308,11 +2308,115 @@ RSpec.describe InvitesController do
         expect(Jobs::InviteEmail.jobs.size).to eq(1)
       end
 
+      it "resends by invite_id, which also works for a bound invite" do
+        post "/invites/reinvite.json", params: { invite_id: invite.id }
+        expect(response.status).to eq(200)
+        expect(Jobs::InviteEmail.jobs.first["args"].first["invite_id"]).to eq(invite.id)
+      end
+
+      it "raises an error when invite_id belongs to someone else" do
+        post "/invites/reinvite.json", params: { invite_id: another_invite.id }
+        expect(response.status).to eq(400)
+      end
+
+      it "resends an allow_any_email invite by invite_id, since it has no bound email to look up" do
+        # Mirrors Jobs::BulkInvite#send_invite's shape for these rows.
+        unbound_invite =
+          Invite.generate(
+            user,
+            email: nil,
+            description: "asharani@ee.nits.ac.in",
+            allow_any_email: true,
+            max_redemptions_allowed: 1,
+          )
+        unbound_invite.update_column(:emailed_status, Invite.emailed_status_types[:sent])
+
+        post "/invites/reinvite.json", params: { invite_id: unbound_invite.id }
+
+        expect(response.status).to eq(200)
+        job_args = Jobs::InviteEmail.jobs.first["args"].first
+        expect(job_args["invite_id"]).to eq(unbound_invite.id)
+      end
+
       it "returns an error when allow_email_invites is disabled" do
         SiteSetting.allow_email_invites = false
         post "/invites/reinvite.json", params: { email: invite.email }
         expect(response.status).to eq(422)
         expect(response.parsed_body["errors"]).to include(I18n.t("invite.email_invites_disabled"))
+      end
+
+      it "regenerates the custom_subject and custom_message with the given keywords by default" do
+        allow(BulkInvitePersonalization::Generator).to receive(:personalize).and_return(
+          subject: "A fresh subject",
+          body: "A freshly generated note.",
+        )
+
+        post "/invites/reinvite.json", params: { email: invite.email, keywords: "robotics club" }
+
+        expect(response.status).to eq(200)
+        expect(invite.reload.custom_subject).to eq("A fresh subject")
+        expect(invite.custom_message).to eq("A freshly generated note.")
+        expect(BulkInvitePersonalization::Generator).to have_received(:personalize).with(
+          invite,
+          extra_keywords: "robotics club",
+        )
+      end
+
+      it "reuses the existing custom_subject/custom_message as-is when ai_personalization is false" do
+        # "No" on a resend means "send this invite exactly as it already
+        # is" -- InviteMailer#send_invite's template selection reuses
+        # whatever is in these columns on its own, so there's nothing to
+        # regenerate or clear here.
+        invite.update!(
+          custom_subject: "a previously AI-generated subject",
+          custom_message: "a previously AI-personalized note",
+        )
+        allow(BulkInvitePersonalization::Generator).to receive(:personalize)
+
+        post "/invites/reinvite.json",
+             params: {
+               email: invite.email,
+               keywords: "robotics club",
+               ai_personalization: "false",
+             }
+
+        expect(response.status).to eq(200)
+        expect(invite.reload.custom_subject).to eq("a previously AI-generated subject")
+        expect(invite.custom_message).to eq("a previously AI-personalized note")
+        expect(BulkInvitePersonalization::Generator).not_to have_received(:personalize)
+        expect(Jobs::InviteEmail.jobs.size).to eq(1)
+      end
+
+      it "still resends via the plain template when ai_personalization is false and there was nothing to reuse" do
+        expect(invite.custom_subject).to eq(nil)
+        expect(invite.custom_message).to eq(nil)
+        allow(BulkInvitePersonalization::Generator).to receive(:personalize)
+
+        post "/invites/reinvite.json", params: { email: invite.email, ai_personalization: "false" }
+
+        expect(response.status).to eq(200)
+        expect(invite.reload.custom_subject).to eq(nil)
+        expect(invite.custom_message).to eq(nil)
+        expect(BulkInvitePersonalization::Generator).not_to have_received(:personalize)
+        expect(Jobs::InviteEmail.jobs.size).to eq(1)
+      end
+
+      it "does not resend when personalization fails, so a stale or unpersonalized body never ships" do
+        # AI personalization on means the admin wants a properly personalized
+        # email or nothing at all, held back to retry -- not the original
+        # stale note (or the plain template) going out silently in its place.
+        invite.update!(custom_message: "original note")
+        allow(BulkInvitePersonalization::Generator).to receive(:personalize).and_raise(
+          BulkInvitePersonalization::Generator::GenerationFailed,
+          "provider outage",
+        )
+
+        post "/invites/reinvite.json", params: { email: invite.email }
+
+        expect(response.status).to eq(422)
+        expect(invite.reload.custom_message).to eq("original note")
+        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:skipped])
+        expect(Jobs::InviteEmail.jobs.size).to eq(0)
       end
     end
   end
@@ -2336,7 +2440,11 @@ RSpec.describe InvitesController do
       redeemed_invite.update!(expires_at: 5.days.ago)
 
       sign_in(admin)
-      post "/invites/reinvite-all"
+      # schedule_send: true (paced) synchronously bumps expires_at via
+      # requeue_for_paced_resend, unlike the personalize+burst cell (the
+      # default when omitted), which defers everything -- including the
+      # expiry bump -- into an enqueued, not-yet-run job.
+      post "/invites/reinvite-all", params: { schedule_send: "true" }
 
       expect(response.status).to eq(200)
       expect(new_invite.reload.expires_at).to eq_time(30.days.from_now)
@@ -2368,7 +2476,7 @@ RSpec.describe InvitesController do
       iitb_invite.update!(expires_at: 5.days.from_now)
 
       sign_in(admin)
-      post "/invites/reinvite-all", params: { domain: "nit.ac.in" }
+      post "/invites/reinvite-all", params: { domain: "nit.ac.in", schedule_send: "true" }
 
       expect(response.status).to eq(200)
       expect(nit_invite.reload.expires_at).to eq_time(30.days.from_now)
@@ -2386,7 +2494,7 @@ RSpec.describe InvitesController do
       other_invite.update!(expires_at: 5.days.from_now)
 
       sign_in(admin)
-      post "/invites/reinvite-all", params: { domain: "ac.in" }
+      post "/invites/reinvite-all", params: { domain: "ac.in", schedule_send: "true" }
 
       expect(response.status).to eq(200)
       expect(nit_invite.reload.expires_at).to eq_time(30.days.from_now)
@@ -2449,7 +2557,7 @@ RSpec.describe InvitesController do
       sent.update!(expires_at: 5.days.from_now)
 
       sign_in(admin)
-      post "/invites/reinvite-all", params: { status: "skipped" }
+      post "/invites/reinvite-all", params: { status: "skipped", schedule_send: "true" }
 
       expect(response.status).to eq(200)
       expect(skipped.reload.expires_at).to eq_time(30.days.from_now)
@@ -2477,7 +2585,11 @@ RSpec.describe InvitesController do
       invite.update!(expires_at: 5.days.from_now)
 
       sign_in(admin)
-      post "/invites/reinvite-all", params: { status: "'; DROP TABLE invites; --" }
+      post "/invites/reinvite-all",
+           params: {
+             status: "'; DROP TABLE invites; --",
+             schedule_send: "true",
+           }
 
       expect(response.status).to eq(200)
       expect(invite.reload.expires_at).to eq_time(30.days.from_now)
@@ -2489,6 +2601,134 @@ RSpec.describe InvitesController do
       post "/invites/reinvite-all"
       expect(response.status).to eq(422)
       expect(response.parsed_body["errors"]).to include(I18n.t("invite.email_invites_disabled"))
+    end
+
+    it "only resends invites matching the given search term" do
+      freeze_time
+
+      matching = Fabricate(:invite, invited_by: admin, email: "priya@nit.ac.in")
+      matching.update!(expires_at: 5.days.from_now)
+      other = Fabricate(:invite, invited_by: admin, email: "rahul@nit.ac.in")
+      other.update!(expires_at: 5.days.from_now)
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { search: "priya", schedule_send: "true" }
+
+      expect(response.status).to eq(200)
+      expect(matching.reload.expires_at).to eq_time(30.days.from_now)
+      expect(other.reload.expires_at).to eq_time(5.days.from_now)
+    end
+
+    it "enqueues the keyword-regeneration job instead of resending directly when keywords are given and schedule_send is false" do
+      freeze_time
+      invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      invite.update!(expires_at: 5.days.from_now)
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { keywords: "robotics club", schedule_send: "false" }
+
+      expect(response.status).to eq(200)
+      expect(invite.reload.expires_at).to eq_time(5.days.from_now)
+      expect(Jobs::ResendInvitesWithKeywords.jobs.size).to eq(1)
+      job_args = Jobs::ResendInvitesWithKeywords.jobs.first["args"].first
+      expect(job_args["invite_ids"]).to eq([invite.id])
+      expect(job_args["extra_keywords"]).to eq("robotics club")
+    end
+
+    it "enqueues the keyword-regeneration job with no keywords at all, as long as personalizing and not scheduled" do
+      # Closes a latent gap in the old branching: "Yes" + no keywords + paced-resend
+      # off used to silently skip personalization entirely. Keywords are now a
+      # genuinely optional extra, not what decides whether this job runs.
+      invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { schedule_send: "false" }
+
+      expect(response.status).to eq(200)
+      expect(Jobs::ResendInvitesWithKeywords.jobs.size).to eq(1)
+      job_args = Jobs::ResendInvitesWithKeywords.jobs.first["args"].first
+      expect(job_args["invite_ids"]).to eq([invite.id])
+      expect(job_args["extra_keywords"]).to eq(nil)
+    end
+
+    it "does not enqueue the keyword-regeneration job when ai_personalization is false" do
+      Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+
+      sign_in(admin)
+      post "/invites/reinvite-all",
+           params: {
+             keywords: "robotics club",
+             ai_personalization: "false",
+           }
+
+      expect(response.status).to eq(200)
+      expect(Jobs::ResendInvitesWithKeywords.jobs).to be_empty
+    end
+
+    it "reuses previously-personalized custom_message as-is and bypasses the paced AI pipeline when ai_personalization is false and schedule_send is false" do
+      # Jobs::ProcessBulkInviteEmails always calls
+      # BulkInvitePersonalization::Generator.personalize with no knowledge
+      # of this per-request flag -- an explicit "No" has to skip that
+      # pipeline entirely, not just withhold keywords from it. "No" means
+      # resend each invite exactly as it already is, so the existing
+      # columns are left untouched rather than cleared.
+      invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          email: "student@nit.ac.in",
+          custom_subject: "a previously AI-generated subject",
+          custom_message: "a previously AI-personalized note",
+        )
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { ai_personalization: "false", schedule_send: "false" }
+
+      expect(response.status).to eq(200)
+      expect(invite.reload.custom_subject).to eq("a previously AI-generated subject")
+      expect(invite.custom_message).to eq("a previously AI-personalized note")
+      expect(invite.emailed_status).not_to eq(Invite.emailed_status_types[:bulk_pending])
+      expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
+      expect(Jobs::ResendInvitesPaced.jobs).to be_empty
+      expect(Jobs::InviteEmail.jobs.map { |job| job["args"].first["invite_id"] }).to include(
+        invite.id,
+      )
+    end
+
+    it "still resends via the plain template when ai_personalization is false and there was nothing to reuse" do
+      invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { ai_personalization: "false", schedule_send: "false" }
+
+      expect(response.status).to eq(200)
+      expect(invite.reload.custom_subject).to eq(nil)
+      expect(invite.custom_message).to eq(nil)
+      expect(Jobs::InviteEmail.jobs.map { |job| job["args"].first["invite_id"] }).to include(
+        invite.id,
+      )
+    end
+
+    it "paces the resend one invite at a time, reusing existing content, when ai_personalization is false and schedule_send is true" do
+      invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          email: "student@nit.ac.in",
+          custom_subject: "a previously AI-generated subject",
+          custom_message: "a previously AI-personalized note",
+        )
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { ai_personalization: "false", schedule_send: "true" }
+
+      expect(response.status).to eq(200)
+      expect(Jobs::InviteEmail.jobs).to be_empty
+      expect(Jobs::ResendInvitesPaced.jobs.map { |job| job["args"].first["invite_id"] }).to eq(
+        [invite.id],
+      )
+      expect(invite.reload.custom_subject).to eq("a previously AI-generated subject")
+      expect(invite.custom_message).to eq("a previously AI-personalized note")
     end
 
     it "resends an allow_any_email invite but not an ordinary never-emailed link invite" do
@@ -2505,7 +2745,13 @@ RSpec.describe InvitesController do
         Invite.generate(admin, email: nil, description: "just a label", max_redemptions_allowed: 1)
 
       sign_in(admin)
-      post "/invites/reinvite-all"
+      # ai_personalization: false (with schedule_send left at its default,
+      # false/burst) is the one cell that still resends synchronously via
+      # invite.resend_invite with no job indirection -- the personalize
+      # cells now always go through a job (closing the old silent-skip gap),
+      # and the paced cell would skip this invite as already in-flight
+      # ("sending" is one of resend_all_invites_paced's in_flight_statuses).
+      post "/invites/reinvite-all", params: { ai_personalization: "false" }
 
       expect(response.status).to eq(200)
       invite_ids = Jobs::InviteEmail.jobs.map { |job| job["args"].first["invite_id"] }
@@ -2513,14 +2759,12 @@ RSpec.describe InvitesController do
       expect(invite_ids).not_to include(never_emailed_invite.id)
     end
 
-    context "when bulk_invite_paced_resend_enabled is true" do
-      before { SiteSetting.bulk_invite_paced_resend_enabled = true }
-
+    context "with schedule_send explicitly true (paced)" do
       it "requeues matching invites through the throttle instead of sending immediately" do
         invite = Fabricate(:invite, invited_by: admin)
 
         sign_in(admin)
-        post "/invites/reinvite-all"
+        post "/invites/reinvite-all", params: { schedule_send: "true" }
 
         expect(response.status).to eq(200)
         expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
@@ -2533,7 +2777,7 @@ RSpec.describe InvitesController do
         Discourse.redis.set(Jobs::ProcessBulkInviteEmails::CHAIN_KEY, 1)
 
         sign_in(admin)
-        post "/invites/reinvite-all"
+        post "/invites/reinvite-all", params: { schedule_send: "true" }
 
         expect(response.status).to eq(200)
         expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
@@ -2550,7 +2794,7 @@ RSpec.describe InvitesController do
         original_updated_at = invite.updated_at
 
         sign_in(admin)
-        post "/invites/reinvite-all"
+        post "/invites/reinvite-all", params: { schedule_send: "true" }
 
         expect(response.status).to eq(200)
         expect(invite.reload.updated_at).to eq_time(original_updated_at)
@@ -2564,11 +2808,108 @@ RSpec.describe InvitesController do
         )
 
         sign_in(admin)
-        post "/invites/reinvite-all"
+        post "/invites/reinvite-all", params: { schedule_send: "true" }
 
         expect(response.status).to eq(200)
         expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
       end
+    end
+  end
+
+  describe "#destroy_all_invites" do
+    let(:admin) { Fabricate(:admin) }
+
+    before { RateLimiter.enable }
+
+    it "deletes all matching invites by soft-deleting them" do
+      nit_invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      other_invite = Fabricate(:invite, invited_by: admin, email: "student@example.com")
+
+      sign_in(admin)
+      post "/invites/destroy-all"
+
+      expect(response.status).to eq(200)
+      expect(nit_invite.reload.deleted_at).to be_present
+      expect(other_invite.reload.deleted_at).to be_present
+    end
+
+    it "only deletes invites matching the given domain" do
+      nit_invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      iitb_invite = Fabricate(:invite, invited_by: admin, email: "student@iitb.ac.in")
+
+      sign_in(admin)
+      post "/invites/destroy-all", params: { domain: "nit.ac.in" }
+
+      expect(response.status).to eq(200)
+      expect(nit_invite.reload.deleted_at).to be_present
+      expect(iitb_invite.reload.deleted_at).to eq(nil)
+    end
+
+    it "only deletes invites matching the given status" do
+      pending_invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      skipped_invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          email: "other@nit.ac.in",
+          emailed_status: Invite.emailed_status_types[:skipped],
+        )
+
+      sign_in(admin)
+      post "/invites/destroy-all", params: { status: "skipped" }
+
+      expect(response.status).to eq(200)
+      expect(skipped_invite.reload.deleted_at).to be_present
+      expect(pending_invite.reload.deleted_at).to eq(nil)
+    end
+
+    it "only deletes invites matching the given search term" do
+      nit_invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      other_invite = Fabricate(:invite, invited_by: admin, email: "student@example.com")
+
+      sign_in(admin)
+      post "/invites/destroy-all", params: { search: "nit" }
+
+      expect(response.status).to eq(200)
+      expect(nit_invite.reload.deleted_at).to be_present
+      expect(other_invite.reload.deleted_at).to eq(nil)
+    end
+
+    it "returns 403 for non-staff user and deletes nothing" do
+      user = Fabricate(:user)
+      invite = Fabricate(:invite, invited_by: user, email: "student@nit.ac.in")
+
+      sign_in(user)
+      post "/invites/destroy-all"
+
+      expect(response.status).to eq(403)
+      expect(invite.reload.deleted_at).to eq(nil)
+    end
+
+    it "errors if admins try to exceed the limit of one bulk delete per day" do
+      Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+
+      sign_in(admin)
+      start = Time.now
+      freeze_time(start)
+
+      post "/invites/destroy-all"
+      expect(response.parsed_body["errors"]).to_not be_present
+
+      freeze_time(start + 10.minutes)
+      post "/invites/destroy-all"
+      expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
+    end
+
+    it "rate limits deleting independently from resending the same filtered set the same day" do
+      Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { domain: "nit.ac.in" }
+      expect(response.parsed_body["errors"]).to_not be_present
+
+      post "/invites/destroy-all", params: { domain: "nit.ac.in" }
+      expect(response.parsed_body["errors"]).to_not be_present
     end
   end
 

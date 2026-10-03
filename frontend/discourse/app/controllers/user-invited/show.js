@@ -6,6 +6,7 @@ import { dependentKeyCompat } from "@ember/object/compat";
 import { service } from "@ember/service";
 import { observes } from "@ember-decorators/object";
 import CreateInviteBulk from "discourse/components/modal/create-invite-bulk";
+import ResendInviteModal from "discourse/components/modal/resend-invite";
 import SentInviteEmail from "discourse/components/modal/sent-invite-email";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import { removeValueFromArray } from "discourse/lib/array-tools";
@@ -211,20 +212,53 @@ export default class UserInvitedShowController extends Controller {
   }
 
   @action
-  reinvite(invite) {
-    invite.reinvite();
-    return false;
+  openResendInvite(invite) {
+    this.modal.show(ResendInviteModal, {
+      model: {
+        bulk: false,
+        onResend: ({ keywords, aiPersonalization }) =>
+          invite.reinvite({ keywords, aiPersonalization }),
+      },
+    });
   }
 
   @action
   reinviteAll() {
     const domain = this.selectedDomain;
     const status = this.selectedStatus;
-    this.dialog.yesNoConfirm({
-      message: this.#reinviteAllConfirmMessage(domain, status),
+    const search = this.searchTerm;
+    this.modal.show(ResendInviteModal, {
+      model: {
+        bulk: true,
+        confirmMessage: this.#reinviteAllConfirmMessage(domain, status),
+        onResend: async ({ keywords, aiPersonalization, scheduleSend }) => {
+          await Invite.reinviteAll(domain, status, search, {
+            keywords,
+            aiPersonalization,
+            scheduleSend,
+          });
+          this.set("reinvitedAll", true);
+        },
+      },
+    });
+  }
+
+  @action
+  deleteAllInvites() {
+    const domain = this.selectedDomain;
+    const status = this.selectedStatus;
+    const search = this.searchTerm;
+
+    this.dialog.deleteConfirm({
+      message: this.#deleteAllInvitesConfirmMessage(domain, status),
       didConfirm: () => {
-        return Invite.reinviteAll(domain, status)
-          .then(() => this.set("reinvitedAll", true))
+        return Invite.destroyAllInvites(domain, status, search)
+          .then(() => {
+            this.toasts.success({
+              data: { message: i18n("user.invited.deleted_all") },
+            });
+            this.send("triggerRefresh");
+          })
           .catch(popupAjaxError);
       },
     });
@@ -296,6 +330,25 @@ export default class UserInvitedShowController extends Controller {
       return i18n("user.invited.reinvite_all_confirm_domain", { domain });
     }
     return i18n("user.invited.reinvite_all_confirm");
+  }
+
+  #deleteAllInvitesConfirmMessage(domain, status) {
+    const statusLabel =
+      status && i18n(`user.invited.delivery_status_${status}`);
+
+    if (domain && status) {
+      return i18n("user.invited.delete_all_confirm_domain_status", {
+        domain,
+        status: statusLabel,
+      });
+    } else if (status) {
+      return i18n("user.invited.delete_all_confirm_status", {
+        status: statusLabel,
+      });
+    } else if (domain) {
+      return i18n("user.invited.delete_all_confirm_domain", { domain });
+    }
+    return i18n("user.invited.delete_all_confirm");
   }
 
   @debounce(INPUT_DELAY)

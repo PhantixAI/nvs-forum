@@ -8,7 +8,9 @@ import inviteDeliveryStatus from "discourse/helpers/invite-delivery-status";
 import rawDate from "discourse/helpers/raw-date";
 import { groupPath } from "discourse/lib/url";
 import ComboBox from "discourse/select-kit/components/combo-box";
+import { not } from "discourse/truth-helpers";
 import DButton from "discourse/ui-kit/d-button";
+import DComboButton from "discourse/ui-kit/d-combo-button";
 import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
 import DCopyButton from "discourse/ui-kit/d-copy-button";
 import DDropdownMenu from "discourse/ui-kit/d-dropdown-menu";
@@ -105,13 +107,33 @@ export default <template>
                     @label="user.invited.reinvited_all"
                   />
                 </span>
-              {{else if @controller.hasEmailInvites}}
-                <DButton
-                  class="btn-default"
-                  @action={{@controller.reinviteAll}}
-                  @icon="arrows-rotate"
-                  @label="user.invited.reinvite_all"
-                />
+              {{else}}
+                <DComboButton
+                  class="resend-delete-combo"
+                  @btnTypeClass="btn-default"
+                  @hasMenu={{true}}
+                  as |combo|
+                >
+                  <combo.Button
+                    @action={{@controller.reinviteAll}}
+                    @disabled={{not @controller.hasEmailInvites}}
+                    @icon="arrows-rotate"
+                    @label="user.invited.reinvite_all"
+                  />
+
+                  <combo.Menu @identifier="invite-bulk-actions-menu">
+                    <DDropdownMenu as |dropdown|>
+                      <dropdown.item>
+                        <DButton
+                          class="btn-danger delete-all-invites"
+                          @action={{@controller.deleteAllInvites}}
+                          @icon="trash-can"
+                          @label="user.invited.delete_all"
+                        />
+                      </dropdown.item>
+                    </DDropdownMenu>
+                  </combo.Menu>
+                </DComboButton>
               {{/if}}
             {{/if}}
           {{/if}}
@@ -393,6 +415,17 @@ export default <template>
                                       }}
                                       @icon="envelope"
                                       @label="user.invited.invite.preview_sent_email"
+                                    />
+                                  </dropdown.item>
+                                  <dropdown.item>
+                                    <DButton
+                                      class="btn-transparent resend-invite"
+                                      @action={{fn
+                                        @controller.openResendInvite
+                                        invite
+                                      }}
+                                      @icon="paper-plane"
+                                      @label="user.invited.reinvite"
                                     />
                                   </dropdown.item>
                                 {{/if}}

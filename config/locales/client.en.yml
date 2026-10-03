@@ -2648,6 +2648,12 @@ en:
         reinvite_all_confirm_status: "Are you sure you want to resend all invites with status \"%{status}\"?"
         reinvite_all_confirm_domain_status: "Are you sure you want to resend all invites for %{domain} with status \"%{status}\"?"
         reinvited_all: "All Invites Sent!"
+        delete_all: "Delete Invites"
+        deleted_all: "Matching invites deleted!"
+        delete_all_confirm: "Are you sure you want to permanently delete all invites? This cannot be undone."
+        delete_all_confirm_domain: "Are you sure you want to permanently delete all invites for %{domain}? This cannot be undone."
+        delete_all_confirm_status: "Are you sure you want to permanently delete all invites with status \"%{status}\"? This cannot be undone."
+        delete_all_confirm_domain_status: "Are you sure you want to permanently delete all invites for %{domain} with status \"%{status}\"? This cannot be undone."
         time_read: "Read Time"
         days_visited: "Days Visited"
         account_age_days: "Account age in days"
@@ -2662,6 +2668,20 @@ en:
           success: "Invite link generated successfully!"
           error: "There was an error generating Invite link"
         cannot_invite_to_forum: "Sorry, you don't have permission to create invites. Please contact an admin to grant you invite permission."
+
+        resend_invite:
+          modal:
+            title: "Resend invite"
+            title_all: "Resend invites"
+            keywords_label: "Keywords (optional)"
+            keywords_placeholder: "Add context to improve the generated email…"
+            ai_personalization_label: "AI Personalization"
+            ai_personalization_yes: "Yes"
+            ai_personalization_no: "No"
+            schedule_send_label: "Schedule Send"
+            schedule_send_yes: "Yes"
+            schedule_send_no: "No"
+            resend: "Resend"
 
         sent_email:
           modal:
@@ -2785,11 +2805,12 @@ en:
             <ul>
               <li><code>locale</code> – the language the invitation and signup flow are shown in for that row.</li>
               <li><code>allow_any_email</code> – set to <code>true</code> to let that invite be redeemed with any email address instead of only the one it was sent to.</li>
+              <li><code>schedule_send</code> – set to <code>false</code> to send that row immediately instead of through the paced, one-at-a-time queue. Defaults to <code>true</code> when left blank.</li>
               <li><code>skip_personalization</code> – set to <code>true</code> to send that row the plain, non-personalized invitation email.</li>
               <li><code>name</code> and <code>keywords</code> – recipient context (e.g. their role or interests) used to personalize the invitation email, when enabled.</li>
             </ul>
-            <pre>email,groups,topic_id,locale,allow_any_email,skip_personalization,name,keywords</pre>
-            <pre>john@smith.com,first_group_name;second_group_name,topic_id,en,true,false,Jane Doe,machine learning;robotics</pre>
+            <pre>email,groups,topic_id,locale,allow_any_email,schedule_send,skip_personalization,name,keywords</pre>
+            <pre>john@smith.com,first_group_name;second_group_name,topic_id,en,true,true,false,Jane Doe,machine learning;robotics</pre>
 
           progress: "Uploaded %{progress}%…"
           success: "File uploaded successfully. You will be notified via message when the process is complete."

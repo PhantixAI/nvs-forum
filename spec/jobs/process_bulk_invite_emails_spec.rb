@@ -63,14 +63,18 @@ RSpec.describe Jobs::ProcessBulkInviteEmails do
       expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(0)
     end
 
-    it "sets custom_message from AI personalization when it returns text" do
+    it "sets custom_subject/custom_message from AI personalization when it returns text" do
       invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
 
-      BulkInvitePersonalization::Generator.stubs(:personalize).returns("A personalized note.")
+      BulkInvitePersonalization::Generator.stubs(:personalize).returns(
+        subject: "A fresh subject",
+        body: "A personalized note.",
+      )
 
       described_class.new.execute({})
 
-      expect(invite.reload.custom_message).to eq("A personalized note.")
+      expect(invite.reload.custom_subject).to eq("A fresh subject")
+      expect(invite.custom_message).to eq("A personalized note.")
     end
 
     it "leaves custom_message blank when personalization is unavailable" do
