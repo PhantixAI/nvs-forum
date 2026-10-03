@@ -47,11 +47,13 @@ module Jobs
     private
 
     def deliver(invite)
-      personalized_text = BulkInvitePersonalization::Generator.personalize(invite)
+      result = BulkInvitePersonalization::Generator.personalize(invite)
 
       # A nil result means personalization doesn't apply. That must not wipe a
       # note the inviter wrote, which resend-all reaches.
-      invite.update_columns(custom_message: personalized_text) if personalized_text.present?
+      if result.present?
+        invite.update_columns(custom_subject: result[:subject], custom_message: result[:body])
+      end
 
       ::Jobs.enqueue(:invite_email, invite_id: invite.id)
     rescue BulkInvitePersonalization::Generator::GenerationFailed => e

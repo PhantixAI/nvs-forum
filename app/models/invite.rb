@@ -44,6 +44,7 @@ class Invite < ActiveRecord::Base
   validates :invited_by_id, presence: true
   validates :email, email: true, allow_blank: true
   validates :custom_message, length: { maximum: 1000 }
+  validates :custom_subject, length: { maximum: 255 }
   validates :domain, length: { maximum: 500 }
   validates :description, length: { maximum: DESCRIPTION_MAX_LENGTH }
   validates :recipient_name, length: { maximum: RECIPIENT_NAME_MAX_LENGTH }
@@ -373,6 +374,23 @@ class Invite < ActiveRecord::Base
   end
   private_class_method :domain_filter_condition
 
+  # Shared by UsersController#invited (the listing) and
+  # InvitesController#resend_all_invites, so bulk resend always matches
+  # exactly the rows the admin can currently see under the same search term.
+  # allow_any_email invites have no bound invites.email -- their intended
+  # recipient lives in invites.description instead (see Jobs::BulkInvite),
+  # so search has to check both or those invites are invisible to search
+  # despite being real and findable by scrolling the unfiltered list.
+  def self.search_filter(invites, search, show_emails:)
+    return invites if search.blank?
+
+    filter_sql = "(LOWER(users.username) LIKE :filter)"
+    filter_sql =
+      "(LOWER(invites.email) LIKE :filter) or (LOWER(invites.description) LIKE :filter) or (LOWER(users.username) LIKE :filter)" if show_emails
+
+    invites.where(filter_sql, filter: "%#{search.downcase}%")
+  end
+
   def self.invalidate_for_email(email)
     Invite.find_by(email: Email.downcase(email))&.invalidate!
   end
@@ -586,6 +604,7 @@ end
 #  admin                   :boolean          default(FALSE), not null
 #  allow_any_email         :boolean          default(FALSE), not null
 #  custom_message          :text
+#  custom_subject          :string
 #  deleted_at              :datetime
 #  description             :string(100)
 #  domain                  :string

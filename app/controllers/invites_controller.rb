@@ -512,11 +512,58 @@ class InvitesController < ApplicationController
       return render_json_error(I18n.t("invite.email_invites_disabled"))
     end
 
-    params.require(:email)
     RateLimiter.new(current_user, "resend-invite-per-hour", 10, 1.hour).performed!
 
-    invite = Invite.find_by(invited_by_id: current_user.id, email: params[:email])
+    # allow_any_email invites are unbound (email: nil) by design -- their
+    # real recipient lives in description instead (see Jobs::BulkInvite,
+    # Invite.search_filter) -- so looking one up by email, as the bound-invite
+    # path below still does for compatibility, would never find it. The
+    # per-invite resend button (frontend/discourse/app/models/invite.js)
+    # always sends invite_id, which works for both invite shapes.
+    invite =
+      if params[:invite_id].present?
+        Invite.find_by(invited_by_id: current_user.id, id: params[:invite_id])
+      else
+        params.require(:email)
+        Invite.find_by(invited_by_id: current_user.id, email: params[:email])
+      end
     raise Discourse::InvalidParameters.new(:email) if invite.blank?
+
+    # A single invite's LLM call is fast enough to run inline here -- unlike
+    # resend_all_invites below, which can touch a batch too large to
+    # regenerate within one web request.
+    if params[:ai_personalization] == "false"
+      # InviteMailer#send_invite's template choice depends on custom_message
+      # (and custom_subject) being present -- an explicit "No" has to clear
+      # whatever a previous (possibly personalized) send left behind, or the
+      # resend just reuses that old AI-written email.
+      invite.update_columns(custom_message: nil, custom_subject: nil)
+    else
+      begin
+        result =
+          BulkInvitePersonalization::Generator.personalize(
+            invite,
+            extra_keywords: params[:keywords],
+          )
+        if result.present?
+          invite.update_columns(custom_subject: result[:subject], custom_message: result[:body])
+        end
+      rescue BulkInvitePersonalization::Generator::GenerationFailed => e
+        Discourse.warn_exception(
+          e,
+          message: "Resend personalization failed for invite #{invite.id}",
+        )
+        # Must not fall through to invite.resend_invite below: with AI
+        # personalization on, sending anyway here would mean either the
+        # plain unpersonalized template or -- worse -- a stale body left
+        # over from a previous attempt, neither of which the admin asked
+        # for. Mark it :skipped (same status the batch paths use for this)
+        # so it's visibly held back and can be resent once this clears.
+        invite.update_columns(emailed_status: Invite.emailed_status_types[:skipped])
+        return render_json_error(I18n.t("invite.ai_personalization_failed"))
+      end
+    end
+
     invite.resend_invite
     render json: success_json
   rescue RateLimiter::LimitExceeded
@@ -561,8 +608,44 @@ class InvitesController < ApplicationController
         "email IS NOT NULL OR emailed_status != ?",
         Invite.emailed_status_types[:not_required],
       )
+    invites_to_resend =
+      Invite.search_filter(
+        invites_to_resend,
+        params[:search],
+        show_emails: guardian.can_see_invite_emails?(current_user),
+      )
 
-    if SiteSetting.bulk_invite_paced_resend_enabled
+    keywords = params[:keywords].presence
+    if params[:ai_personalization] == "false"
+      # An explicit "No" must win over bulk_invite_paced_resend_enabled:
+      # that setting routes through Jobs::ProcessBulkInviteEmails, which
+      # calls BulkInvitePersonalization::Generator.personalize for every
+      # invite with no awareness of this per-request choice at all, so
+      # going through it here would regenerate AI text anyway. Clear any
+      # previously-personalized custom_message (see InviteMailer#send_invite's
+      # template choice) and resend immediately instead, bypassing that
+      # pipeline entirely.
+      # distinct(false): invites_to_resend inherits a DISTINCT from
+      # Invite.pending, which update_all doesn't support and Rails 8.2 will
+      # start raising on -- harmless to drop here since update_all issues a
+      # single UPDATE ... WHERE, not a SELECT, so duplicate rows from the
+      # join were never a concern for it in the first place.
+      invites_to_resend.distinct(false).update_all(custom_message: nil, custom_subject: nil)
+      invites_to_resend.find_each { |invite| invite.resend_invite }
+    elsif keywords.present?
+      # A filtered batch can be hundreds to low thousands of invites, so
+      # regenerating each one's AI text has to happen off-request -- unlike
+      # resend_invite above.
+      # reorder(nil): invites_to_resend inherits a DISTINCT + ORDER BY
+      # invites.updated_at from Invite.pending, and plucking just :id would
+      # otherwise violate Postgres's "ORDER BY expressions must appear in
+      # the SELECT DISTINCT list" rule.
+      Jobs.enqueue(
+        :resend_invites_with_keywords,
+        invite_ids: invites_to_resend.reorder(nil).pluck(:id),
+        extra_keywords: keywords,
+      )
+    elsif SiteSetting.bulk_invite_paced_resend_enabled
       resend_all_invites_paced(invites_to_resend)
     else
       invites_to_resend.find_each { |invite| invite.resend_invite }

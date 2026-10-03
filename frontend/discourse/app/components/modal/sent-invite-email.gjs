@@ -1,4 +1,3 @@
-import { Textarea } from "@ember/component";
 import DModal from "discourse/ui-kit/d-modal";
 import { i18n } from "discourse-i18n";
 
@@ -7,6 +6,7 @@ const SentInviteEmail = <template>
     class="sent-invite-email-modal"
     @bodyClass="sent-invite-email"
     @closeModal={{@closeModal}}
+    @inline={{@inline}}
     @title={{i18n "user.invited.sent_email.modal.title"}}
   >
     <:body>
@@ -20,14 +20,14 @@ const SentInviteEmail = <template>
       <div class="control-group">
         <label>{{i18n "user.invited.sent_email.modal.body"}}</label>
         <div class="controls">
-          <Textarea @value={{@model.body}} />
+          <p class="sent-invite-email-body">{{@model.body}}</p>
         </div>
       </div>
 
       <div class="control-group">
         <label>{{i18n "user.invited.sent_email.modal.headers"}}</label>
         <div class="controls">
-          <Textarea wrap="off" @value={{@model.headers}} />
+          <p class="sent-invite-email-headers">{{@model.headers}}</p>
         </div>
       </div>
     </:body>
