@@ -2735,6 +2735,103 @@ RSpec.describe InvitesController do
     end
   end
 
+  describe "#destroy_all_invites" do
+    let(:admin) { Fabricate(:admin) }
+
+    before { RateLimiter.enable }
+
+    it "deletes all matching invites by soft-deleting them" do
+      nit_invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      other_invite = Fabricate(:invite, invited_by: admin, email: "student@example.com")
+
+      sign_in(admin)
+      post "/invites/destroy-all"
+
+      expect(response.status).to eq(200)
+      expect(nit_invite.reload.deleted_at).to be_present
+      expect(other_invite.reload.deleted_at).to be_present
+    end
+
+    it "only deletes invites matching the given domain" do
+      nit_invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      iitb_invite = Fabricate(:invite, invited_by: admin, email: "student@iitb.ac.in")
+
+      sign_in(admin)
+      post "/invites/destroy-all", params: { domain: "nit.ac.in" }
+
+      expect(response.status).to eq(200)
+      expect(nit_invite.reload.deleted_at).to be_present
+      expect(iitb_invite.reload.deleted_at).to eq(nil)
+    end
+
+    it "only deletes invites matching the given status" do
+      pending_invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      skipped_invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          email: "other@nit.ac.in",
+          emailed_status: Invite.emailed_status_types[:skipped],
+        )
+
+      sign_in(admin)
+      post "/invites/destroy-all", params: { status: "skipped" }
+
+      expect(response.status).to eq(200)
+      expect(skipped_invite.reload.deleted_at).to be_present
+      expect(pending_invite.reload.deleted_at).to eq(nil)
+    end
+
+    it "only deletes invites matching the given search term" do
+      nit_invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      other_invite = Fabricate(:invite, invited_by: admin, email: "student@example.com")
+
+      sign_in(admin)
+      post "/invites/destroy-all", params: { search: "nit" }
+
+      expect(response.status).to eq(200)
+      expect(nit_invite.reload.deleted_at).to be_present
+      expect(other_invite.reload.deleted_at).to eq(nil)
+    end
+
+    it "returns 403 for non-staff user and deletes nothing" do
+      user = Fabricate(:user)
+      invite = Fabricate(:invite, invited_by: user, email: "student@nit.ac.in")
+
+      sign_in(user)
+      post "/invites/destroy-all"
+
+      expect(response.status).to eq(403)
+      expect(invite.reload.deleted_at).to eq(nil)
+    end
+
+    it "errors if admins try to exceed the limit of one bulk delete per day" do
+      Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+
+      sign_in(admin)
+      start = Time.now
+      freeze_time(start)
+
+      post "/invites/destroy-all"
+      expect(response.parsed_body["errors"]).to_not be_present
+
+      freeze_time(start + 10.minutes)
+      post "/invites/destroy-all"
+      expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
+    end
+
+    it "rate limits deleting independently from resending the same filtered set the same day" do
+      Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { domain: "nit.ac.in" }
+      expect(response.parsed_body["errors"]).to_not be_present
+
+      post "/invites/destroy-all", params: { domain: "nit.ac.in" }
+      expect(response.parsed_body["errors"]).to_not be_present
+    end
+  end
+
   describe "#upload_csv" do
     it "requires to be logged in" do
       post "/invites/upload_csv.json"

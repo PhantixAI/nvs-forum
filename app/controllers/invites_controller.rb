@@ -654,6 +654,41 @@ class InvitesController < ApplicationController
     render json: success_json
   end
 
+  def destroy_all_invites
+    guardian.ensure_can_destroy_all_invites!(current_user)
+
+    # Same scoping as resend_all_invites above -- this sits behind the same
+    # button, so it must affect exactly the set resend would have touched
+    # for the same filters.
+    domain = params[:domain].presence if params[:domain].to_s.match?(Invite::DOMAIN_REGEX)
+    status = params[:status].presence if Invite::DELIVERY_STATUSES.include?(params[:status])
+
+    begin
+      # Separate key from bulk-reinvite-per-day so resending and deleting
+      # the same filtered set the same day don't block each other.
+      rate_limit_key = ["bulk-destroy-invite-per-day", domain, status].compact.join("-")
+      RateLimiter.new(current_user, rate_limit_key, 1, 1.day, apply_limit_to_staff: true).performed!
+    rescue RateLimiter::LimitExceeded
+      return render_json_error(I18n.t("rate_limiter.slow_down"))
+    end
+
+    invites_to_destroy =
+      Invite.pending(current_user, domain:, status:).where(
+        "email IS NOT NULL OR emailed_status != ?",
+        Invite.emailed_status_types[:not_required],
+      )
+    invites_to_destroy =
+      Invite.search_filter(
+        invites_to_destroy,
+        params[:search],
+        show_emails: guardian.can_see_invite_emails?(current_user),
+      )
+
+    invites_to_destroy.find_each { |invite| invite.trash!(current_user) }
+
+    render json: success_json
+  end
+
   def upload_csv
     guardian.ensure_can_bulk_invite_to_forum!
 

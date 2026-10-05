@@ -19,7 +19,7 @@ module BulkInvitePersonalization
     PUNCTUATION_SHOUTING_PATTERN = /!|\$/
     ALL_CAPS_WORD_PATTERN = /\b[A-Z]{4,}\b/
     SENTENCE_BOUNDARY = /[.?]/
-    REQUIRED_LINK_LINE = "Please use the following invite link to join the forum:\n%{link}"
+    REQUIRED_LINK_LINE = "\n\nPlease use the following invite link to join the forum:\n%{link}"
 
     # The model is told not to write the join link itself (see
     # Generator#system_message) -- it is always appended here afterward,
