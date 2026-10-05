@@ -39,11 +39,13 @@ acceptance("User invited - delivery status filter", function (needs) {
   let invitedRequests;
   let reinviteAllRequests;
   let reinviteRequests;
+  let destroyAllRequests;
 
   needs.hooks.beforeEach(() => {
     invitedRequests = [];
     reinviteAllRequests = [];
     reinviteRequests = [];
+    destroyAllRequests = [];
   });
 
   needs.pretender((server, helper) => {
@@ -76,6 +78,11 @@ acceptance("User invited - delivery status filter", function (needs) {
       reinviteRequests.push(helper.parsePostData(request.requestBody));
       return helper.response({ success: "OK" });
     });
+
+    server.post("/invites/destroy-all", (request) => {
+      destroyAllRequests.push(helper.parsePostData(request.requestBody));
+      return helper.response({ success: "OK" });
+    });
   });
 
   test("renders a pill for sent and skipped invites", async function (assert) {
@@ -104,6 +111,37 @@ acceptance("User invited - delivery status filter", function (needs) {
 
     assert.strictEqual(reinviteAllRequests.length, 1);
     assert.strictEqual(reinviteAllRequests[0].status, "skipped");
+  });
+
+  test("deletes only the filtered status after a warning and confirmation, leaving resend untouched", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    const statusFilter = selectKit(".invite-status-filter");
+    await statusFilter.expand();
+    await statusFilter.selectRowByValue("skipped");
+
+    await click(".resend-delete-combo .fk-d-menu__trigger");
+    await click(".fk-d-menu .delete-all-invites");
+
+    assert
+      .dom(".dialog-body")
+      .includesText('with status "Skipped"', "the warning names the status");
+    await click(".dialog-footer .btn-danger");
+
+    assert.strictEqual(destroyAllRequests.length, 1);
+    assert.strictEqual(destroyAllRequests[0].status, "skipped");
+    assert.strictEqual(
+      reinviteAllRequests.length,
+      0,
+      "deleting does not also resend"
+    );
+
+    // The combo button's own primary action still works unaffected by the
+    // menu it now carries.
+    await click(".resend-delete-combo .d-combo-button-button");
+    await click(".resend-invite-modal .resend-invite-confirm");
+
+    assert.strictEqual(reinviteAllRequests.length, 1);
   });
 
   test("includes the active search term when resending all invites", async function (assert) {

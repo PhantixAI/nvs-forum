@@ -76,6 +76,20 @@ export default class Invite extends EmberObject {
     });
   }
 
+  static destroyAllInvites(domain, status, search) {
+    const data = {};
+    if (!isNone(domain)) {
+      data.domain = domain;
+    }
+    if (!isNone(status)) {
+      data.status = status;
+    }
+    if (!isNone(search)) {
+      data.search = search;
+    }
+    return ajax("/invites/destroy-all", { type: "POST", data });
+  }
+
   static findLatestSentEmail(inviteId) {
     return ajax(`/admin/email-logs/invite_sent/${inviteId}.json`);
   }

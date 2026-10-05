@@ -19,7 +19,7 @@ module BulkInvitePersonalization
     PUNCTUATION_SHOUTING_PATTERN = /!|\$/
     ALL_CAPS_WORD_PATTERN = /\b[A-Z]{4,}\b/
     SENTENCE_BOUNDARY = /[.?]/
-    REQUIRED_LINK_LINE = "Please use the following invite link to join the forum:\n%{link}"
+    REQUIRED_LINK_LINE = "\n\nPlease use the following invite link to join the forum:\n%{link}"
 
     # The model is told not to write the join link itself (see
     # Generator#system_message) -- it is always appended here afterward,
@@ -29,7 +29,7 @@ module BulkInvitePersonalization
     # depending on; this also means any link-shaped text at all in the
     # model's own output is unexpected (see the URL check below), not
     # something to make an exception for.
-    def self.clean_body(text, required_link:, invite_id: nil)
+    def self.clean_body(text, required_link:, invite_id: nil, recipient_domain: nil)
       return nil if text.blank?
 
       sanitized = ActionView::Base.full_sanitizer.sanitize(text).to_s
@@ -50,7 +50,7 @@ module BulkInvitePersonalization
       flattened = collapse_whitespace(sanitized, preserve_paragraphs: true)
       return nil if flattened.blank?
 
-      if flattened.match?(URL_PATTERN)
+      if contains_unexpected_link?(flattened, recipient_domain)
         log_rejection(:body, "unexpected link or domain", invite_id:, text: flattened)
         return nil
       end
@@ -71,10 +71,10 @@ module BulkInvitePersonalization
         return nil
       end
 
-      "#{truncated}\n\n#{REQUIRED_LINK_LINE % { link: required_link }}"
+      "#{truncated}#{REQUIRED_LINK_LINE % { link: required_link }}"
     end
 
-    def self.clean_subject(text, invite_id: nil)
+    def self.clean_subject(text, invite_id: nil, recipient_domain: nil)
       return nil if text.blank?
 
       sanitized = ActionView::Base.full_sanitizer.sanitize(text).to_s
@@ -88,7 +88,7 @@ module BulkInvitePersonalization
       flattened = collapse_whitespace(sanitized)
       return nil if flattened.blank?
 
-      if flattened.match?(URL_PATTERN)
+      if contains_unexpected_link?(flattened, recipient_domain)
         log_rejection(:subject, "contains a link or domain", invite_id:, text: flattened)
         return nil
       end
@@ -105,6 +105,20 @@ module BulkInvitePersonalization
 
       flattened
     end
+
+    # The model is explicitly told it may reference the recipient's
+    # college/institution using their bare email domain when it doesn't
+    # know the real institution name (see Generator's rules) -- a prose
+    # mention of exactly that domain is not a link and must not be
+    # rejected as one. Only the bare substring is stripped before
+    # checking, so an actual http://<domain> or www.<domain> construction
+    # of the same domain still matches URL_PATTERN on what's left and is
+    # still rejected -- only a plain mention is exempt.
+    def self.contains_unexpected_link?(text, recipient_domain)
+      checked = recipient_domain.present? ? text.gsub(recipient_domain, "") : text
+      checked.match?(URL_PATTERN)
+    end
+    private_class_method :contains_unexpected_link?
 
     # A blanket gsub(/\s+/, " ") (the old behavior, still used for the
     # single-line subject) would also flatten an intentional blank-line

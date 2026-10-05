@@ -74,13 +74,25 @@ module BulkInvitePersonalization
                 "raw[0..200]=#{response[0..200].inspect}"
       end
 
-      body = ResponseValidator.clean_body(parsed[:body], required_link: link, invite_id: invite.id)
+      domain = recipient_domain(invite)
+      body =
+        ResponseValidator.clean_body(
+          parsed[:body],
+          required_link: link,
+          invite_id: invite.id,
+          recipient_domain: domain,
+        )
       if body.nil?
         raise GenerationFailed,
               "invite #{invite.id}: body failed validation (see preceding rejection log line)"
       end
 
-      subject = ResponseValidator.clean_subject(parsed[:subject], invite_id: invite.id)
+      subject =
+        ResponseValidator.clean_subject(
+          parsed[:subject],
+          invite_id: invite.id,
+          recipient_domain: domain,
+        )
       if subject.nil?
         raise GenerationFailed,
               "invite #{invite.id}: subject failed validation (see preceding rejection log line)"
@@ -215,13 +227,18 @@ module BulkInvitePersonalization
     end
     private_class_method :parse_response
 
-    def self.user_message(invite, extra_keywords: nil)
-      # allow_any_email rows store the real address in `description`, not
-      # `email` (which is nil so the invite is redeemable by anyone -- see
-      # Jobs::BulkInvite#send_invite) -- fall back to it so these rows don't
-      # silently lose domain context from the prompt.
+    # allow_any_email rows store the real address in `description`, not
+    # `email` (which is nil so the invite is redeemable by anyone -- see
+    # Jobs::BulkInvite#send_invite) -- fall back to it so these rows don't
+    # silently lose domain context from the prompt.
+    def self.recipient_domain(invite)
       recipient_address = invite.email.presence || invite.description
-      lines = ["Recipient email domain: #{recipient_address.to_s.split("@").last}"]
+      recipient_address.to_s.split("@").last
+    end
+    private_class_method :recipient_domain
+
+    def self.user_message(invite, extra_keywords: nil)
+      lines = ["Recipient email domain: #{recipient_domain(invite)}"]
       lines << "Recipient name: #{invite.recipient_name}" if invite.recipient_name.present?
 
       # extra_keywords is a one-off, per-resend addition (see

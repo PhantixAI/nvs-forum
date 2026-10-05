@@ -171,6 +171,21 @@ RSpec.describe BulkInvitePersonalization::Generator do
           }.to raise_error(described_class::GenerationFailed, %r{parseable SUBJECT:/BODY})
         end
 
+        it "does not reject the body for mentioning the recipient's own email domain" do
+          # Confirmed in production: an otherwise-compliant body mentioning
+          # the recipient's institute by email domain (exactly what the
+          # rules tell the model to do when it doesn't know the real
+          # institution name) was being rejected as an "unexpected link".
+          compliant = "SUBJECT: Hey\nBODY:\nGreat to connect with iitb.ac.in folks, worth a look?"
+
+          result = nil
+          DiscourseAi::Completions::Llm.with_prepared_responses([compliant]) do
+            result = described_class.personalize(invite)
+          end
+
+          expect(result[:body]).to include("Great to connect with iitb.ac.in folks, worth a look?")
+        end
+
         it "raises GenerationFailed, rather than returning nil, when the body fails the anti-spam rules" do
           non_compliant =
             "SUBJECT: Hey\nBODY:\nCheck this out NOW at https://spam.example.com! #{invite_link}"

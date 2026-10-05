@@ -4,7 +4,7 @@ RSpec.describe BulkInvitePersonalization::ResponseValidator do
   let(:link) { "https://example.com/invites/abc123" }
 
   describe ".clean_body" do
-    let(:link_line) { "Please use the following invite link to join the forum:\n#{link}" }
+    let(:link_line) { "\n\nPlease use the following invite link to join the forum:\n#{link}" }
 
     it "returns nil for blank input" do
       expect(described_class.clean_body(nil, required_link: link)).to eq(nil)
@@ -18,13 +18,13 @@ RSpec.describe BulkInvitePersonalization::ResponseValidator do
           "about internships and course notes. Thought it might be useful for " \
           "you too. Open to taking a look?"
 
-      expect(described_class.clean_body(text, required_link: link)).to eq("#{text}\n\n#{link_line}")
+      expect(described_class.clean_body(text, required_link: link)).to eq("#{text}#{link_line}")
     end
 
     it "collapses excess whitespace within a single paragraph before appending the link" do
       text = "Hey there.\n  Open   to a quick look?"
       expect(described_class.clean_body(text, required_link: link)).to eq(
-        "Hey there. Open to a quick look?\n\n#{link_line}",
+        "Hey there. Open to a quick look?#{link_line}",
       )
     end
 
@@ -32,21 +32,21 @@ RSpec.describe BulkInvitePersonalization::ResponseValidator do
       text = "Hey there,  this is   paragraph one.\n\nAnd this is   paragraph two, worth a look?"
       expect(described_class.clean_body(text, required_link: link)).to eq(
         "Hey there, this is paragraph one.\n\n" \
-          "And this is paragraph two, worth a look?\n\n#{link_line}",
+          "And this is paragraph two, worth a look?#{link_line}",
       )
     end
 
     it "collapses three or more blank lines between paragraphs down to a single paragraph break" do
       text = "Paragraph one.\n\n\n\nParagraph two, worth a look?"
       expect(described_class.clean_body(text, required_link: link)).to eq(
-        "Paragraph one.\n\nParagraph two, worth a look?\n\n#{link_line}",
+        "Paragraph one.\n\nParagraph two, worth a look?#{link_line}",
       )
     end
 
     it "strips HTML tags before appending the link" do
       text = "Hey <b>there</b>, worth a look?"
       expect(described_class.clean_body(text, required_link: link)).to eq(
-        "Hey there, worth a look?\n\n#{link_line}",
+        "Hey there, worth a look?#{link_line}",
       )
     end
 
@@ -75,6 +75,31 @@ RSpec.describe BulkInvitePersonalization::ResponseValidator do
           "Visit www.example.com sometime, interested?",
           required_link: link,
         ),
+      ).to eq(nil)
+    end
+
+    it "does not reject a bare mention of the recipient's own email domain" do
+      # Confirmed in production: the model correctly followed the rule
+      # letting it reference the recipient's institution by email domain
+      # when it doesn't know the real name (e.g. "spjimr.org") -- that is
+      # prose, not a link, and must not be rejected as one.
+      text = "Hope you are doing well at spjimr.org. Worth a look?"
+      expect(
+        described_class.clean_body(text, required_link: link, recipient_domain: "spjimr.org"),
+      ).to eq("#{text}#{link_line}")
+    end
+
+    it "still rejects the recipient's own domain if it's written as an actual link" do
+      text = "Hope you are doing well, visit www.spjimr.org sometime."
+      expect(
+        described_class.clean_body(text, required_link: link, recipient_domain: "spjimr.org"),
+      ).to eq(nil)
+    end
+
+    it "still rejects an unrelated domain even when a recipient_domain is given" do
+      text = "Head to example.com to learn more, interested?"
+      expect(
+        described_class.clean_body(text, required_link: link, recipient_domain: "spjimr.org"),
       ).to eq(nil)
     end
 
@@ -133,12 +158,12 @@ RSpec.describe BulkInvitePersonalization::ResponseValidator do
 
     it "does not reject short acronyms" do
       text = "A few of us from AI club have been chatting here, worth a look?"
-      expect(described_class.clean_body(text, required_link: link)).to eq("#{text}\n\n#{link_line}")
+      expect(described_class.clean_body(text, required_link: link)).to eq("#{text}#{link_line}")
     end
 
     it "does not reject allow-listed institute acronyms" do
       text = "A few of us from MNIT and other NIT campuses connect here, worth a look?"
-      expect(described_class.clean_body(text, required_link: link)).to eq("#{text}\n\n#{link_line}")
+      expect(described_class.clean_body(text, required_link: link)).to eq("#{text}#{link_line}")
     end
 
     it "still rejects a non-allow-listed ALL CAPS word alongside an allow-listed acronym" do
@@ -151,7 +176,7 @@ RSpec.describe BulkInvitePersonalization::ResponseValidator do
       # rather than the bare "NIT" acronym -- an otherwise clean, compliant
       # response was being rejected as shouting for that alone.
       text = "A few of us from NITS and other NIT campuses connect here, worth a look?"
-      expect(described_class.clean_body(text, required_link: link)).to eq("#{text}\n\n#{link_line}")
+      expect(described_class.clean_body(text, required_link: link)).to eq("#{text}#{link_line}")
     end
 
     it "still rejects a genuinely non-allow-listed ALL CAPS word even as a plural" do
@@ -166,7 +191,7 @@ RSpec.describe BulkInvitePersonalization::ResponseValidator do
       expect(described_class.clean_body(text, required_link: link)).to eq(nil)
 
       SiteSetting.institute_acronyms = "ACME"
-      expect(described_class.clean_body(text, required_link: link)).to eq("#{text}\n\n#{link_line}")
+      expect(described_class.clean_body(text, required_link: link)).to eq("#{text}#{link_line}")
     end
 
     it "truncates text over 100 words at the last sentence boundary, then still appends the real link after it" do
@@ -174,7 +199,7 @@ RSpec.describe BulkInvitePersonalization::ResponseValidator do
       long_text = ([sentence] * 15).join(" ") + " Worth a look?"
 
       result = described_class.clean_body(long_text, required_link: link)
-      body_only = result.sub("\n\n#{link_line}", "")
+      body_only = result.sub(link_line, "")
 
       expect(body_only.split(" ").length).to be <= described_class::MAX_WORDS
       expect(body_only).to match(/[.?]\z/)
@@ -212,6 +237,23 @@ RSpec.describe BulkInvitePersonalization::ResponseValidator do
 
     it "rejects a subject containing a link" do
       expect(described_class.clean_subject("Check this out: https://example.com")).to eq(nil)
+    end
+
+    it "does not reject a bare mention of the recipient's own email domain" do
+      # Confirmed in production: "quick invite for nitp.ac.in alumni" was
+      # rejected even though it's a correct, instructed use of the
+      # recipient's domain, not a link.
+      text = "quick invite for spjimr.org alumni"
+      expect(described_class.clean_subject(text, recipient_domain: "spjimr.org")).to eq(text)
+    end
+
+    it "still rejects an unrelated domain even when a recipient_domain is given" do
+      expect(
+        described_class.clean_subject(
+          "Check this out: example.com",
+          recipient_domain: "spjimr.org",
+        ),
+      ).to eq(nil)
     end
 
     it "rejects markdown formatting" do
