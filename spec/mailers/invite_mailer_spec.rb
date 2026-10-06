@@ -145,6 +145,19 @@ RSpec.describe InviteMailer do
           )
         end
 
+        it "preserves the paragraph break and link line, unlike a plain custom_message (which collapses them)" do
+          invite.update!(
+            custom_message:
+              "First paragraph of the AI note.\n\nPlease use the following invite link to join the forum:\n#{invite.link}",
+          )
+
+          body = InviteMailer.send_invite(invite).body.encoded
+
+          expect(body).not_to match(
+            "First paragraph of the AI note. Please use the following invite link",
+          )
+        end
+
         it "falls back to the wrapped custom template when skip_personalization is set on this row" do
           invite.update!(skip_personalization: true)
 

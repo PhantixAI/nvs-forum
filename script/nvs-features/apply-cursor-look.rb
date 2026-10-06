@@ -208,6 +208,23 @@ CSS = <<~'SCSS'.gsub("__MEDIA__", MEDIA)
         color: var(--primary);
       }
     }
+
+    // Hardcoded, not var(--secondary): text inputs (login/signup's email, username and
+    // password fields among them) otherwise inherit --secondary for their background, same
+    // as the page around them, so a field barely reads as a distinct input at all --
+    // #f7f7f4 on #f7f7f4. A real input should look like one regardless of the page's own
+    // tone.
+    input[type="text"],
+    input[type="password"],
+    input[type="email"],
+    input[type="number"],
+    input[type="search"],
+    input[type="tel"],
+    input[type="url"],
+    textarea,
+    .d-editor-textarea-wrapper {
+      background-color: #ffffff;
+    }
   }
 SCSS
 

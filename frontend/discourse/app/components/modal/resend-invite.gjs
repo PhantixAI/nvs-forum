@@ -90,7 +90,7 @@ export default class ResendInviteModal extends Component {
             }}</label>
           <div class="controls">
             <Textarea
-              maxlength="255"
+              maxlength="100000"
               placeholder={{i18n
                 "user.invited.resend_invite.modal.keywords_placeholder"
               }}

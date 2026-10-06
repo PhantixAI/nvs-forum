@@ -20,7 +20,6 @@ import DTextField from "discourse/ui-kit/d-text-field";
 import dAvatar from "discourse/ui-kit/helpers/d-avatar";
 import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
 import dFormatDate from "discourse/ui-kit/helpers/d-format-date";
-import dFormatDuration from "discourse/ui-kit/helpers/d-format-duration";
 import dIcon from "discourse/ui-kit/helpers/d-icon";
 import dNumber from "discourse/ui-kit/helpers/d-number";
 import { i18n } from "discourse-i18n";
@@ -153,6 +152,12 @@ export default <template>
                     }}</th>
                   {{#if @controller.model.can_see_invite_details}}
                     <th class="d-table__header-cell">{{i18n
+                        "user.invited.invited_email"
+                      }}</th>
+                    <th class="d-table__header-cell">{{i18n
+                        "user.invited.account_email"
+                      }}</th>
+                    <th class="d-table__header-cell">{{i18n
                         "user.last_seen"
                       }}</th>
                     <th class="d-table__header-cell">{{i18n
@@ -160,12 +165,6 @@ export default <template>
                       }}</th>
                     <th class="d-table__header-cell">{{i18n
                         "user.invited.posts_read_count"
-                      }}</th>
-                    <th class="d-table__header-cell">{{i18n
-                        "user.invited.time_read"
-                      }}</th>
-                    <th class="d-table__header-cell">{{i18n
-                        "user.invited.days_visited"
                       }}</th>
                     <th class="d-table__header-cell">{{i18n
                         "user.invited.invited_via"
@@ -195,6 +194,23 @@ export default <template>
                     {{#if @controller.model.can_see_invite_details}}
                       <td class="d-table__cell --detail">
                         <div class="d-table__mobile-label">
+                          {{i18n "user.invited.invited_email"}}
+                        </div>
+                        {{#if invite.email}}
+                          {{dIcon "envelope"}}
+                          {{invite.email}}
+                        {{else}}
+                          {{dIcon "link"}}
+                        {{/if}}
+                      </td>
+                      <td class="d-table__cell --detail">
+                        <div class="d-table__mobile-label">
+                          {{i18n "user.invited.account_email"}}
+                        </div>
+                        {{invite.user.email}}
+                      </td>
+                      <td class="d-table__cell --detail">
+                        <div class="d-table__mobile-label">
                           {{i18n "user.last_seen"}}
                         </div>
                         {{dFormatDate invite.user.last_seen_at}}
@@ -210,26 +226,6 @@ export default <template>
                           {{i18n "user.invited.posts_read_count"}}
                         </div>
                         {{dNumber invite.user.posts_read_count}}
-                      </td>
-                      <td class="d-table__cell --detail">
-                        <div class="d-table__mobile-label">
-                          {{i18n "user.invited.time_read"}}
-                        </div>
-                        {{dFormatDuration invite.user.time_read}}
-                      </td>
-                      <td class="d-table__cell --detail">
-                        <div class="d-table__mobile-label">
-                          {{i18n "user.invited.days_visited"}}
-                        </div>
-                        <div>
-                          <span
-                            title={{i18n "user.invited.days_visited"}}
-                          >{{trustHTML invite.user.days_visited}}</span>
-                          /
-                          <span
-                            title={{i18n "user.invited.account_age_days"}}
-                          >{{trustHTML invite.user.days_since_created}}</span>
-                        </div>
                       </td>
                       <td class="d-table__cell --detail">
                         <div class="d-table__mobile-label">

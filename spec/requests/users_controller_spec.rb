@@ -2764,6 +2764,39 @@ RSpec.describe UsersController do
       expect(invites[0]["user"]).to be_present
     end
 
+    it "includes both the invited and the redeeming account's email on the redeemed tab for the inviter" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      redeeming_user = Fabricate(:user, email: "actually-redeemed-with@example.com")
+      redeemed_invite =
+        Fabricate(:invite, email: "originally-invited@example.com", invited_by: inviter)
+      Fabricate(:invited_user, invite: redeemed_invite, user: redeeming_user)
+
+      sign_in(inviter)
+      get "/u/#{inviter.username}/invited.json", params: { filter: "redeemed" }
+      expect(response.status).to eq(200)
+
+      invite = response.parsed_body["invites"].first
+      expect(invite["email"]).to eq("originally-invited@example.com")
+      expect(invite["user"]["email"]).to eq("actually-redeemed-with@example.com")
+    end
+
+    it "omits both redeemed-tab emails for a viewer who can't see invite details" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      other_viewer = Fabricate(:user, trust_level: TrustLevel[2])
+      redeeming_user = Fabricate(:user, email: "actually-redeemed-with@example.com")
+      redeemed_invite =
+        Fabricate(:invite, email: "originally-invited@example.com", invited_by: inviter)
+      Fabricate(:invited_user, invite: redeemed_invite, user: redeeming_user)
+
+      sign_in(other_viewer)
+      get "/u/#{inviter.username}/invited.json", params: { filter: "redeemed" }
+      expect(response.status).to eq(200)
+
+      invite = response.parsed_body["invites"].first
+      expect(invite).not_to include("email")
+      expect(invite["user"]).not_to include("email")
+    end
+
     it "finds an allow_any_email invite by its stashed recipient in description" do
       inviter = Fabricate(:user, trust_level: TrustLevel[2])
       sign_in(inviter)

@@ -28,7 +28,7 @@ class Invite < ActiveRecord::Base
   DELIVERY_STATUSES = %w[scheduled pending skipped sent delivered bounced complained].freeze
   DESCRIPTION_MAX_LENGTH = 100
   RECIPIENT_NAME_MAX_LENGTH = 100
-  RECIPIENT_KEYWORDS_MAX_LENGTH = 255
+  RECIPIENT_KEYWORDS_MAX_LENGTH = 100_000
 
   rate_limit :limit_invites_per_day
 
@@ -619,7 +619,7 @@ end
 #  invite_key              :string(32)       not null
 #  max_redemptions_allowed :integer          default(1), not null
 #  moderator               :boolean          default(FALSE), not null
-#  recipient_keywords      :string(255)
+#  recipient_keywords      :text
 #  recipient_name          :string(100)
 #  redemption_count        :integer          default(0), not null
 #  schedule_send           :boolean          default(TRUE), not null

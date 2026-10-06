@@ -7190,7 +7190,7 @@ CREATE TABLE public.invites (
     description character varying(100),
     admin boolean DEFAULT false NOT NULL,
     recipient_name character varying(100),
-    recipient_keywords character varying(255),
+    recipient_keywords text,
     skip_personalization boolean DEFAULT false NOT NULL,
     email_domain character varying,
     allow_any_email boolean DEFAULT false NOT NULL,
@@ -25628,6 +25628,7 @@ SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
 ('20261007082151'),
+('20261006115238'),
 ('20261006113418'),
 ('20261006083655'),
 ('20261005091527'),

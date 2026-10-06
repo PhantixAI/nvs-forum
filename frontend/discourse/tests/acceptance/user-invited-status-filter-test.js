@@ -348,3 +348,49 @@ acceptance("User invited - resend failure", function (needs) {
     assert.dom(".resend-invite-modal").exists("the modal is still open");
   });
 });
+
+acceptance("User invited - redeemed tab emails", function (needs) {
+  needs.user();
+
+  needs.pretender((server, helper) => {
+    server.get("/u/eviltrout/invited.json", () => {
+      return helper.response({
+        invites: [
+          {
+            id: 1,
+            redeemed_at: "2026-09-23T04:47:13.195Z",
+            email: "originally-invited@example.com",
+            invite_source: "email",
+            user: {
+              id: 99,
+              username: "redeemer",
+              name: "Redeemer",
+              avatar_template: "/images/avatar.png",
+              email: "actually-redeemed-with@example.com",
+              topics_entered: 1,
+              posts_read_count: 2,
+              last_seen_at: "2026-09-23T04:47:13.195Z",
+            },
+          },
+        ],
+        can_see_invite_details: true,
+        counts: { pending: 0, expired: 0, redeemed: 1, total: 0 },
+        available_domains: [],
+        available_statuses: STATUSES,
+      });
+    });
+  });
+
+  test("shows the invited and account email columns, and no longer shows Read Time/Days Visited", async function (assert) {
+    await visit("/u/eviltrout/invited/redeemed");
+
+    assert
+      .dom("table.user-invite-list tbody tr:nth-child(1)")
+      .includesText("originally-invited@example.com")
+      .includesText("actually-redeemed-with@example.com");
+    assert.dom("table.user-invite-list thead").doesNotIncludeText("Read Time");
+    assert
+      .dom("table.user-invite-list thead")
+      .doesNotIncludeText("Days Visited");
+  });
+});

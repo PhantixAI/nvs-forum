@@ -16,10 +16,21 @@ class InviteMailer < ActionMailer::Base
       inviter_name = "#{invite.invited_by.name} (#{invite.invited_by.username})"
     end
 
+    # Whether this invite is getting the AI-personalized template (see the template
+    # selection below) is decided up here too: the AI body (ResponseValidator) is already
+    # carefully formatted -- a blank line between paragraphs, a single newline before the
+    # join link -- so collapsing every run of newlines to a single space, below, would
+    # destroy that formatting. A hand-typed custom_message still gets collapsed, since any
+    # newlines there are more likely accidental (pasted multi-line text into a one-line
+    # note) than intentional.
+    ai_active = SiteSetting.bulk_invite_ai_personalization_enabled && !invite.skip_personalization?
+
     sanitized_message =
       (
         if invite.custom_message.present?
-          ActionView::Base.full_sanitizer.sanitize(invite.custom_message.gsub(/\n+/, " ").strip)
+          message = invite.custom_message
+          message = message.gsub(/\n+/, " ") unless ai_active
+          ActionView::Base.full_sanitizer.sanitize(message.strip)
         else
           nil
         end
@@ -73,10 +84,8 @@ class InviteMailer < ActionMailer::Base
       # fallback for any message that doesn't qualify, since it has its
       # own working subject_template and still renders the message, rather
       # than falling all the way back to default_template and silently
-      # dropping the personalized text.
-      ai_active =
-        SiteSetting.bulk_invite_ai_personalization_enabled && !invite.skip_personalization?
-
+      # dropping the personalized text. (ai_active itself is computed above,
+      # alongside sanitized_message.)
       template =
         if ai_active && sanitized_message && invite.custom_subject.present?
           "ai_personalized_invite_forum_mailer"
