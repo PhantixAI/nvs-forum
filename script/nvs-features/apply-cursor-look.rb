@@ -174,6 +174,21 @@ CSS = <<~'SCSS'.gsub("__MEDIA__", MEDIA)
       --d-button-default-border-color: var(--primary-300);
       --d-button-default-text-color: var(--primary);
       --d-button-default-icon-color: var(--primary);
+
+      // Every native input (login/signup's email, username and password fields, the header
+      // search box, the topic/admin filter fields, ...) reads its background from this one
+      // token (app/assets/stylesheets/common/base/discourse.scss) -- it defaults to
+      // var(--secondary), same as the page around it, so a field barely reads as a distinct
+      // input at all. Search is a div (.search-input in search-menu.scss) painted with this
+      // same token rather than a real input background, which a selector targeting
+      // input[type="search"] directly would miss entirely.
+      --d-input-bg-color: #ffffff;
+
+      // A second, separate input-background token (app/assets/stylesheets/common/tokens.scss)
+      // for the newer ui-kit/FormKit surfaces -- also defaults to var(--secondary). Drives
+      // FormKit's own controls, the sidebar search box (.sidebar-search__input-container,
+      // the one reported missing this look), and the generic .filter-input component.
+      --token-color-background-input: #ffffff;
     }
 
     h1 {
@@ -209,21 +224,58 @@ CSS = <<~'SCSS'.gsub("__MEDIA__", MEDIA)
       }
     }
 
-    // Hardcoded, not var(--secondary): text inputs (login/signup's email, username and
-    // password fields among them) otherwise inherit --secondary for their background, same
-    // as the page around them, so a field barely reads as a distinct input at all --
-    // #f7f7f4 on #f7f7f4. A real input should look like one regardless of the page's own
-    // tone.
-    input[type="text"],
-    input[type="password"],
-    input[type="email"],
-    input[type="number"],
-    input[type="search"],
-    input[type="tel"],
-    input[type="url"],
+    // Not driven by either input-background token above: each of these paints
+    // var(--secondary) straight onto an input-like control (a native select, a select-kit
+    // dropdown's closed box, a date/time or password field, ...), so every one of them needs
+    // its own override to read as an input rather than page background. background-color
+    // (not the background shorthand) so .d-native-select's chevron background-image survives.
+    //
+    // !important throughout this block: every one of these is fighting a rule in core's own
+    // SCSS, several nested several classes deep (multi-select.scss's own .multi-select-header
+    // rule, for one, is 3 class selectors). Matching a core selector's specificity exactly and
+    // relying on "theme CSS loads after core" to win the tie is fragile -- it already lost once
+    // silently this way (.multi-select-header) -- and re-matching it by hand every time core
+    // changes doesn't scale. !important says plainly what's meant: these surfaces are always
+    // white, independent of how core happens to structure the selector underneath.
     textarea,
-    .d-editor-textarea-wrapper {
-      background-color: #ffffff;
+    .d-editor-textarea-wrapper,
+    select,
+    .ember-select,
+    .d-native-select,
+    .calendar-date-time-input,
+    .form-kit__control-password-wrapper,
+    .select-kit.combo-box .select-kit-header,
+    .select-kit.multi-select,
+    // multi-select-header is a native <summary> (select-kit itself a native <details> --
+    // see select-kit.js's @tagName("details") and multi-select-header.gjs's
+    // @tagName("summary")), tag-qualified here to say so rather than matching by class alone.
+    summary.multi-select-header,
+    // The "Search..." row inside an opened select-kit dropdown (category/tag/group choosers,
+    // not just combo-box) -- select-kit.scss leaves .filter-input itself transparent, so this
+    // row otherwise shows through to .select-kit-body's var(--secondary) panel behind it.
+    // Left as-is: .select-kit-body (the result list below the search row) -- a dropdown
+    // panel's list is read as a menu surface, same family as every other dropdown/menu panel
+    // on the site, not as an input.
+    .select-kit-filter,
+    // FormKit's checkbox is a hidden real <input> plus this styled box standing in for it.
+    .form-kit__control-checkbox-checkmark {
+      background-color: #ffffff !important;
+    }
+
+    // The empty-state avatar/logo upload dropzone (upload.scss) fills with
+    // var(--primary-very-low) -- our palette's version of that is a warm off-white, not
+    // pure white, so it reads as a slightly different shade next to the inputs above rather
+    // than as one of them.
+    .no-image .file-uploader__preview,
+    .no-file .file-uploader__preview,
+    // Once a file IS picked, upload.scss sets no background-color at all on .has-image/
+    // .has-file -- fully transparent, not just unthemed. Confirmed live: these use
+    // background-size: contain (not cover), so a non-square logo leaves letterboxed empty
+    // space around it that was showing the page behind it through, rgba(0,0,0,0), rather
+    // than reading as a white mat around the thumbnail like the empty state above.
+    .has-image .file-uploader__preview,
+    .has-file .file-uploader__preview {
+      background-color: #ffffff !important;
     }
   }
 SCSS

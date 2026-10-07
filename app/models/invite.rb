@@ -80,6 +80,12 @@ class Invite < ActiveRecord::Base
   end
 
   before_validation { self.email = Email.downcase(email) unless email.nil? }
+  before_validation :set_skip_email_domain_validation
+
+  # Not a DB column -- mirrors User#skip_email_domain_validation (see
+  # set_skip_email_domain_validation below and lib/validators/email_validator.rb, which reads
+  # this generically via record.try(:skip_email_domain_validation) for any record type).
+  attr_accessor :skip_email_domain_validation
 
   attribute :email_already_exists
 
@@ -92,6 +98,18 @@ class Invite < ActiveRecord::Base
   def self.emailed_status_types
     @emailed_status_types ||=
       Enum.new(not_required: 0, pending: 1, bulk_pending: 2, sending: 3, sent: 4, skipped: 5)
+  end
+
+  # Staff-sent invites (admin, moderator, or Batch Moderator -- see
+  # InviteGuardian#can_skip_email_domain_validation?) skip the site's email-domain allowlist
+  # entirely, not just format/blocklist checks -- this is what let 2255 ordinary personal-domain
+  # CSV rows get rejected at Invite.create! time in production despite being sent by an admin.
+  # invited_by is always a loaded User object by the time this runs (every caller passes the
+  # full object, not just an id), so this adds no extra query for the common admin/moderator
+  # case -- Guardian#is_staff? short-circuits before the Batch Moderator check ever runs.
+  def set_skip_email_domain_validation
+    self.skip_email_domain_validation =
+      invited_by.present? && Guardian.new(invited_by).can_skip_email_domain_validation?
   end
 
   def user_doesnt_already_exist

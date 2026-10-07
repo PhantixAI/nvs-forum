@@ -1971,3 +1971,66 @@ real boolean, hence the `== "true"` comparison rather than a bare `@if`.
   section 14's look also rolls back this setting (the component unlinks entirely), and vice
   versa — they are not independently toggleable via `ROLLBACK=1`, only via the theme setting
   itself once applied.
+
+## 16. Staff-Sent Invites Skip the Email-Domain Allowlist Entirely
+
+### Requirement
+
+Found via a production incident (iitians.in, "Bulk user invite processed with errors"): a
+bulk-invite CSV of 2402 rows, none marked `allow_any_email` (section 3a), failed 2255 of them —
+2250 from the exact same cause, `"Email domain is not in the list of allowed college domains"`,
+on ordinary personal addresses (gmail.com, yahoo.co.in, rediffmail.com, ...) that an admin had
+every intention of inviting. Unlike section 3a's `allow_any_email` (a per-CSV-row opt-in, and only
+ever reachable via the bulk-invite CSV, never a single invite), the ask here is unconditional:
+**any invite sent by an admin, moderator, or this fork's "Batch Moderator" cohort (see section 5's
+`BatchModeration`) should never be blocked by the domain allowlist at all**, with no flag to
+remember to set. A regular trust-level member's own "invite a friend" single invite keeps today's
+domain-restricted behavior unchanged — confirmed deliberately scoped this way, not a blanket
+everyone-bypasses-it change.
+
+### Root cause
+
+Domain validation blocks an invite-based signup at **two** separate points, and `allow_any_email`
+(section 3a) only ever addressed the second one:
+
+1. **`Invite` creation itself** — `Invite` has its own `validates :email, email: true` (same
+   `EmailValidator` as `User`), which is what actually produced the 2255 production failures: the
+   CSV rows never even became `Invite` rows, so there was nothing to resend once the upload
+   finished.
+2. **`User` creation at redemption** — `InviteRedeemer#create_user_from_invite`, already bypassed
+   for `allow_any_email` invites per section 3a's extension.
+
+### What is configured
+
+Mirrors the exact `attr_accessor` + `before_validation` propagation pattern section 3a's extension
+already established for `User`/`UserEmail`, reused for `Invite` too (not a DB column):
+
+- `InviteGuardian#can_skip_email_domain_validation?` (`lib/guardian/invite_guardian.rb`) — a
+  thin delegation to the existing `can_bulk_invite_to_forum?` (admin, moderator, or Batch
+  Moderator), named separately rather than called directly at each site so a single-invite
+  creation path checking "can bulk invite" doesn't read like a copy-paste mistake.
+- `Invite#set_skip_email_domain_validation` (`before_validation`, `app/models/invite.rb`) sets
+  `skip_email_domain_validation` from `Guardian.new(invited_by).can_skip_email_domain_validation?`
+  — `invited_by` is always an in-memory `User` object by the time this runs (every caller passes
+  the full object), so this adds no extra query for the common admin/moderator case (`is_staff?`
+  short-circuits before the Batch Moderator `exists?` check ever runs).
+- `InviteRedeemer#create_user_from_invite`'s existing `allow_any_email?` bypass condition gained
+  an `|| Guardian.new(invite.invited_by).can_skip_email_domain_validation?` clause.
+- `lib/validators/email_validator.rb` needed no functional change at all — its
+  `record.try(:skip_email_domain_validation)` check already generically supports any record type;
+  only its comment (which claimed `Invite` doesn't define this accessor) needed updating.
+
+### Edge cases
+
+- **Batch Moderator nuance**: a Batch Moderator's bulk-invite CSV is routed through
+  `ReviewableBulkInvite` for admin approval rather than processed directly (section 5), but
+  `ReviewableBulkInvite#perform_approve_bulk_invite` enqueues the job with
+  `current_user_id: created_by_id` — **the original Batch Moderator stays `invited_by` even after
+  admin approval, never reassigned to the approving admin**. A plain `invited_by.staff?` check
+  would have missed these rows entirely; `can_skip_email_domain_validation?` deliberately reuses
+  `can_bulk_invite_to_forum?`'s wider trust boundary instead, for exactly this reason.
+- Format (`EmailAddressValidator`) and blocklist (`ScreenedEmail`) checks are unaffected either
+  way — only the domain-allowlist check is skipped, same as `allow_any_email` already behaved.
+- No migration, no data backfill: the 2255 failed rows from the production incident were never
+  persisted (they failed inside `Invite.create!` before any row was written). Re-uploading the
+  same CSV after this ships succeeds for those rows.

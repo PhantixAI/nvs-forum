@@ -336,6 +336,54 @@ RSpec.describe InviteRedeemer do
         }.to raise_error(ActiveRecord::RecordInvalid)
       end
     end
+
+    context "with a staff inviter" do
+      # Same gotcha as the allow_any_email context above: create the invite (and its
+      # invited_by admin) before restricting allowed_email_domains.
+      it "bypasses the site's domain allowlist, even without allow_any_email" do
+        invite =
+          Fabricate(
+            :invite,
+            email: "someone@not-allowed.example",
+            invited_by: admin,
+            allow_any_email: false,
+          )
+        SiteSetting.allowed_email_domains = "allowed.example"
+
+        user =
+          InviteRedeemer.create_user_from_invite(
+            invite: invite,
+            email: invite.email,
+            username: "someone",
+          )
+
+        expect(user).to be_persisted
+        expect(user.email).to eq("someone@not-allowed.example")
+      end
+
+      it "still enforces the blocklist (ScreenedEmail) even when the domain check is bypassed" do
+        invite =
+          Fabricate(
+            :invite,
+            email: "someone@allowed.example",
+            invited_by: admin,
+            allow_any_email: false,
+          )
+        SiteSetting.allowed_email_domains = "allowed.example"
+        ScreenedEmail.create!(
+          email: "blocked@mailinator.com",
+          action_type: ScreenedEmail.actions[:block],
+        )
+
+        expect {
+          InviteRedeemer.create_user_from_invite(
+            invite: invite,
+            email: "blocked@mailinator.com",
+            username: "someone",
+          )
+        }.to raise_error(ActiveRecord::RecordInvalid)
+      end
+    end
   end
 
   describe "#redeem" do

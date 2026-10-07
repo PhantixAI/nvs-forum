@@ -54,6 +54,16 @@ module InviteGuardian
     is_staff?
   end
 
+  # Reuses can_bulk_invite_to_forum?'s trust boundary (admin, moderator, or Batch Moderator,
+  # once BatchModeration::GuardianExtension is prepended) for a different purpose: whether
+  # this user's invites skip the email-domain allowlist entirely. A Batch Moderator's bulk
+  # invite is always admin-reviewed before it's ever processed (see ReviewableBulkInvite), but
+  # invited_by stays the original Batch Moderator even after approval -- so checking is_staff?
+  # alone here would miss them.
+  def can_skip_email_domain_validation?
+    can_bulk_invite_to_forum?
+  end
+
   def can_resend_all_invites?
     is_staff?
   end

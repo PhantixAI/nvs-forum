@@ -580,5 +580,29 @@ RSpec.describe Jobs::BulkInvite do
         expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
       end
     end
+
+    context "with a restricted allowed_email_domains setting" do
+      # Regression test for a real production incident: a bulk-invite CSV full of ordinary
+      # personal-domain addresses (gmail.com, yahoo.co.in, etc.), none marked
+      # allow_any_email, uploaded by an admin, failed almost entirely -- every row hit
+      # Invite.create!'s own domain-allowlist validation (see Invite#email validates) before
+      # this fix, even though an admin is clearly trusted to invite whoever they choose.
+      it "still sends to a non-allowlisted domain for an admin-run bulk invite, with no allow_any_email needed" do
+        SiteSetting.allowed_email_domains = "college.edu"
+
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "alum@gmail.com" }],
+        )
+
+        invite = Invite.find_by(email: "alum@gmail.com")
+        expect(invite).to be_present
+        expect(invite.allow_any_email).to eq(false)
+
+        post = Post.last
+        expect(post.raw).to include("1 invites mailed")
+        expect(post.raw).not_to include("error")
+      end
+    end
   end
 end

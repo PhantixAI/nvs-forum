@@ -171,8 +171,11 @@ class InviteRedeemer
     # An allow_any_email invite already lets the redeemer sign up with any address (see
     # Invite#can_redeem_invite?/#is_invite_link?) -- without this, the site's domain
     # allowlist (SiteSetting.allowed_email_domains) would still reject that address here,
-    # silently contradicting the "any email" promise.
-    user.skip_email_domain_validation = true if invite.allow_any_email?
+    # silently contradicting the "any email" promise. Staff-sent invites (admin, moderator, or
+    # Batch Moderator -- see InviteGuardian#can_skip_email_domain_validation?) skip it
+    # unconditionally too, not just allow_any_email rows.
+    user.skip_email_domain_validation = true if invite.allow_any_email? ||
+      Guardian.new(invite.invited_by).can_skip_email_domain_validation?
 
     user.save!
     authenticator.finish

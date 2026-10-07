@@ -49,6 +49,45 @@ RSpec.describe Invite do
       expect(invite).not_to be_valid
     end
 
+    context "with a restricted allowed_email_domains setting" do
+      fab!(:admin)
+
+      # Create the invite before restricting allowed_email_domains -- otherwise the
+      # fabricator's own invited_by user creation gets blocked by the same validator this
+      # context is testing (see the identical gotcha noted in invite_redeemer_spec.rb).
+      it "still blocks a regular user's invite to a non-allowlisted domain" do
+        invite = Fabricate.build(:invite, email: "someone@not-allowed.example", invited_by: user)
+        SiteSetting.allowed_email_domains = "allowed.example"
+
+        expect(invite).not_to be_valid
+      end
+
+      it "allows an admin's invite to a non-allowlisted domain (this is the production bug: a bulk-invite CSV row with a personal gmail/yahoo address, sent by an admin, used to fail here)" do
+        invite = Fabricate.build(:invite, email: "someone@not-allowed.example", invited_by: admin)
+        SiteSetting.allowed_email_domains = "allowed.example"
+
+        expect(invite).to be_valid
+      end
+
+      it "still enforces email format for an admin's invite -- only the domain check is skipped" do
+        invite = Fabricate.build(:invite, email: "asjdso", invited_by: admin)
+        SiteSetting.allowed_email_domains = "allowed.example"
+
+        expect(invite).not_to be_valid
+      end
+
+      it "still enforces the blocklist (ScreenedEmail) for an admin's invite -- only the domain check is skipped" do
+        ScreenedEmail.create!(
+          email: "blocked@not-allowed.example",
+          action_type: ScreenedEmail.actions[:block],
+        )
+        invite = Fabricate.build(:invite, email: "blocked@not-allowed.example", invited_by: admin)
+        SiteSetting.allowed_email_domains = "allowed.example"
+
+        expect(invite).not_to be_valid
+      end
+    end
+
     it "does not allow an invalid email address" do
       invite = Fabricate.build(:invite, email: "asjdso")
       expect(invite.valid?).to eq(false)
