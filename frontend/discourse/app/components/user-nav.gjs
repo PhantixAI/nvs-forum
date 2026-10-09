@@ -12,6 +12,15 @@ const UserNav = <template>
       class="main-nav nav user-nav"
       @ariaLabel="User primary"
     >
+      {{#if (and @isMobileView @isStaff)}}
+        <li class="user-nav__admin">
+          <a href={{@user.adminPath}}>
+            {{dIcon "wrench"}}
+            <span>{{i18n "admin.user.manage_user"}}</span>
+          </a>
+        </li>
+      {{/if}}
+
       {{#unless @user.profile_hidden}}
         <DNavigationItem class="user-nav__summary" @route="user.summary">
           {{dIcon "user"}}
@@ -85,14 +94,6 @@ const UserNav = <template>
           {{dIcon "gear"}}
           <span>{{i18n "user.preferences.title"}}</span>
         </DNavigationItem>
-      {{/if}}
-      {{#if (and @isMobileView @isStaff)}}
-        <li class="user-nav__admin">
-          <a href={{@user.adminPath}}>
-            {{dIcon "wrench"}}
-            <span>{{i18n "admin.user.manage_user"}}</span>
-          </a>
-        </li>
       {{/if}}
     </DHorizontalOverflowNav>
   </section>
