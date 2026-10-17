@@ -19,6 +19,24 @@ if (fs.existsSync(`${discourseRoot}/node_modules/.yarn-integrity`)) {
   console.log("cleanup done");
 }
 
+// discourse/base images have shipped a stale frontend/discourse-types/node_modules/@types
+// snapshot baked in at image-build time (e.g. @types/@glint__ember-tsc, @types/@glimmer__component).
+// A valid @types/<name> entry never itself starts with "@", so any that do are leftovers from an
+// older, incompatible layout. node_modules is gitignored, so a bootstrap's git checkout never
+// clears them, and pnpm then refuses to place real dependencies over them with
+// ERR_PNPM_INVALID_DEPENDENCY_NAME. Clear them before pnpm runs.
+const staleTypesDir = `${discourseRoot}/frontend/discourse-types/node_modules/@types`;
+if (fs.existsSync(staleTypesDir)) {
+  for (const entry of fs.readdirSync(staleTypesDir)) {
+    if (entry.startsWith("@")) {
+      console.log(
+        `[.pnpmfile.cjs] Removing stale invalid @types entry: ${entry}`
+      );
+      fs.rmSync(`${staleTypesDir}/${entry}`, { recursive: true, force: true });
+    }
+  }
+}
+
 const oldFrontendPath = `app/assets/javascripts`;
 if (fs.existsSync(`${discourseRoot}/${oldFrontendPath}`)) {
   console.log(

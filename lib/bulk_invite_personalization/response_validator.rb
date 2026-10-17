@@ -29,7 +29,13 @@ module BulkInvitePersonalization
     # depending on; this also means any link-shaped text at all in the
     # model's own output is unexpected (see the URL check below), not
     # something to make an exception for.
-    def self.clean_body(text, required_link:, invite_id: nil, recipient_domain: nil)
+    def self.clean_body(
+      text,
+      required_link:,
+      invite_id: nil,
+      recipient_domain: nil,
+      exempt_keywords: nil
+    )
       return nil if text.blank?
 
       sanitized = ActionView::Base.full_sanitizer.sanitize(text).to_s
@@ -55,7 +61,14 @@ module BulkInvitePersonalization
         return nil
       end
 
-      if (word = shouting_word(flattened, recipient_domain: recipient_domain))
+      if (
+           word =
+             shouting_word(
+               flattened,
+               recipient_domain: recipient_domain,
+               exempt_keywords: exempt_keywords,
+             )
+         )
         log_rejection(:body, "shouting (word: #{word.inspect})", invite_id:, text: flattened)
         return nil
       end
@@ -74,7 +87,7 @@ module BulkInvitePersonalization
       "#{truncated}#{REQUIRED_LINK_LINE % { link: required_link }}"
     end
 
-    def self.clean_subject(text, invite_id: nil, recipient_domain: nil)
+    def self.clean_subject(text, invite_id: nil, recipient_domain: nil, exempt_keywords: nil)
       return nil if text.blank?
 
       sanitized = ActionView::Base.full_sanitizer.sanitize(text).to_s
@@ -93,7 +106,14 @@ module BulkInvitePersonalization
         return nil
       end
 
-      if (word = shouting_word(flattened, recipient_domain: recipient_domain))
+      if (
+           word =
+             shouting_word(
+               flattened,
+               recipient_domain: recipient_domain,
+               exempt_keywords: exempt_keywords,
+             )
+         )
         log_rejection(:subject, "shouting (word: #{word.inspect})", invite_id:, text: flattened)
         return nil
       end
@@ -109,16 +129,32 @@ module BulkInvitePersonalization
     # The model is explicitly told it may reference the recipient's
     # college/institution using their bare email domain when it doesn't
     # know the real institution name (see Generator's rules) -- a prose
-    # mention of exactly that domain is not a link and must not be
-    # rejected as one. Only the bare substring is stripped before
-    # checking, so an actual http://<domain> or www.<domain> construction
-    # of the same domain still matches URL_PATTERN on what's left and is
-    # still rejected -- only a plain mention is exempt.
+    # mention of that domain is not a link and must not be rejected as
+    # one. Checked per matched fragment (not a single gsub of the exact
+    # domain) because an allow_any_email invite's real address is often on
+    # a subdomain (e.g. "student.nitw.ac.in") and the model naturally
+    # writes the shorter, recognizable parent domain instead ("nitw.ac.in")
+    # -- confirmed in production this was rejecting a large share of an
+    # otherwise-compliant batch. A match counts as the recipient's own
+    # domain if either string contains the other, so it's exempt whichever
+    # direction the truncation goes; an unrelated domain, or a bare
+    # protocol/"www." prefix with nothing domain-shaped attached, still
+    # isn't and is still rejected.
     def self.contains_unexpected_link?(text, recipient_domain)
-      checked = recipient_domain.present? ? text.gsub(recipient_domain, "") : text
-      checked.match?(URL_PATTERN)
+      text.scan(URL_PATTERN).any? { |match| !domain_related_match?(match, recipient_domain) }
     end
     private_class_method :contains_unexpected_link?
+
+    def self.domain_related_match?(match, recipient_domain)
+      return false if recipient_domain.blank?
+
+      normalized = match.downcase.delete_prefix("www.")
+      return false if normalized.blank?
+
+      domain = recipient_domain.downcase
+      domain.include?(normalized) || normalized.include?(domain)
+    end
+    private_class_method :domain_related_match?
 
     # A blanket gsub(/\s+/, " ") (the old behavior, still used for the
     # single-line subject) would also flatten an intentional blank-line
@@ -144,35 +180,52 @@ module BulkInvitePersonalization
     # just that something did -- the difference between re-running this by
     # hand to find out and reading it straight off the log line.
     #
-    # recipient_domain's own acronym (e.g. "mnnit.ac.in" -> "MNNIT") is
-    # always exempt, on top of whatever institute_acronyms has -- confirmed
-    # in production this otherwise turns into whack-a-mole: the model
-    # naturally writes the recipient's own institute's acronym (derived
-    # straight from their email domain), and a site serving many institutes
-    # will always be one domain behind a hand-maintained allowlist (MNNIT
-    # and AIIMS both got rejected for months before anyone noticed, despite
-    # NIT/MNIT/IIT already being allow-listed -- a one-letter-off or
-    # altogether different institute is easy to miss by hand).
-    def self.shouting_word(text, recipient_domain: nil)
+    # Two exemptions apply on top of whatever institute_acronyms has, both
+    # scoped to this one invite rather than a site-wide allowlist entry:
+    #
+    # - A word that appears anywhere in recipient_domain (e.g. "IITM" in
+    #   "smail.iitm.ac.in") is exempt -- a substring check rather than
+    #   requiring it to be the domain's first label, since an
+    #   allow_any_email invite's real address is often on a subdomain
+    #   (the institute code isn't always the leftmost part) -- confirmed in
+    #   production this was rejecting genuine institute mentions (IITM,
+    #   IITD, IITH, MNNIT, NITW...) for every subdomain-addressed invite,
+    #   one hand-maintained allowlist entry at a time otherwise (MNNIT and
+    #   AIIMS both got missed for months despite NIT/MNIT/IIT already being
+    #   allow-listed).
+    # - A word that appears in exempt_keywords (the invite's own
+    #   recipient_keywords, see Generator#combined_keywords) is exempt --
+    #   an admin-supplied term like a lab/program code ("WSAI") is the
+    #   model following its instructions to use that context, not shouting,
+    #   and will never belong on a site-wide institute allowlist.
+    def self.shouting_word(text, recipient_domain: nil, exempt_keywords: nil)
       return "!/$" if text.match?(PUNCTUATION_SHOUTING_PATTERN)
 
       allowlist = SiteSetting.institute_acronyms.split("|")
-      domain_acronym = recipient_domain.to_s.split(".").first&.upcase
+      keyword_words = exempt_keywords.to_s.scan(ALL_CAPS_WORD_PATTERN)
       text
         .scan(ALL_CAPS_WORD_PATTERN)
         .find do |word|
+          next false if domain_contains_word?(recipient_domain, word)
+          next false if keyword_words.include?(word) || keyword_words.include?(word.chomp("S"))
+
           # Confirmed in production: the model routinely writes the natural
           # plural ("NITS" for an allow-listed "NIT") rather than the bare
           # acronym -- an otherwise-compliant response was being rejected as
           # shouting for that alone. Tolerate a simple trailing-S plural of
-          # any allow-listed acronym (or the recipient's own domain
-          # acronym) rather than requiring an exact match.
-          next false if domain_acronym.present? && [word, word.chomp("S")].include?(domain_acronym)
-
+          # any allow-listed acronym rather than requiring an exact match.
           !allowlist.include?(word) && !allowlist.include?(word.chomp("S"))
         end
     end
     private_class_method :shouting_word
+
+    def self.domain_contains_word?(recipient_domain, word)
+      return false if recipient_domain.blank?
+
+      domain = recipient_domain.to_s.upcase
+      domain.include?(word) || domain.include?(word.chomp("S"))
+    end
+    private_class_method :domain_contains_word?
 
     def self.truncate_to_word_limit(text)
       words = text.split(" ")

@@ -75,12 +75,14 @@ module BulkInvitePersonalization
       end
 
       domain = recipient_domain(invite)
+      keywords = combined_keywords(invite, extra_keywords)
       body =
         ResponseValidator.clean_body(
           parsed[:body],
           required_link: link,
           invite_id: invite.id,
           recipient_domain: domain,
+          exempt_keywords: keywords,
         )
       if body.nil?
         raise GenerationFailed,
@@ -92,6 +94,7 @@ module BulkInvitePersonalization
           parsed[:subject],
           invite_id: invite.id,
           recipient_domain: domain,
+          exempt_keywords: keywords,
         )
       if subject.nil?
         raise GenerationFailed,
@@ -243,16 +246,27 @@ module BulkInvitePersonalization
         lines << "Recipient name: #{normalize_recipient_name(invite.recipient_name)}"
       end
 
-      # extra_keywords is a one-off, per-resend addition (see
-      # InvitesController#resend_invite/#resend_all_invites) -- it's never
-      # persisted, unlike invite.recipient_keywords, so both can be present
-      # and are combined rather than one overriding the other.
-      keywords = [invite.recipient_keywords, extra_keywords].select(&:present?).join(", ")
+      keywords = combined_keywords(invite, extra_keywords)
       lines << "Additional context: #{keywords}" if keywords.present?
 
       lines.join("\n")
     end
     private_class_method :user_message
+
+    # extra_keywords is a one-off, per-resend addition (see
+    # InvitesController#resend_invite/#resend_all_invites) -- it's never
+    # persisted, unlike invite.recipient_keywords, so both can be present
+    # and are combined rather than one overriding the other. Also handed to
+    # ResponseValidator as exempt_keywords: an admin-supplied ALL-CAPS term
+    # here (e.g. a lab/program code like "WSAI") is the model following
+    # instructions to use it, not shouting -- confirmed in production this
+    # was getting every invite in a batch permanently skipped, since a
+    # per-recipient term like that was never going to land on the
+    # site-wide institute_acronyms allowlist.
+    def self.combined_keywords(invite, extra_keywords)
+      [invite.recipient_keywords, extra_keywords].select(&:present?).join(", ")
+    end
+    private_class_method :combined_keywords
 
     # Confirmed in production: a whole CSV batch's name column came in
     # ALL CAPS (college-directory export), the model echoed it verbatim into
