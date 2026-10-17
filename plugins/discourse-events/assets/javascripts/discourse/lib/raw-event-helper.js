@@ -1,6 +1,6 @@
 import { camelize } from "@ember/string";
 import { buildBBCodeAttrs, parseBBCodeTag } from "discourse/lib/text";
-import { EVENT_SCOPES } from "./calendar-event-scope";
+import { EVENT_SCOPES } from "./calendar-event-scope.js";
 
 let lastSetting;
 let lastHosts;
