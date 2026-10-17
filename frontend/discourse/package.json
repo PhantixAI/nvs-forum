@@ -50,7 +50,7 @@
     "@fullcalendar/moment-timezone": "^6.1.20",
     "@fullcalendar/timegrid": "^6.1.20",
     "@glimmer/syntax": "0.95.0",
-    "@glint/ember-tsc": "^1.11.6",
+    "@glint/ember-tsc": "^1.11.4",
     "@glint/template": "^1.9.0",
     "@highlightjs/cdn-assets": "11.12.0",
     "@json-editor/json-editor": "2.17.3",
@@ -173,7 +173,7 @@
     "source-map-js": "^1.2.2",
     "testem": "^3.21.3",
     "tracked-built-ins": "^4.1.2",
-    "typescript": "7.1.0-dev.20260930.4",
+    "typescript": "^6.0.3",
     "util": "^0.12.5",
     "xss": "1.0.15"
   },
@@ -181,7 +181,7 @@
     "node": ">= 20",
     "npm": "please-use-pnpm",
     "yarn": "please-use-pnpm",
-    "pnpm": "^12"
+    "pnpm": "^10"
   },
   "ember": {
     "edition": "octane"

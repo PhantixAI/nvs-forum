@@ -61,6 +61,11 @@ RSpec.describe BulkInvitePersonalization::Generator do
         fab!(:llm_model, :fake_model)
 
         before do
+          # discourse_ai_enabled defaults to false even once the plugin is
+          # loaded (LOAD_PLUGINS=1) -- without this, every example below
+          # silently gets nil back from #personalize regardless of what it
+          # stubs, since Generator.enabled? short-circuits first.
+          SiteSetting.discourse_ai_enabled = true
           SiteSetting.ai_default_llm_model = llm_model.id
           # resolve_llm re-queries by id rather than reusing this fab!, so
           # stubbing methods directly on llm_model (below) would silently no-op
@@ -184,6 +189,35 @@ RSpec.describe BulkInvitePersonalization::Generator do
           end
 
           expect(result[:body]).to include("Great to connect with iitb.ac.in folks, worth a look?")
+        end
+
+        it "does not reject the body for echoing an ALL-CAPS word from the invite's own recipient_keywords" do
+          # Confirmed in production: a CSV with recipient_keywords like
+          # "WSAI;IDDD" (real lab/program codes, not spam) -- the model
+          # follows its own instructions to use that context and writes it
+          # back verbatim, which ResponseValidator's anti-shouting check was
+          # rejecting every time, since those terms could never belong on
+          # the site-wide institute_acronyms allowlist.
+          invite.update!(recipient_keywords: "WSAI;IDDD")
+          compliant = "SUBJECT: Hey\nBODY:\nGiven your work with WSAI and IDDD, worth a look?"
+
+          result = nil
+          DiscourseAi::Completions::Llm.with_prepared_responses([compliant]) do
+            result = described_class.personalize(invite)
+          end
+
+          expect(result[:body]).to include("Given your work with WSAI and IDDD, worth a look?")
+        end
+
+        it "still raises GenerationFailed for an ALL-CAPS word that isn't in recipient_keywords, the domain, or the allowlist" do
+          invite.update!(recipient_keywords: "WSAI")
+          non_compliant = "SUBJECT: Hey\nBODY:\nThis is AMAZING, worth a look?"
+
+          expect {
+            DiscourseAi::Completions::Llm.with_prepared_responses([non_compliant]) do
+              described_class.personalize(invite)
+            end
+          }.to raise_error(described_class::GenerationFailed, /body failed validation/)
         end
 
         it "raises GenerationFailed, rather than returning nil, when the body fails the anti-spam rules" do

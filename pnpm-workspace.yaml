@@ -8,11 +8,12 @@ ignoreWorkspaceCycles: true
 updateNotifier: false
 strictPeerDependencies: true
 strictDepBuilds: false
-allowBuilds:
-  lefthook: true
-  "@zoom/meetingsdk": false
-  core-js: false
-  rete: false
+onlyBuiltDependencies:
+- lefthook
+ignoredBuiltDependencies:
+- "@zoom/meetingsdk"
+- core-js
+- rete
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
 - "@discourse/*"
@@ -96,7 +97,7 @@ peerDependencyRules:
     - "@types/react"
 overrides:
   "tmp": "^0.2.7"
-  "@glint/tsserver-plugin>typescript": "^6.0.3"
+  typescript: "^6.0.3"
   "babel-plugin-ember-template-compilation@~2.3.0": "2.4.1"
   "broccoli-babel-transpiler@8.0.0": "^8.0.2"
 allowedDeprecatedVersions:

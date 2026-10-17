@@ -103,6 +103,55 @@ RSpec.describe BulkInvitePersonalization::ResponseValidator do
       ).to eq(nil)
     end
 
+    it "exempts a shortened parent domain the model writes instead of the recipient's literal subdomain" do
+      # Confirmed in production: an allow_any_email invite's real address is
+      # often on a subdomain (e.g. "student.nitw.ac.in"), and the model
+      # naturally writes the shorter, recognizable parent domain instead
+      # ("nitw.ac.in") -- rejecting that as an unrelated link/domain was
+      # skipping a large share of an otherwise-compliant batch.
+      text = "Reaching out to folks at nitw.ac.in, worth a look?"
+      expect(
+        described_class.clean_body(
+          text,
+          required_link: link,
+          recipient_domain: "student.nitw.ac.in",
+        ),
+      ).to eq("#{text}#{link_line}")
+    end
+
+    it "exempts the recipient's literal subdomain itself, not just the shortened form" do
+      text = "Reaching out to folks at student.nitw.ac.in, worth a look?"
+      expect(
+        described_class.clean_body(
+          text,
+          required_link: link,
+          recipient_domain: "student.nitw.ac.in",
+        ),
+      ).to eq("#{text}#{link_line}")
+    end
+
+    it "still rejects an unrelated domain even when the recipient is on a subdomain" do
+      text = "Head to example.com to learn more, interested?"
+      expect(
+        described_class.clean_body(
+          text,
+          required_link: link,
+          recipient_domain: "student.nitw.ac.in",
+        ),
+      ).to eq(nil)
+    end
+
+    it "still rejects a bare 'www.' with nothing domain-shaped after it" do
+      text = "Visit www. sometime, interested?"
+      expect(
+        described_class.clean_body(
+          text,
+          required_link: link,
+          recipient_domain: "student.nitw.ac.in",
+        ),
+      ).to eq(nil)
+    end
+
     it "rejects a different/altered link just as readily as the real one" do
       altered = link.sub("abc123", "xyz789")
       expect(described_class.clean_body("Worth a look? #{altered}", required_link: link)).to eq(nil)
@@ -219,6 +268,55 @@ RSpec.describe BulkInvitePersonalization::ResponseValidator do
       ).to eq("#{text}#{link_line}")
     end
 
+    it "does not reject an institute acronym embedded anywhere in the recipient's domain, not just its first label" do
+      # Confirmed in production: an allow_any_email invite's real address is
+      # often on a subdomain where the institute code isn't the leftmost
+      # label (e.g. "smail.iitm.ac.in") -- deriving the acronym from only
+      # the first label was missing these (IITM, IITD, IITH...) even though
+      # NIT/MNIT/IIT were already allow-listed.
+      text = "A few of us from IITM wanted to reach out, worth a look?"
+      expect(
+        described_class.clean_body(text, required_link: link, recipient_domain: "smail.iitm.ac.in"),
+      ).to eq("#{text}#{link_line}")
+    end
+
+    it "still rejects the same word when it isn't contained anywhere in the recipient's domain" do
+      text = "A few of us from IITM wanted to reach out, worth a look?"
+      expect(
+        described_class.clean_body(
+          text,
+          required_link: link,
+          recipient_domain: "student.nitw.ac.in",
+        ),
+      ).to eq(nil)
+    end
+
+    it "exempts an ALL-CAPS word that appears in the invite's own exempt_keywords" do
+      # Confirmed in production: a CSV with recipient_keywords like
+      # "WSAI;IDDD" (real lab/program codes, not spam) -- the model follows
+      # its own instructions to use that context and writes it back
+      # verbatim, which was being rejected every time since those terms
+      # could never belong on the site-wide institute_acronyms allowlist.
+      text = "Given your work with WSAI, worth a look?"
+      expect(
+        described_class.clean_body(text, required_link: link, exempt_keywords: "WSAI;IDDD"),
+      ).to eq("#{text}#{link_line}")
+    end
+
+    it "tolerates the natural plural of an exempt_keywords word too" do
+      text = "Given your work with WSAIS, worth a look?"
+      expect(
+        described_class.clean_body(text, required_link: link, exempt_keywords: "WSAI;IDDD"),
+      ).to eq("#{text}#{link_line}")
+    end
+
+    it "still rejects an ALL-CAPS word that isn't in exempt_keywords, the domain, or the allowlist" do
+      text = "This is AMAZING, worth a look?"
+      expect(
+        described_class.clean_body(text, required_link: link, exempt_keywords: "WSAI;IDDD"),
+      ).to eq(nil)
+    end
+
     it "truncates text over 100 words at the last sentence boundary, then still appends the real link after it" do
       sentence = "This is one short sentence about the community."
       long_text = ([sentence] * 15).join(" ") + " Worth a look?"
@@ -311,6 +409,36 @@ RSpec.describe BulkInvitePersonalization::ResponseValidator do
       expect(
         described_class.clean_subject("Hello from MNNIT", recipient_domain: "iitb.ac.in"),
       ).to eq(nil)
+    end
+
+    it "does not reject an institute acronym embedded anywhere in the recipient's domain in a subject too" do
+      expect(
+        described_class.clean_subject("Hello from IITM", recipient_domain: "smail.iitm.ac.in"),
+      ).to eq("Hello from IITM")
+    end
+
+    it "exempts an ALL-CAPS word from exempt_keywords in a subject too" do
+      expect(described_class.clean_subject("Note about WSAI", exempt_keywords: "WSAI")).to eq(
+        "Note about WSAI",
+      )
+    end
+
+    it "still rejects a subject link when the recipient is on a subdomain but the match is unrelated" do
+      expect(
+        described_class.clean_subject(
+          "Check this out: example.com",
+          recipient_domain: "student.nitw.ac.in",
+        ),
+      ).to eq(nil)
+    end
+
+    it "does not reject a shortened parent domain in a subject either" do
+      expect(
+        described_class.clean_subject(
+          "quick invite for nitw.ac.in alumni",
+          recipient_domain: "student.nitw.ac.in",
+        ),
+      ).to eq("quick invite for nitw.ac.in alumni")
     end
 
     it "rejects a subject over the max word count" do

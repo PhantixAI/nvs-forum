@@ -68,14 +68,25 @@ ssh -i /tmp/ls_key.pem ubuntu@52.66.136.102
 
 ## Deploying Custom Changes
 
-Push changes to `master` on `PhantixAI/nvs-forum`, then:
+Deploys are automated via `.github/workflows/deploy.yml`, which runs on a self-hosted GitHub
+Actions runner on this same Lightsail box. **Every push to `master` triggers it automatically**
+— there is no manual SSH step for a normal deploy anymore. It:
 
-```bash
-ssh -i ~/.ssh/lightsail-navodians.pem ubuntu@52.66.136.102
-cd /var/discourse && sudo ./launcher rebuild app
-```
+1. Writes `containers/app.yml`/`config/multisite.yml` with real secrets injected.
+2. Runs `sudo ./launcher bootstrap app` to build the new image — **the site stays up** during
+   this step, since bootstrap builds into a new container without touching the running one.
+3. Swaps the container (`launcher destroy` + `launcher start`) — brief downtime, ~30s.
+4. Waits for nginx and curl-checks all three domains before finishing; fails the workflow (and
+   leaves the old container running) if anything doesn't come up.
 
-Rebuild takes ~10–15 minutes. The site stays down during rebuild — plan accordingly.
+Before a commit can even reach `master`, `.github/workflows/bootstrap-check.yml` must pass — it
+runs the same `pnpm install --frozen-lockfile` command the bootstrap step depends on, inside the
+real `discourse/base` image, as a required PR check. This exists because a pnpm/TypeScript
+tooling upgrade from upstream Discourse broke that exact step in production on 2026-10-17 with no
+earlier warning (see the revert commits around `570ffdda808`/`4368431eb4b` for the root cause).
+
+A manual `ssh` + `sudo ./launcher rebuild app` (as in First-Time Setup above) is only needed for
+one-off recovery, not routine deploys.
 
 ## app.yml Credentials
 
