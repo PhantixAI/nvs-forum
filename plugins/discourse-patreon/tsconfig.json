@@ -16,10 +16,5 @@
         "./admin/assets/javascripts/*.gts"
       ]
     }
-  },
-  "references": [
-    {
-      "path": "../../frontend/discourse"
-    }
-  ]
+  }
 }
