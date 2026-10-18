@@ -1,0 +1,42 @@
+name: Bootstrap Check
+
+# Reproduces the exact step that broke production on 2026-10-17: pnpm install
+# running inside the real discourse/base image, via the same command the
+# launcher's pups "yarn" hook runs during `./launcher bootstrap app`. The
+# generic Linux test container used by tests.yml/linting.yml does not exercise
+# this code path, so it didn't catch that regression. This check is
+# intentionally narrow (just the install step, no DB, no asset precompile) to
+# stay fast and avoid needing any production secrets.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+concurrency:
+  group: bootstrap-check-${{ format('{0}-{1}', github.head_ref || github.run_number, github.job) }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pnpm-install:
+    name: pnpm install (discourse/base image)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pull discourse/base image
+        run: docker pull discourse/base:release
+
+      - name: Run the launcher's yarn-hook install command
+        run: |
+          docker run --rm \
+            -v "$PWD:/var/www/discourse" \
+            -w /var/www/discourse \
+            discourse/base:release \
+            bash -c 'chown -R discourse:discourse /var/www/discourse && su discourse -c "CI=1 pnpm install --frozen-lockfile && pnpm prune"'
