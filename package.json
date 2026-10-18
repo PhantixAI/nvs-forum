@@ -49,7 +49,7 @@
     "node": ">= 20",
     "npm": "please-use-pnpm",
     "yarn": "please-use-pnpm",
-    "pnpm": "^12"
+    "pnpm": "^10"
   },
-  "packageManager": "pnpm@12.11.2"
+  "packageManager": "pnpm@10.34.5"
 }
