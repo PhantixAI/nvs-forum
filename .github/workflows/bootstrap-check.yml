@@ -39,4 +39,4 @@ jobs:
             -v "$PWD:/var/www/discourse" \
             -w /var/www/discourse \
             discourse/base:release \
-            su discourse -c 'CI=1 pnpm install --frozen-lockfile && pnpm prune'
+            bash -c 'chown -R discourse:discourse /var/www/discourse && su discourse -c "CI=1 pnpm install --frozen-lockfile && pnpm prune"'
