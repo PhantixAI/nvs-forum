@@ -87,6 +87,17 @@ hooks:
         cmd:
           - git clone https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-follow.git
           - git clone https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-authentication-validations.git
+  # pnpm 12's default Rust linker mis-aliases a few scoped, self-typed peer
+  # dependencies (@glimmer/component, @glint/template, @glint/ember-tsc) into
+  # ERR_PNPM_INVALID_DEPENDENCY_NAME on Linux. package.json now pins pnpm to
+  # 10.34.5, but the base image's pnpm binary is a direct global install, not
+  # Corepack-managed, so it won't follow that automatically -- force it here,
+  # immediately before pups' "yarn" hook runs `pnpm install --frozen-lockfile`.
+  before_yarn:
+    - exec:
+        cd: $home
+        cmd:
+          - npm install -g pnpm@10.34.5
   after_db_migrate:
     - exec:
         cd: $home
