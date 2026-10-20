@@ -3258,4 +3258,140 @@ RSpec.describe InvitesController do
       end
     end
   end
+
+  describe "#extract_from_url" do
+    it "requires to be logged in" do
+      post "/invites/extract-from-url.json", params: { url: "https://example.com", rules: "rules" }
+      expect(response.status).to eq(403)
+    end
+
+    context "while logged in" do
+      it "fails if you cannot bulk invite to the forum" do
+        sign_in(user)
+        post "/invites/extract-from-url.json",
+             params: {
+               url: "https://example.com",
+               rules: "rules",
+             }
+        expect(response.status).to eq(403)
+      end
+
+      it "rejects a blank url or rules" do
+        sign_in(admin)
+
+        post "/invites/extract-from-url.json", params: { url: "", rules: "rules" }
+        expect(response.status).to eq(422)
+
+        post "/invites/extract-from-url.json", params: { url: "https://example.com", rules: "" }
+        expect(response.status).to eq(422)
+      end
+
+      it "persists the given rules for later prefill, even before the extraction itself runs" do
+        sign_in(admin)
+        BulkInviteUrlExtraction::Generator.stubs(:extract).returns(
+          BulkInviteUrlExtraction::Generator::Result.new(rows: [], warnings: []),
+        )
+
+        post "/invites/extract-from-url.json",
+             params: {
+               url: "https://example.com",
+               rules: "Append RollNo to @example.edu",
+             }
+
+        expect(PluginStore.get("bulk_invite_url_extraction", "last_rules")).to eq(
+          "Append RollNo to @example.edu",
+        )
+      end
+
+      it "returns the extracted rows and any warnings on success" do
+        sign_in(admin)
+        rows = [{ email: "priya@iitb.ac.in", name: "Priya" }]
+        BulkInviteUrlExtraction::Generator.stubs(:extract).returns(
+          BulkInviteUrlExtraction::Generator::Result.new(
+            rows: rows,
+            warnings: ["Part 2 of 2 of the page could not be processed."],
+          ),
+        )
+
+        post "/invites/extract-from-url.json",
+             params: {
+               url: "https://example.com",
+               rules: "rules",
+             }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["rows"]).to eq(
+          [{ "email" => "priya@iitb.ac.in", "name" => "Priya" }],
+        )
+        expect(response.parsed_body["warnings"]).to eq(
+          ["Part 2 of 2 of the page could not be processed."],
+        )
+      end
+
+      it "returns a 422 with the failure message when extraction fails entirely" do
+        sign_in(admin)
+        BulkInviteUrlExtraction::Generator.stubs(:extract).raises(
+          BulkInviteUrlExtraction::Generator::ExtractionFailed.new(
+            "Could not fetch the page: timed out",
+          ),
+        )
+
+        post "/invites/extract-from-url.json",
+             params: {
+               url: "https://example.com",
+               rules: "rules",
+             }
+
+        expect(response.status).to eq(422)
+        expect(response.parsed_body["errors"]).to include("Could not fetch the page: timed out")
+      end
+
+      it "enforces a per-hour rate limit on extraction attempts" do
+        sign_in(admin)
+        RateLimiter.enable
+        BulkInviteUrlExtraction::Generator.stubs(:extract).returns(
+          BulkInviteUrlExtraction::Generator::Result.new(rows: [], warnings: []),
+        )
+
+        11.times do
+          post "/invites/extract-from-url.json",
+               params: {
+                 url: "https://example.com",
+                 rules: "rules",
+               }
+        end
+
+        expect(response.status).to eq(429)
+      end
+    end
+  end
+
+  describe "#last_url_extraction_rules" do
+    it "requires to be logged in" do
+      get "/invites/extract-from-url.json"
+      expect(response.status).to eq(403)
+    end
+
+    it "fails if you cannot bulk invite to the forum" do
+      sign_in(user)
+      get "/invites/extract-from-url.json"
+      expect(response.status).to eq(403)
+    end
+
+    it "returns a blank string when no rules have ever been saved" do
+      sign_in(admin)
+      get "/invites/extract-from-url.json"
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["rules"]).to eq("")
+    end
+
+    it "returns the most recently saved rules" do
+      PluginStore.set("bulk_invite_url_extraction", "last_rules", "Append RollNo to @example.edu")
+      sign_in(admin)
+
+      get "/invites/extract-from-url.json"
+
+      expect(response.parsed_body["rules"]).to eq("Append RollNo to @example.edu")
+    end
+  end
 end

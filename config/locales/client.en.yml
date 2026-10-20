@@ -2850,6 +2850,25 @@ en:
           pending_review: "File uploaded successfully. It has been submitted for staff review and won't be processed until approved."
           error: "Sorry, file should be CSV format."
 
+          url_extraction:
+            csv_tab: "Upload CSV file"
+            url_tab: "Extract from URL"
+            url_label: "Page URL"
+            rules_label: "Extraction rules"
+            context_label: "Context"
+            context_description: "Used to guide the extraction, and attached to every invite it produces as recipient context for personalized emails."
+            extract_button: "Extract"
+            extracting: "Extracting…"
+            groups_label: "Add to groups"
+            topic_label: "Invite to topic"
+            allow_any_email_label: "Allow any email"
+            schedule_send_label: "Schedule send"
+            skip_personalization_label: "Skip personalization"
+            email_column: "Email"
+            name_column: "Name"
+            selected_count: "%{count} of %{total} rows selected"
+            create_invites_button: "Create Invites"
+
       confirm_access:
         title: "Confirm access"
         incorrect_password: "The entered password is incorrect."
