@@ -649,6 +649,8 @@ en:
     max_rows: "First %{max_bulk_invites} invites has been sent. Try splitting the file in smaller parts."
     file_too_large: "The uploaded file is too large. Please split it into smaller files."
     error: "There was an error uploading that file. Please try again later."
+    url_extraction:
+      missing_fields: "Enter both a URL and extraction rules."
 
   invite_link:
     email_taken: "This email is already in use. If you already have an account please log in or reset password."
@@ -2135,6 +2137,8 @@ en:
     bulk_invite_email_delay_min_seconds: "Minimum random delay, in seconds, between each bulk invite email being sent. Applies to every bulk invite, whether or not AI personalization is enabled."
     bulk_invite_email_delay_max_seconds: "Maximum random delay, in seconds, between each bulk invite email being sent. Applies to every bulk invite, whether or not AI personalization is enabled."
     bulk_invite_paced_resend_enabled: "When an admin uses Resend All Invites, re-queue matching invites through the same one-at-a-time, randomly-paced throttle a bulk invite CSV upload uses (governed by {{setting:bulk_invite_email_delay_min_seconds}} and {{setting:bulk_invite_email_delay_max_seconds}}), instead of emailing all of them immediately. Recommended for sites running large bulk invite campaigns, so a resend can't send a burst of emails that gets flagged as spam."
+    bulk_invite_url_extraction_enabled: "Allow an admin to extract a list of email addresses (and names, where available) from a web page, to use as the basis for a bulk invite CSV. Requires an AI language model to be configured under AI plugin settings; when none is configured, the extraction tool is unavailable."
+    bulk_invite_url_extraction_max_tokens: "Maximum output tokens requested from the AI language model per page section when extracting email addresses from a URL (see {{setting:bulk_invite_url_extraction_enabled}}). A value too low can cause a section's extraction to fail; raise this if that happens often on large pages."
     disabled: "disabled"
     display_local_time_in_user_card: "Display the local time based on a user's timezone when their user card is opened."
     censored_words: "Words that will be automatically replaced with &#9632;&#9632;&#9632;&#9632;"

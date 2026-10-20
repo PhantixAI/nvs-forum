@@ -42,6 +42,8 @@ class InvitesController < ApplicationController
                    resend_all_invites
                    send_now_invite
                    upload_csv
+                   extract_from_url
+                   last_url_extraction_rules
                  ]
 
   skip_before_action :check_xhr, except: [:perform_accept_invitation]
@@ -852,6 +854,59 @@ class InvitesController < ApplicationController
                status: :unprocessable_entity
       end
     end
+  end
+
+  # Feeds the "From URL" step of the bulk invite UI -- extracts a reviewable
+  # list of {email, name} rows from an admin-supplied page, following
+  # admin-supplied free-text rules. Never creates an Invite itself: the
+  # admin reviews/edits the returned rows client-side, which then get
+  # resubmitted as a CSV through #upload_csv like any other bulk invite, so
+  # every safeguard there (size/row caps, ReviewableBulkInvite gating,
+  # per-row validation) applies unchanged.
+  def extract_from_url
+    guardian.ensure_can_bulk_invite_to_forum!
+    RateLimiter.new(
+      current_user,
+      "bulk-invite-url-extraction-per-hour",
+      10,
+      1.hour,
+      apply_limit_to_staff: true,
+    ).performed!
+
+    url = params[:url].to_s.strip
+    rules = params[:rules].to_s.strip
+    context = params[:context].to_s.strip
+
+    if url.blank? || rules.blank?
+      return(
+        render json:
+                 failed_json.merge(errors: [I18n.t("bulk_invite.url_extraction.missing_fields")]),
+               status: :unprocessable_entity
+      )
+    end
+
+    PluginStore.set("bulk_invite_url_extraction", "last_rules", rules)
+
+    hijack do
+      result = BulkInviteUrlExtraction::Generator.extract(url: url, rules: rules, context: context)
+      render json: success_json.merge(rows: result.rows, warnings: result.warnings)
+    rescue BulkInviteUrlExtraction::Generator::ExtractionFailed => e
+      render json: failed_json.merge(errors: [e.message]), status: :unprocessable_entity
+    end
+  end
+
+  # Prefills the "Rules" field in the "From URL" step with whatever rules
+  # text an admin last used -- a single site-wide value (see
+  # BulkInviteUrlExtraction::Generator and #extract_from_url), not a
+  # per-admin or per-site-setting one, so a page re-scraped a day later
+  # doesn't start from a blank textarea.
+  def last_url_extraction_rules
+    guardian.ensure_can_bulk_invite_to_forum!
+
+    render json:
+             success_json.merge(
+               rules: PluginStore.get("bulk_invite_url_extraction", "last_rules").to_s,
+             )
   end
 
   private

@@ -4348,6 +4348,23 @@ uncategorized:
     depends_behavior: "hidden"
     dependent_setting_display: "inline"
 
+  bulk_invite_url_extraction_enabled:
+    default: false
+    client: true
+    area: "users"
+
+  bulk_invite_url_extraction_max_tokens:
+    default: 4000
+    type: integer
+    min: 500
+    max: 16000
+    client: false
+    area: "users"
+    depends_on:
+      - bulk_invite_url_extraction_enabled
+    depends_behavior: "hidden"
+    dependent_setting_display: "inline"
+
   bulk_invite_email_delay_min_seconds:
     default: 5
     client: false
