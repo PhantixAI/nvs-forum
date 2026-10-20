@@ -1,14 +1,14 @@
 import { concat, fn, hash } from "@ember/helper";
+import { on } from "@ember/modifier";
 import { LinkTo } from "@ember/routing";
 import { trustHTML } from "@ember/template";
 import SvgEnvelopeZero from "discourse/components/svg/envelope-zero";
 import DMenu from "discourse/float-kit/components/d-menu";
 import bodyClass from "discourse/helpers/body-class";
 import inviteDeliveryStatus from "discourse/helpers/invite-delivery-status";
-import rawDate from "discourse/helpers/raw-date";
 import { groupPath } from "discourse/lib/url";
 import ComboBox from "discourse/select-kit/components/combo-box";
-import { eq, not } from "discourse/truth-helpers";
+import { and, eq, not } from "discourse/truth-helpers";
 import DButton from "discourse/ui-kit/d-button";
 import DComboButton from "discourse/ui-kit/d-combo-button";
 import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
@@ -97,7 +97,42 @@ export default <template>
               />
             {{/if}}
 
-            {{#if @controller.invitePending}}
+            {{#if @controller.inviteReview}}
+              <DComboButton
+                class="send-delete-selected-combo"
+                @btnTypeClass="btn-default"
+                @hasMenu={{true}}
+                as |combo|
+              >
+                <combo.Button
+                  class="send-selected-drafts"
+                  @action={{@controller.sendSelectedDrafts}}
+                  @disabled={{not @controller.selectedDraftIds.size}}
+                  @icon="paper-plane"
+                  @label="user.invited.send_selected"
+                />
+
+                <combo.Menu
+                  @disabled={{not @controller.selectedDraftIds.size}}
+                  @identifier="draft-bulk-actions-menu"
+                >
+                  <DDropdownMenu as |dropdown|>
+                    <dropdown.item>
+                      <DButton
+                        class="btn-danger delete-selected-drafts"
+                        @action={{@controller.deleteSelectedDrafts}}
+                        @icon="trash-can"
+                        @label="user.invited.delete_selected"
+                      />
+                    </dropdown.item>
+                  </DDropdownMenu>
+                </combo.Menu>
+              </DComboButton>
+            {{/if}}
+
+            {{#if
+              (and @controller.invitePending (not @controller.inviteReview))
+            }}
               {{#if @controller.reinvitedAll}}
                 <span class="reinvited-all">
                   <DButton
@@ -169,6 +204,9 @@ export default <template>
                     <th class="d-table__header-cell">{{i18n
                         "user.invited.invited_via"
                       }}</th>
+                    <th class="d-table__header-cell">{{i18n
+                        "user.invited.keywords"
+                      }}</th>
                   {{/if}}
                 </tr>
               </thead>
@@ -233,6 +271,12 @@ export default <template>
                         </div>
                         {{trustHTML invite.invite_source}}
                       </td>
+                      <td class="d-table__cell --detail">
+                        <div class="d-table__mobile-label">
+                          {{i18n "user.invited.keywords"}}
+                        </div>
+                        {{invite.recipient_keywords}}
+                      </td>
                     {{/if}}
                   </tr>
                 {{/each}}
@@ -242,6 +286,16 @@ export default <template>
             <table class="d-table user-invite-list">
               <thead class="d-table__header">
                 <tr class="d-table__row">
+                  {{#if @controller.inviteReview}}
+                    <th class="d-table__header-cell">
+                      <input
+                        checked={{@controller.allDraftsSelected}}
+                        title={{i18n "user.invited.select_all"}}
+                        type="checkbox"
+                        {{on "click" @controller.toggleSelectAllDrafts}}
+                      />
+                    </th>
+                  {{/if}}
                   <th class="d-table__header-cell">{{i18n
                       "user.invited.invited_via"
                     }}</th>
@@ -249,7 +303,7 @@ export default <template>
                       "user.invited.sent"
                     }}</th>
                   <th class="d-table__header-cell">{{i18n
-                      "user.invited.expires_at"
+                      "user.invited.keywords"
                     }}</th>
                   <th class="d-table__header-cell">{{i18n
                       "user.invited.delivery_status"
@@ -260,6 +314,18 @@ export default <template>
               <tbody class="d-table__body">
                 {{#each @controller.model.invites as |invite|}}
                   <tr class="d-table__row">
+                    {{#if @controller.inviteReview}}
+                      <td class="d-table__cell --overview">
+                        <input
+                          checked={{@controller.isDraftSelected invite}}
+                          type="checkbox"
+                          {{on
+                            "click"
+                            (fn @controller.toggleDraftSelected invite)
+                          }}
+                        />
+                      </td>
+                    {{/if}}
                     <td class="d-table__cell --overview invite-type">
                       <div class="invite-shortkey">
                         {{#if invite.link}}
@@ -330,17 +396,11 @@ export default <template>
                       {{dFormatDate invite.updated_at}}
                     </td>
 
-                    <td class="d-table__cell --detail invite-expires-at">
+                    <td class="d-table__cell --detail invite-keywords">
                       <div class="d-table__mobile-label">
-                        {{i18n "user.invited.expires_at"}}
+                        {{i18n "user.invited.keywords"}}
                       </div>
-                      {{#if @controller.inviteExpired}}
-                        {{rawDate invite.expires_at}}
-                      {{else if invite.expired}}
-                        {{i18n "user.invited.expired"}}
-                      {{else}}
-                        {{rawDate invite.expires_at}}
-                      {{/if}}
+                      {{invite.recipient_keywords}}
                     </td>
 
                     <td class="d-table__cell --detail invite-delivery-status">

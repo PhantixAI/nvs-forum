@@ -18,7 +18,9 @@ class InviteSerializer < ApplicationSerializer
              :expires_at,
              :expired,
              :grants_admin,
-             :grants_moderator
+             :grants_moderator,
+             :recipient_keywords,
+             :allow_any_email
 
   has_many :topics, embed: :object, serializer: BasicTopicSerializer
   has_many :groups, embed: :object, serializer: BasicGroupSerializer
@@ -48,7 +50,9 @@ class InviteSerializer < ApplicationSerializer
   end
 
   def emailed
-    object.emailed_status != Invite.emailed_status_types[:not_required]
+    ![Invite.emailed_status_types[:not_required], Invite.emailed_status_types[:review]].include?(
+      object.emailed_status,
+    )
   end
 
   def include_delivery_status?
@@ -111,6 +115,14 @@ class InviteSerializer < ApplicationSerializer
   end
 
   def include_grants_moderator?
+    can_see_invite_details?
+  end
+
+  def include_recipient_keywords?
+    can_see_invite_details?
+  end
+
+  def include_allow_any_email?
     can_see_invite_details?
   end
 

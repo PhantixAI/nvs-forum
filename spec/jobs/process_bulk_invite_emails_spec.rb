@@ -63,62 +63,29 @@ RSpec.describe Jobs::ProcessBulkInviteEmails do
       expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(0)
     end
 
-    it "sets custom_subject/custom_message from AI personalization when it returns text" do
-      invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
+    it "never calls the AI personalization generator -- every bulk_pending invite already has resolved content by the time it gets here (see Jobs::GenerateInvitePersonalization)" do
+      Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
 
-      BulkInvitePersonalization::Generator.stubs(:personalize).returns(
-        subject: "A fresh subject",
-        body: "A personalized note.",
-      )
+      BulkInvitePersonalization::Generator.expects(:personalize).never
 
       described_class.new.execute({})
-
-      expect(invite.reload.custom_subject).to eq("A fresh subject")
-      expect(invite.custom_message).to eq("A personalized note.")
     end
 
-    it "leaves custom_message blank when personalization is unavailable" do
-      invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
-
-      BulkInvitePersonalization::Generator.stubs(:personalize).returns(nil)
-
-      described_class.new.execute({})
-
-      expect(invite.reload.custom_message).to eq(nil)
-      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:sending])
-    end
-
-    it "keeps a note the inviter wrote when personalization is unavailable" do
+    it "leaves an existing custom_subject/custom_message untouched, sending whatever content is already there" do
       invite =
         Fabricate(
           :invite,
           emailed_status: Invite.emailed_status_types[:bulk_pending],
-          custom_message: "Looking forward to having you.",
+          custom_subject: "A pre-generated subject",
+          custom_message: "A pre-generated note.",
         )
 
-      BulkInvitePersonalization::Generator.stubs(:personalize).returns(nil)
-
       described_class.new.execute({})
 
-      expect(invite.reload.custom_message).to eq("Looking forward to having you.")
-    end
-
-    it "skips an invite whose personalization fails, without sending it, and keeps the chain going" do
-      invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
-      later_invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
-
-      BulkInvitePersonalization::Generator.stubs(:personalize).raises(
-        BulkInvitePersonalization::Generator::GenerationFailed,
-        "spend cap exceeded",
-      )
-
-      described_class.new.execute({})
-
-      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:skipped])
-      expect(invite.delivery_status).to eq("skipped")
-      expect(Jobs::InviteEmail.jobs.size).to eq(0)
-      expect(later_invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
-      expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
+      expect(invite.reload.custom_subject).to eq("A pre-generated subject")
+      expect(invite.custom_message).to eq("A pre-generated note.")
+      expect(invite.emailed_status).to eq(Invite.emailed_status_types[:sending])
+      expect(Jobs::InviteEmail.jobs.size).to eq(1)
     end
 
     it "marks the invite_email job as a topic invite when the invite has a topic" do
@@ -144,29 +111,22 @@ RSpec.describe Jobs::ProcessBulkInviteEmails do
       )
     end
 
-    it "does not retry a skipped invite on the next run" do
-      invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
-
-      BulkInvitePersonalization::Generator.stubs(:personalize).raises(
-        BulkInvitePersonalization::Generator::GenerationFailed,
-        "spend cap exceeded",
-      )
-
-      described_class.new.execute({})
-      Jobs::ProcessBulkInviteEmails.jobs.clear
-      described_class.new.execute({})
-
-      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:skipped])
-      expect(Jobs::InviteEmail.jobs.size).to eq(0)
-    end
-
-    # Covers an unexpected error elsewhere in #deliver, which #execute's own
-    # rescue still handles.
+    # Covers an unexpected error from #deliver's own Jobs.enqueue call, which
+    # #execute's outer rescue still handles the same way it always has.
     it "moves an invite that fails to send to pending and keeps the chain going" do
       invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
       later_invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
 
-      BulkInvitePersonalization::Generator.stubs(:personalize).raises(StandardError, "boom")
+      # #reschedule's own Jobs.enqueue_in call is implemented in terms of
+      # Jobs.enqueue internally, so it needs to keep working normally --
+      # and_call_original as the general case, with the specific
+      # :invite_email call overridden to raise.
+      allow(::Jobs).to receive(:enqueue).and_call_original
+      allow(::Jobs).to receive(:enqueue).with(
+        :invite_email,
+        invite_id: invite.id,
+        invite_to_topic: false,
+      ).and_raise(StandardError, "boom")
 
       described_class.new.execute({})
 
