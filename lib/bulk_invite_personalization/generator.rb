@@ -3,9 +3,14 @@
 module BulkInvitePersonalization
   # Generates a distinct, anti-spam-styled invite email for one bulk-invite
   # recipient by asking the site's configured AI language model to rework an
-  # admin-provided base email. Called once per invite, right before send, from
-  # Jobs::ProcessBulkInviteEmails -- never from Jobs::BulkInvite, which can be
-  # processing thousands of rows in a single job run.
+  # admin-provided base email. Called once per invite, off-request, from
+  # Jobs::GenerateInvitePersonalization (which pre-generates a whole batch's
+  # content before any of it reaches the paced send queue -- a slow/variable
+  # LLM call here used to block that queue's own send pacing when it ran
+  # inline inside Jobs::ProcessBulkInviteEmails#deliver instead) and from
+  # InvitesController#perform_resend (synchronously, for a single invite,
+  # where that latency doesn't compound). Never from Jobs::BulkInvite
+  # itself, which can be processing thousands of rows in a single job run.
   #
   # bulk_invite_ai_personalization_template is rendered with real values
   # (site title/description, and the invite's own real join link) before
@@ -29,7 +34,7 @@ module BulkInvitePersonalization
   # a silently-degraded one (a generic subject, a generic body, or worse, a
   # stale body left over from a previous attempt) going out in its place.
   # The caller is expected to hold the invite back (mark it :skipped) rather
-  # than send on this exception -- see Jobs::ProcessBulkInviteEmails,
+  # than send on this exception -- see Jobs::GenerateInvitePersonalization,
   # Jobs::ResendInvitesWithKeywords, and InvitesController#resend_invite.
   module Generator
     GenerationFailed = Class.new(StandardError)
@@ -46,7 +51,7 @@ module BulkInvitePersonalization
     TEMPERATURE = 0.9
 
     def self.personalize(invite, extra_keywords: nil)
-      return nil if invite.skip_personalization?
+      return nil unless invite.ai_personalization?
       return nil unless enabled?
 
       link = invite.link(with_email_token: !Invite.email_code_enabled?)

@@ -32,9 +32,9 @@ RSpec.describe BulkInvitePersonalization::Generator do
       end
     end
 
-    context "when the invite has skip_personalization set" do
+    context "when the invite has ai_personalization disabled" do
       before do
-        invite.update!(skip_personalization: true)
+        invite.update!(ai_personalization: false)
         SiteSetting.bulk_invite_ai_personalization_enabled = true
       end
 

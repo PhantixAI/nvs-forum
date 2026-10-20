@@ -1229,6 +1229,12 @@ RSpec.describe InvitesController do
         expect(Jobs::InviteEmail.jobs.size).to eq(0)
       end
 
+      it "updates recipient_keywords" do
+        put "/invites/#{invite.id}", params: { recipient_keywords: "Physics, Ph.D" }
+        expect(response.status).to eq(200)
+        expect(invite.reload.recipient_keywords).to eq("Physics, Ph.D")
+      end
+
       it "cannot create duplicated invites" do
         Fabricate(:invite, invited_by: admin, email: "test2@example.com")
 
@@ -1411,6 +1417,20 @@ RSpec.describe InvitesController do
         delete "/invites.json", params: { id: invite.id }
         expect(response.status).to eq(200)
         expect(invite.reload.trashed?).to be_truthy
+      end
+
+      it "hard-deletes a draft invite instead of trashing it" do
+        draft =
+          Invite.generate(
+            user,
+            email: "draftee@example.com",
+            emailed_status: Invite.emailed_status_types[:review],
+          )
+
+        delete "/invites.json", params: { id: draft.id }
+
+        expect(response.status).to eq(200)
+        expect(Invite.with_deleted.exists?(id: draft.id)).to eq(false)
       end
     end
   end
@@ -2418,6 +2438,55 @@ RSpec.describe InvitesController do
         expect(invite.emailed_status).to eq(Invite.emailed_status_types[:skipped])
         expect(Jobs::InviteEmail.jobs.size).to eq(0)
       end
+
+      it "persists allow_any_email and ai_personalization overrides, and skips the LLM call entirely for this send" do
+        allow(BulkInvitePersonalization::Generator).to receive(:personalize)
+
+        post "/invites/reinvite.json",
+             params: {
+               email: invite.email,
+               allow_any_email: "true",
+               ai_personalization: "false",
+             }
+
+        expect(response.status).to eq(200)
+        invite.reload
+        expect(invite.allow_any_email).to eq(true)
+        expect(invite.ai_personalization).to eq(false)
+        # ai_personalization is now the single flag controlling both the
+        # persisted column and #perform_resend's own decision to call
+        # Generator.personalize at all -- unlike the old skip_personalization
+        # column (enforced only inside the generator itself), "false" here
+        # means the call never happens in the first place.
+        expect(BulkInvitePersonalization::Generator).not_to have_received(:personalize)
+      end
+
+      it "routes through the paced queue instead of sending immediately when schedule_send is explicitly true" do
+        post "/invites/reinvite.json", params: { email: invite.email, schedule_send: "true" }
+
+        expect(response.status).to eq(200)
+        invite.reload
+        expect(invite.schedule_send).to eq(true)
+        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+        expect(Jobs::InviteEmail.jobs.size).to eq(0)
+      end
+
+      it "sends a draft invite for the first time via the same endpoint, moving it off draft status once the enqueued send runs" do
+        draft =
+          Invite.generate(
+            user,
+            email: "draftee@example.com",
+            emailed_status: Invite.emailed_status_types[:review],
+          )
+
+        post "/invites/reinvite.json", params: { invite_id: draft.id }
+
+        expect(response.status).to eq(200)
+        expect(Jobs::InviteEmail.jobs.size).to eq(1)
+
+        Jobs::InviteEmail.new.execute(invite_id: draft.id)
+        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:sent])
+      end
     end
   end
 
@@ -2540,11 +2609,13 @@ RSpec.describe InvitesController do
       redeemed_invite.update!(expires_at: 5.days.ago)
 
       sign_in(admin)
-      # schedule_send: true (paced) synchronously bumps expires_at via
-      # requeue_for_paced_resend, unlike the personalize+burst cell (the
-      # default when omitted), which defers everything -- including the
-      # expiry bump -- into an enqueued, not-yet-run job.
-      post "/invites/reinvite-all", params: { schedule_send: "true" }
+      # ai_personalization: false with schedule_send left at its default
+      # (false/burst) is dispatch_bulk_resend's one cell that still resends
+      # synchronously via invite.resend_invite, with no job indirection at
+      # all -- every other combination defers the actual work (and the
+      # expiry bump that comes with it) into an enqueued, not-yet-run job,
+      # which this test's synchronous assertions below can't observe.
+      post "/invites/reinvite-all", params: { ai_personalization: "false" }
 
       expect(response.status).to eq(200)
       expect(new_invite.reload.expires_at).to eq_time(30.days.from_now)
@@ -2576,7 +2647,7 @@ RSpec.describe InvitesController do
       iitb_invite.update!(expires_at: 5.days.from_now)
 
       sign_in(admin)
-      post "/invites/reinvite-all", params: { domain: "nit.ac.in", schedule_send: "true" }
+      post "/invites/reinvite-all", params: { domain: "nit.ac.in", ai_personalization: "false" }
 
       expect(response.status).to eq(200)
       expect(nit_invite.reload.expires_at).to eq_time(30.days.from_now)
@@ -2594,7 +2665,7 @@ RSpec.describe InvitesController do
       other_invite.update!(expires_at: 5.days.from_now)
 
       sign_in(admin)
-      post "/invites/reinvite-all", params: { domain: "ac.in", schedule_send: "true" }
+      post "/invites/reinvite-all", params: { domain: "ac.in", ai_personalization: "false" }
 
       expect(response.status).to eq(200)
       expect(nit_invite.reload.expires_at).to eq_time(30.days.from_now)
@@ -2657,7 +2728,7 @@ RSpec.describe InvitesController do
       sent.update!(expires_at: 5.days.from_now)
 
       sign_in(admin)
-      post "/invites/reinvite-all", params: { status: "skipped", schedule_send: "true" }
+      post "/invites/reinvite-all", params: { status: "skipped", ai_personalization: "false" }
 
       expect(response.status).to eq(200)
       expect(skipped.reload.expires_at).to eq_time(30.days.from_now)
@@ -2688,7 +2759,7 @@ RSpec.describe InvitesController do
       post "/invites/reinvite-all",
            params: {
              status: "'; DROP TABLE invites; --",
-             schedule_send: "true",
+             ai_personalization: "false",
            }
 
       expect(response.status).to eq(200)
@@ -2712,7 +2783,7 @@ RSpec.describe InvitesController do
       other.update!(expires_at: 5.days.from_now)
 
       sign_in(admin)
-      post "/invites/reinvite-all", params: { search: "priya", schedule_send: "true" }
+      post "/invites/reinvite-all", params: { search: "priya", ai_personalization: "false" }
 
       expect(response.status).to eq(200)
       expect(matching.reload.expires_at).to eq_time(30.days.from_now)
@@ -2845,12 +2916,12 @@ RSpec.describe InvitesController do
         Invite.generate(admin, email: nil, description: "just a label", max_redemptions_allowed: 1)
 
       sign_in(admin)
-      # ai_personalization: false (with schedule_send left at its default,
-      # false/burst) is the one cell that still resends synchronously via
-      # invite.resend_invite with no job indirection -- the personalize
-      # cells now always go through a job (closing the old silent-skip gap),
-      # and the paced cell would skip this invite as already in-flight
-      # ("sending" is one of resend_all_invites_paced's in_flight_statuses).
+      # ai_personalization: false with schedule_send left at its default
+      # (false/burst) lands in the one dispatch_bulk_resend cell that still
+      # resends synchronously via invite.resend_invite, with no job
+      # indirection at all -- the other three cells each go through a job
+      # instead (Jobs::ResendInvitesWithKeywords, Jobs::ResendInvitesPaced,
+      # or Jobs::GenerateInvitePersonalization).
       post "/invites/reinvite-all", params: { ai_personalization: "false" }
 
       expect(response.status).to eq(200)
@@ -2860,58 +2931,26 @@ RSpec.describe InvitesController do
     end
 
     context "with schedule_send explicitly true (paced)" do
-      it "requeues matching invites through the throttle instead of sending immediately" do
+      it "enqueues Jobs::GenerateInvitePersonalization with the matching invites' ids, instead of requeuing or sending immediately" do
         invite = Fabricate(:invite, invited_by: admin)
 
         sign_in(admin)
         post "/invites/reinvite-all", params: { schedule_send: "true" }
 
         expect(response.status).to eq(200)
-        expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+        # Dispatch itself doesn't touch emailed_status or the paced chain --
+        # Jobs::GenerateInvitePersonalization claims the invite into
+        # :drafting (and later, bulk_pending + ensure_chain!) once it
+        # actually runs; see spec/jobs/generate_invite_personalization_spec.rb
+        # for coverage of the in-flight-skip/chain-join behavior that used to
+        # live here, back when this cell did that work inline.
+        expect(invite.reload.emailed_status).not_to eq(Invite.emailed_status_types[:drafting])
         expect(Jobs::InviteEmail.jobs).to be_empty
-        expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
-      end
-
-      it "joins the running throttle chain instead of starting a second one" do
-        invite = Fabricate(:invite, invited_by: admin)
-        Discourse.redis.set(Jobs::ProcessBulkInviteEmails::CHAIN_KEY, 1)
-
-        sign_in(admin)
-        post "/invites/reinvite-all", params: { schedule_send: "true" }
-
-        expect(response.status).to eq(200)
-        expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
         expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
-      end
-
-      it "leaves invites already mid-throttle untouched" do
-        invite =
-          Fabricate(
-            :invite,
-            invited_by: admin,
-            emailed_status: Invite.emailed_status_types[:bulk_pending],
-          )
-        original_updated_at = invite.updated_at
-
-        sign_in(admin)
-        post "/invites/reinvite-all", params: { schedule_send: "true" }
-
-        expect(response.status).to eq(200)
-        expect(invite.reload.updated_at).to eq_time(original_updated_at)
-      end
-
-      it "does not enqueue the throttle job when nothing needs requeuing" do
-        Fabricate(
-          :invite,
-          invited_by: admin,
-          emailed_status: Invite.emailed_status_types[:bulk_pending],
+        expect(Jobs::GenerateInvitePersonalization.jobs.size).to eq(1)
+        expect(Jobs::GenerateInvitePersonalization.jobs.first["args"].first["invite_ids"]).to eq(
+          [invite.id],
         )
-
-        sign_in(admin)
-        post "/invites/reinvite-all", params: { schedule_send: "true" }
-
-        expect(response.status).to eq(200)
-        expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
       end
     end
   end
@@ -3255,6 +3294,472 @@ RSpec.describe InvitesController do
           expect(response.status).to eq(422)
           expect(response.parsed_body["errors"]).to include("Custom error message")
         end
+      end
+    end
+  end
+
+  describe "#extract_from_url" do
+    it "requires to be logged in" do
+      post "/invites/extract-from-url.json", params: { url: "https://example.com", rules: "rules" }
+      expect(response.status).to eq(403)
+    end
+
+    context "while logged in" do
+      it "fails if you cannot bulk invite to the forum" do
+        sign_in(user)
+        post "/invites/extract-from-url.json",
+             params: {
+               url: "https://example.com",
+               rules: "rules",
+             }
+        expect(response.status).to eq(403)
+      end
+
+      it "rejects a blank url or rules" do
+        sign_in(admin)
+
+        post "/invites/extract-from-url.json", params: { url: "", rules: "rules" }
+        expect(response.status).to eq(422)
+
+        post "/invites/extract-from-url.json", params: { url: "https://example.com", rules: "" }
+        expect(response.status).to eq(422)
+      end
+
+      it "persists the given rules for later prefill, even before the extraction itself runs" do
+        sign_in(admin)
+        BulkInviteUrlExtraction::Generator.stubs(:extract).returns(
+          BulkInviteUrlExtraction::Generator::Result.new(rows: [], warnings: []),
+        )
+
+        post "/invites/extract-from-url.json",
+             params: {
+               url: "https://example.com",
+               rules: "Append RollNo to @example.edu",
+             }
+
+        expect(PluginStore.get("bulk_invite_url_extraction", "last_rules")).to eq(
+          "Append RollNo to @example.edu",
+        )
+      end
+
+      it "returns the extracted rows and any warnings on success" do
+        sign_in(admin)
+        rows = [{ email: "priya@iitb.ac.in", name: "Priya" }]
+        BulkInviteUrlExtraction::Generator.stubs(:extract).returns(
+          BulkInviteUrlExtraction::Generator::Result.new(
+            rows: rows,
+            warnings: ["Part 2 of 2 of the page could not be processed."],
+          ),
+        )
+
+        post "/invites/extract-from-url.json",
+             params: {
+               url: "https://example.com",
+               rules: "rules",
+             }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["rows"]).to eq(
+          [{ "email" => "priya@iitb.ac.in", "name" => "Priya" }],
+        )
+        expect(response.parsed_body["warnings"]).to eq(
+          ["Part 2 of 2 of the page could not be processed."],
+        )
+      end
+
+      it "returns a 422 with the failure message when extraction fails entirely" do
+        sign_in(admin)
+        BulkInviteUrlExtraction::Generator.stubs(:extract).raises(
+          BulkInviteUrlExtraction::Generator::ExtractionFailed.new(
+            "Could not fetch the page: timed out",
+          ),
+        )
+
+        post "/invites/extract-from-url.json",
+             params: {
+               url: "https://example.com",
+               rules: "rules",
+             }
+
+        expect(response.status).to eq(422)
+        expect(response.parsed_body["errors"]).to include("Could not fetch the page: timed out")
+      end
+
+      it "enforces a per-hour rate limit on extraction attempts" do
+        sign_in(admin)
+        RateLimiter.enable
+        BulkInviteUrlExtraction::Generator.stubs(:extract).returns(
+          BulkInviteUrlExtraction::Generator::Result.new(rows: [], warnings: []),
+        )
+
+        11.times do
+          post "/invites/extract-from-url.json",
+               params: {
+                 url: "https://example.com",
+                 rules: "rules",
+               }
+        end
+
+        expect(response.status).to eq(429)
+      end
+    end
+  end
+
+  describe "#last_url_extraction_rules" do
+    it "requires to be logged in" do
+      get "/invites/extract-from-url.json"
+      expect(response.status).to eq(403)
+    end
+
+    it "fails if you cannot bulk invite to the forum" do
+      sign_in(user)
+      get "/invites/extract-from-url.json"
+      expect(response.status).to eq(403)
+    end
+
+    it "returns a blank string when no rules have ever been saved" do
+      sign_in(admin)
+      get "/invites/extract-from-url.json"
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["rules"]).to eq("")
+    end
+
+    it "returns the most recently saved rules" do
+      PluginStore.set("bulk_invite_url_extraction", "last_rules", "Append RollNo to @example.edu")
+      sign_in(admin)
+
+      get "/invites/extract-from-url.json"
+
+      expect(response.parsed_body["rules"]).to eq("Append RollNo to @example.edu")
+    end
+  end
+
+  describe "#create_drafts" do
+    it "requires to be logged in" do
+      post "/invites/create-drafts.json", params: { csv: "email\nfoo@example.com" }
+      expect(response.status).to eq(403)
+    end
+
+    context "while logged in" do
+      it "fails if you cannot bulk invite to the forum" do
+        sign_in(user)
+        post "/invites/create-drafts.json", params: { csv: "email\nfoo@example.com" }
+        expect(response.status).to eq(403)
+      end
+
+      it "creates draft invites from the given CSV and never sends them" do
+        sign_in(admin)
+
+        csv = <<~CSV
+          email,name,groups,topic_id,locale,keywords
+          priya@iitb.ac.in,Priya,,,en,physics students
+        CSV
+
+        post "/invites/create-drafts.json", params: { csv: csv }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["created_count"]).to eq(1)
+        expect(response.parsed_body["errors"]).to eq([])
+
+        invite = Invite.find_by(email: "priya@iitb.ac.in")
+        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:review])
+        expect(invite.recipient_name).to eq("Priya")
+        expect(invite.recipient_keywords).to eq("physics students")
+        expect(Jobs::BulkInvite.jobs.size).to eq(0)
+        expect(Jobs::InviteEmail.jobs.size).to eq(0)
+      end
+
+      it "defaults ai_personalization to true when the param is absent, and persists an explicit false" do
+        sign_in(admin)
+
+        csv = <<~CSV
+          email,name,groups,topic_id,locale,keywords
+          a@example.com,,,,,
+        CSV
+
+        post "/invites/create-drafts.json", params: { csv: csv }
+        expect(Invite.find_by(email: "a@example.com").ai_personalization).to eq(true)
+
+        post "/invites/create-drafts.json",
+             params: {
+               csv: "email,name,groups,topic_id,locale,keywords\nb@example.com,,,,,",
+               ai_personalization: "false",
+             }
+        expect(Invite.find_by(email: "b@example.com").ai_personalization).to eq(false)
+      end
+
+      it "rejects a CSV with more rows than max_bulk_invites" do
+        sign_in(admin)
+        SiteSetting.max_bulk_invites = 1
+
+        csv = <<~CSV
+          email,name,groups,topic_id,locale,keywords
+          a@example.com,,,,,
+          b@example.com,,,,,
+        CSV
+
+        post "/invites/create-drafts.json", params: { csv: csv }
+
+        expect(response.status).to eq(422)
+      end
+
+      it "reports per-row errors without failing the whole batch" do
+        sign_in(admin)
+
+        csv = <<~CSV
+          email,name,groups,topic_id,locale,keywords
+          not-an-email,,,,,
+          valid@example.com,,,,,
+        CSV
+
+        post "/invites/create-drafts.json", params: { csv: csv }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["created_count"]).to eq(1)
+        expect(response.parsed_body["errors"]).to include("Invalid email 'not-an-email'")
+      end
+    end
+  end
+
+  describe "#send_drafts" do
+    it "requires to be logged in" do
+      post "/invites/send-drafts.json", params: { invite_ids: [1] }
+      expect(response.status).to eq(403)
+    end
+
+    context "while logged in" do
+      fab!(:user)
+      fab!(:draft) do
+        Invite.generate(
+          user,
+          email: "draftee@example.com",
+          emailed_status: Invite.emailed_status_types[:review],
+        )
+      end
+
+      before { sign_in(user) }
+
+      it "enqueues the keyword-regeneration job when personalizing without scheduling" do
+        post "/invites/send-drafts.json", params: { invite_ids: [draft.id], schedule_send: "false" }
+
+        expect(response.status).to eq(200)
+        expect(Jobs::ResendInvitesWithKeywords.jobs.size).to eq(1)
+        job_args = Jobs::ResendInvitesWithKeywords.jobs.first["args"].first
+        expect(job_args["invite_ids"]).to eq([draft.id])
+        # The actual send only happens once the job runs -- not inline.
+        expect(Jobs::InviteEmail.jobs).to be_empty
+      end
+
+      it "enqueues Jobs::GenerateInvitePersonalization when personalizing and scheduled (the UI default), leaving the draft's status alone until that job claims it" do
+        post "/invites/send-drafts.json", params: { invite_ids: [draft.id], schedule_send: "true" }
+
+        expect(response.status).to eq(200)
+        # dispatch_bulk_resend only enqueues the job -- it doesn't flip
+        # emailed_status itself. That's Jobs::GenerateInvitePersonalization's
+        # own #claim_for_drafting, covered in its own spec file.
+        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
+        expect(Jobs::GenerateInvitePersonalization.jobs.size).to eq(1)
+        expect(Jobs::GenerateInvitePersonalization.jobs.first["args"].first["invite_ids"]).to eq(
+          [draft.id],
+        )
+        expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
+        expect(Jobs::InviteEmail.jobs).to be_empty
+      end
+
+      it "paces the send one invite at a time, with no personalization, when scheduled but ai_personalization is false" do
+        post "/invites/send-drafts.json",
+             params: {
+               invite_ids: [draft.id],
+               ai_personalization: "false",
+               schedule_send: "true",
+             }
+
+        expect(response.status).to eq(200)
+        expect(Jobs::ResendInvitesPaced.jobs.map { |job| job["args"].first["invite_id"] }).to eq(
+          [draft.id],
+        )
+        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
+        expect(Jobs::InviteEmail.jobs).to be_empty
+      end
+
+      it "sends immediately inline when neither personalizing nor scheduling" do
+        post "/invites/send-drafts.json",
+             params: {
+               invite_ids: [draft.id],
+               ai_personalization: "false",
+               schedule_send: "false",
+             }
+
+        expect(response.status).to eq(200)
+        expect(Jobs::InviteEmail.jobs.map { |job| job["args"].first["invite_id"] }).to include(
+          draft.id,
+        )
+        expect(Jobs::ResendInvitesWithKeywords.jobs).to be_empty
+        expect(Jobs::ResendInvitesPaced.jobs).to be_empty
+        expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
+      end
+
+      it "fails loudly (not a silent partial send) when a non-admin selects an invite they don't own" do
+        other_draft =
+          Invite.generate(
+            admin,
+            email: "otherdraftee@example.com",
+            emailed_status: Invite.emailed_status_types[:review],
+          )
+
+        post "/invites/send-drafts.json",
+             params: {
+               invite_ids: [draft.id, other_draft.id],
+               schedule_send: "true",
+             }
+
+        expect(response.status).to eq(422)
+        expect(Jobs::GenerateInvitePersonalization.jobs).to be_empty
+        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
+        expect(other_draft.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
+      end
+
+      it "lets an admin send another user's drafts -- the Invited page itself lists by profile, not by viewer" do
+        other_draft =
+          Invite.generate(
+            user,
+            email: "otherdraftee@example.com",
+            emailed_status: Invite.emailed_status_types[:review],
+          )
+
+        sign_in(admin)
+        post "/invites/send-drafts.json",
+             params: {
+               invite_ids: [draft.id, other_draft.id],
+               schedule_send: "true",
+             }
+
+        expect(response.status).to eq(200)
+        expect(Jobs::GenerateInvitePersonalization.jobs.size).to eq(1)
+        expect(
+          Jobs::GenerateInvitePersonalization.jobs.first["args"].first["invite_ids"],
+        ).to match_array([draft.id, other_draft.id])
+      end
+
+      it "persists allow_any_email/ai_personalization overrides inline before dispatch" do
+        post "/invites/send-drafts.json",
+             params: {
+               invite_ids: [draft.id],
+               allow_any_email: "true",
+               ai_personalization: "false",
+               schedule_send: "true",
+             }
+
+        expect(response.status).to eq(200)
+        expect(draft.reload.allow_any_email).to eq(true)
+        expect(draft.ai_personalization).to eq(false)
+        # ai_personalization: false routes dispatch to the "schedule_send
+        # only" cell (staggered Jobs::ResendInvitesPaced, one enqueue per
+        # invite) -- there's nothing to generate, so Jobs::GenerateInvitePersonalization
+        # is never involved for this combination.
+        expect(Jobs::ResendInvitesPaced.jobs.map { |job| job["args"].first["invite_id"] }).to eq(
+          [draft.id],
+        )
+        expect(Jobs::GenerateInvitePersonalization.jobs).to be_empty
+      end
+
+      it "forwards ad hoc keywords to the personalize-only job" do
+        post "/invites/send-drafts.json",
+             params: {
+               invite_ids: [draft.id],
+               schedule_send: "false",
+               keywords: "robotics club",
+             }
+
+        expect(response.status).to eq(200)
+        job_args = Jobs::ResendInvitesWithKeywords.jobs.first["args"].first
+        expect(job_args["extra_keywords"]).to eq("robotics club")
+      end
+
+      it "is rate-limited per request, not per invite" do
+        RateLimiter.enable
+
+        11.times { post "/invites/send-drafts.json", params: { invite_ids: [draft.id] } }
+
+        expect(response.status).to eq(429)
+      end
+    end
+  end
+
+  describe "#destroy_drafts" do
+    it "requires to be logged in" do
+      post "/invites/destroy-drafts.json", params: { invite_ids: [1] }
+      expect(response.status).to eq(403)
+    end
+
+    context "while logged in" do
+      fab!(:user)
+      fab!(:draft) do
+        Invite.generate(
+          user,
+          email: "draftee@example.com",
+          emailed_status: Invite.emailed_status_types[:review],
+        )
+      end
+
+      before { sign_in(user) }
+
+      it "permanently deletes the selected drafts" do
+        post "/invites/destroy-drafts.json", params: { invite_ids: [draft.id] }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["destroyed_count"]).to eq(1)
+        expect(Invite.with_deleted.exists?(id: draft.id)).to eq(false)
+      end
+
+      it "fails loudly (not a silent partial delete) when a non-admin selects an invite they don't own" do
+        other_draft =
+          Invite.generate(
+            admin,
+            email: "otherdraftee@example.com",
+            emailed_status: Invite.emailed_status_types[:review],
+          )
+
+        post "/invites/destroy-drafts.json", params: { invite_ids: [draft.id, other_draft.id] }
+
+        expect(response.status).to eq(422)
+        expect(Invite.with_deleted.exists?(id: draft.id)).to eq(true)
+        expect(Invite.with_deleted.exists?(id: other_draft.id)).to eq(true)
+      end
+
+      it "lets an admin delete another user's drafts -- the Invited page itself lists by profile, not by viewer" do
+        other_draft =
+          Invite.generate(
+            user,
+            email: "otherdraftee@example.com",
+            emailed_status: Invite.emailed_status_types[:review],
+          )
+
+        sign_in(admin)
+        post "/invites/destroy-drafts.json", params: { invite_ids: [draft.id, other_draft.id] }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["destroyed_count"]).to eq(2)
+        expect(Invite.with_deleted.exists?(id: draft.id)).to eq(false)
+        expect(Invite.with_deleted.exists?(id: other_draft.id)).to eq(false)
+      end
+
+      it "never deletes a non-draft invite, even if selected" do
+        sent_invite = Fabricate(:invite, invited_by: user)
+
+        post "/invites/destroy-drafts.json", params: { invite_ids: [sent_invite.id] }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["destroyed_count"]).to eq(0)
+        expect(Invite.exists?(id: sent_invite.id)).to eq(true)
+      end
+
+      it "is rate-limited per request, not per invite" do
+        RateLimiter.enable
+
+        11.times { post "/invites/destroy-drafts.json", params: { invite_ids: [draft.id] } }
+
+        expect(response.status).to eq(429)
       end
     end
   end

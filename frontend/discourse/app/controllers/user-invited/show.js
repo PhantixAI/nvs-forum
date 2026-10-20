@@ -33,6 +33,8 @@ export default class UserInvitedShowController extends Controller {
   @tracked selectedDomain = null;
   @tracked selectedStatus = null;
 
+  @tracked selectedDraftIds = new Set();
+
   /** @type {import("discourse/models/user").default | null} */
   user = null;
 
@@ -41,8 +43,8 @@ export default class UserInvitedShowController extends Controller {
 
   /** @type {{ pending: number, redeemed: number, expired: number, total: number } | null | undefined} */
   invitesCount = null;
-
   reinvitedAll = false;
+
   searchTerm = "";
 
   @tracked _canInviteToForumOverride;
@@ -72,6 +74,16 @@ export default class UserInvitedShowController extends Controller {
   @dependentKeyCompat
   get invitePending() {
     return this.filter === "pending";
+  }
+
+  // No longer a separate tab -- "review" is just another value of the
+  // Pending tab's own status filter (see statusOptions), reusing its table
+  // (and that table's Edit/kebab actions) instead of a dedicated one. Named
+  // "review" rather than "draft" to stay distinct from the :drafting
+  // emailed_status (the system is drafting; the admin reviews).
+  @dependentKeyCompat
+  get inviteReview() {
+    return this.filter === "pending" && this.selectedStatus === "review";
   }
 
   @computed("user.id", "currentUser.id")
@@ -142,12 +154,18 @@ export default class UserInvitedShowController extends Controller {
     return this.currentUser?.staff && this.domainOptions.length > 0;
   }
 
-  @computed("model.available_statuses")
+  @computed("model.available_statuses", "filter")
   get statusOptions() {
-    return (this.model?.available_statuses || []).map((status) => ({
-      id: status,
-      name: i18n(`user.invited.delivery_status_${status}`),
-    }));
+    // "review" is only a meaningful filter on the Pending tab -- Expired has
+    // no real review state (see Invite.expired, which never returns one
+    // regardless of status), so offering it there would just be a filter
+    // option that always empties the list.
+    return (this.model?.available_statuses || [])
+      .filter((status) => status !== "review" || this.filter === "pending")
+      .map((status) => ({
+        id: status,
+        name: i18n(`user.invited.delivery_status_${status}`),
+      }));
   }
 
   @computed("statusOptions", "currentUser.staff", "filter")
@@ -158,6 +176,15 @@ export default class UserInvitedShowController extends Controller {
       this.currentUser?.staff &&
       this.filter !== "redeemed" &&
       this.statusOptions.length > 0
+    );
+  }
+
+  @dependentKeyCompat
+  get allDraftsSelected() {
+    const invites = this.model?.invites || [];
+    return (
+      invites.length > 0 &&
+      invites.every((invite) => this.selectedDraftIds.has(invite.id))
     );
   }
 
@@ -235,8 +262,95 @@ export default class UserInvitedShowController extends Controller {
     this.modal.show(ResendInviteModal, {
       model: {
         bulk: false,
-        onResend: ({ keywords, aiPersonalization }) =>
-          invite.reinvite({ keywords, aiPersonalization }),
+        onResend: ({ keywords, aiPersonalization, scheduleSend }) =>
+          invite.reinvite({ keywords, aiPersonalization, scheduleSend }),
+      },
+    });
+  }
+
+  @action
+  isDraftSelected(invite) {
+    return this.selectedDraftIds.has(invite.id);
+  }
+
+  @action
+  toggleDraftSelected(invite) {
+    const selected = new Set(this.selectedDraftIds);
+    if (selected.has(invite.id)) {
+      selected.delete(invite.id);
+    } else {
+      selected.add(invite.id);
+    }
+    this.selectedDraftIds = selected;
+  }
+
+  @action
+  toggleSelectAllDrafts() {
+    this.selectedDraftIds = this.allDraftsSelected
+      ? new Set()
+      : new Set((this.model?.invites || []).map((invite) => invite.id));
+  }
+
+  @action
+  sendSelectedDrafts() {
+    const inviteIds = [...this.selectedDraftIds];
+    if (inviteIds.length === 0) {
+      return;
+    }
+
+    this.modal.show(ResendInviteModal, {
+      model: {
+        drafts: true,
+        confirmMessage: i18n("user.invited.send_selected_confirm", {
+          count: inviteIds.length,
+        }),
+        onResend: async ({
+          keywords,
+          aiPersonalization,
+          scheduleSend,
+          allowAnyEmail,
+        }) => {
+          // Sending is always paced, not a burst (InvitesController#send_drafts,
+          // ResendInviteModal) -- a selected batch can be in the hundreds, and
+          // personalizing even one invite is a live LLM call, so this resolves
+          // once the batch is queued/scheduled, not once it's actually sent.
+          await Invite.sendDrafts(inviteIds, {
+            keywords,
+            aiPersonalization,
+            scheduleSend,
+            allowAnyEmail,
+          });
+          this.selectedDraftIds = new Set();
+          this.toasts.success({
+            data: { message: i18n("user.invited.sent_selected") },
+          });
+          this.send("triggerRefresh");
+        },
+      },
+    });
+  }
+
+  @action
+  deleteSelectedDrafts() {
+    const inviteIds = [...this.selectedDraftIds];
+    if (inviteIds.length === 0) {
+      return;
+    }
+
+    this.dialog.deleteConfirm({
+      message: i18n("user.invited.delete_selected_confirm", {
+        count: inviteIds.length,
+      }),
+      didConfirm: () => {
+        return Invite.destroyDrafts(inviteIds)
+          .then(() => {
+            this.selectedDraftIds = new Set();
+            this.toasts.success({
+              data: { message: i18n("user.invited.deleted_selected") },
+            });
+            this.send("triggerRefresh");
+          })
+          .catch(popupAjaxError);
       },
     });
   }
@@ -296,6 +410,10 @@ export default class UserInvitedShowController extends Controller {
   statusChanged(status) {
     this.selectedStatus = status;
     this.set("reinvitedAll", false);
+    // Leaving the "review" status behind a stale checked selection would
+    // otherwise resurface (against a now-different row set) if the admin
+    // flips back to it later.
+    this.selectedDraftIds = new Set();
     this._refetch();
   }
 

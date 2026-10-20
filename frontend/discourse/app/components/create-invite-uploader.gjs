@@ -30,6 +30,11 @@ export default class CreateInviteUploader extends Component {
   }
 
   @action
+  addFiles(files) {
+    this.uppyUpload.addFiles(files);
+  }
+
+  @action
   startUpload() {
     this.uppyUpload.startUpload();
   }
@@ -44,6 +49,7 @@ export default class CreateInviteUploader extends Component {
           uploaded=this.uploaded
           pendingReview=this.pendingReview
           submitDisabled=this.submitDisabled
+          addFiles=this.addFiles
           startUpload=this.startUpload
         )
         this.uppyUpload.setup

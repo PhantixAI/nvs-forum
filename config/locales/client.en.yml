@@ -2636,7 +2636,7 @@ en:
         groups: "Groups"
         topic: "Topic"
         sent: "Created/Last Sent"
-        expires_at: "Expires"
+        keywords: "Keywords"
         delivery_status: "Delivery"
         delivery_status_scheduled: "Scheduled"
         delivery_status_pending: "Sending"
@@ -2645,12 +2645,24 @@ en:
         delivery_status_delivered: "Delivered"
         delivery_status_bounced: "Bounced"
         delivery_status_complained: "Marked as spam"
+        delivery_status_review: "Review"
         edit: "Edit"
         remove: "Remove"
         copy_link: "Get Link"
         reinvite: "Resend Email"
         reinvited: "Invite re-sent"
         removed: "Removed"
+        select_all: "Select all"
+        send_selected: "Send Selected"
+        send_selected_confirm:
+          one: "Send %{count} selected draft invite?"
+          other: "Send %{count} selected draft invites?"
+        sent_selected: "Selected draft invites have been queued for sending."
+        delete_selected: "Delete Selected"
+        delete_selected_confirm:
+          one: "Permanently delete %{count} selected draft invite? This cannot be undone."
+          other: "Permanently delete %{count} selected draft invites? This cannot be undone."
+        deleted_selected: "Selected draft invites have been deleted."
         search: "type to search invites…"
         all_domains: "All domains"
         all_statuses: "All statuses"
@@ -2707,12 +2719,10 @@ en:
             keywords_label: "Keywords (optional)"
             keywords_placeholder: "Add context to improve the generated email…"
             ai_personalization_label: "AI Personalization"
-            ai_personalization_yes: "Yes"
-            ai_personalization_no: "No"
             schedule_send_label: "Schedule Send"
-            schedule_send_yes: "Yes"
-            schedule_send_no: "No"
+            allow_any_email_label: "Allow any email"
             resend: "Resend"
+            send: "Send"
 
         sent_email:
           modal:
@@ -2795,6 +2805,8 @@ en:
           member_email_label: "Send to"
           member_email_help: "We'll email an invitation link to this address."
           email_placeholder: "name@example.com"
+          recipient_email_label: "Recipient email"
+          recipient_email_help: "Who this link was created for. The link can still be redeemed by any email allowed by the domain above."
           invite_by: "Invite by"
           invite_by_link: "Shareable link"
           invite_by_email: "Email"
@@ -2839,16 +2851,32 @@ en:
               <li><code>locale</code> – the language the invitation and signup flow are shown in for that row.</li>
               <li><code>allow_any_email</code> – set to <code>true</code> to let that invite be redeemed with any email address instead of only the one it was sent to.</li>
               <li><code>schedule_send</code> – set to <code>false</code> to send that row immediately instead of through the paced, one-at-a-time queue. Defaults to <code>true</code> when left blank.</li>
-              <li><code>skip_personalization</code> – set to <code>true</code> to send that row the plain, non-personalized invitation email.</li>
+              <li><code>ai_personalization</code> – set to <code>false</code> to send that row the plain, non-personalized invitation email. Defaults to <code>true</code> when left blank.</li>
               <li><code>name</code> and <code>keywords</code> – recipient context (e.g. their role or interests) used to personalize the invitation email, when enabled.</li>
             </ul>
-            <pre>email,groups,topic_id,locale,allow_any_email,schedule_send,skip_personalization,name,keywords</pre>
-            <pre>john@smith.com,first_group_name;second_group_name,topic_id,en,true,true,false,Jane Doe,machine learning;robotics</pre>
+            <pre>email,groups,topic_id,locale,allow_any_email,schedule_send,ai_personalization,name,keywords</pre>
+            <pre>john@smith.com,first_group_name;second_group_name,topic_id,en,true,true,true,Jane Doe,machine learning;robotics</pre>
 
           progress: "Uploaded %{progress}%…"
           success: "File uploaded successfully. You will be notified via message when the process is complete."
           pending_review: "File uploaded successfully. It has been submitted for staff review and won't be processed until approved."
           error: "Sorry, file should be CSV format."
+
+          url_extraction:
+            csv_tab: "Upload CSV file"
+            url_tab: "Extract from URL"
+            url_label: "Page URL"
+            rules_label: "Extraction rules"
+            extract_button: "Extract"
+            extracting: "Extracting…"
+            allow_any_email_label: "Allow any email"
+            schedule_send_label: "Schedule send"
+            csv_review_label: "Review and edit before creating drafts"
+            create_invites_button: "Create Draft Invites"
+            creating_invites: "Creating drafts…"
+            drafts_created:
+              one: "%{count} draft invite created. Review and send it from the Pending tab's Review filter."
+              other: "%{count} draft invites created. Review and send them from the Pending tab's Review filter."
 
       confirm_access:
         title: "Confirm access"

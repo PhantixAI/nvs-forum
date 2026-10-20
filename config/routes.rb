@@ -1755,6 +1755,11 @@ Discourse::Application.routes.draw do
     post "invites/create-multiple" => "invites#create_multiple", :constraints => { format: :json }
 
     post "invites/upload_csv" => "invites#upload_csv"
+    post "invites/extract-from-url" => "invites#extract_from_url"
+    get "invites/extract-from-url" => "invites#last_url_extraction_rules"
+    post "invites/create-drafts" => "invites#create_drafts"
+    post "invites/send-drafts" => "invites#send_drafts"
+    post "invites/destroy-drafts" => "invites#destroy_drafts"
     post "invites/destroy-all-expired" => "invites#destroy_all_expired"
     post "invites/destroy-all" => "invites#destroy_all_invites"
     post "invites/reinvite" => "invites#resend_invite"

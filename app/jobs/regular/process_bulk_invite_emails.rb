@@ -46,23 +46,15 @@ module Jobs
 
     private
 
+    # No longer personalizes here -- every invite reaching :bulk_pending has
+    # already had its content generated (or confirmed not applicable) by
+    # Jobs::GenerateInvitePersonalization, or (for a single-invite resend)
+    # synchronously by InvitesController#perform_resend before calling
+    # Invite#requeue_for_paced_resend. Personalizing inline here used to mean
+    # a slow/variable LLM call (confirmed in production: up to 367s) blocked
+    # this method's own send pacing for every other queued invite.
     def deliver(invite)
-      result = BulkInvitePersonalization::Generator.personalize(invite)
-
-      # A nil result means personalization doesn't apply. That must not wipe a
-      # note the inviter wrote, which resend-all reaches.
-      if result.present?
-        invite.update_columns(custom_subject: result[:subject], custom_message: result[:body])
-      end
-
       ::Jobs.enqueue(:invite_email, invite_id: invite.id)
-    rescue BulkInvitePersonalization::Generator::GenerationFailed => e
-      # Handled here rather than in #execute's rescue, which would put the
-      # invite back to :pending and out of this queue for good. :skipped also
-      # moves it off :sending, so recover_stale_sending_invites won't retry it
-      # against a provider that is still failing; an admin resends it instead.
-      Rails.logger.error("[ProcessBulkInviteEmails] invite #{invite.id} skipped -- #{e.message}")
-      invite.update_columns(emailed_status: Invite.emailed_status_types[:skipped])
     end
 
     def reschedule
