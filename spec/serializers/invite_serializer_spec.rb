@@ -38,6 +38,7 @@ RSpec.describe InviteSerializer do
         :custom_message,
         :topics,
         :groups,
+        :recipient_keywords,
       )
     end
 
@@ -131,6 +132,37 @@ RSpec.describe InviteSerializer do
       json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
 
       expect(json).not_to include(:emailed, :delivery_status)
+    end
+  end
+
+  describe "draft invites" do
+    fab!(:user)
+
+    it "reports emailed as false for a draft, unlike an ordinary never-emailed invite link" do
+      invite =
+        Invite.generate(
+          user,
+          email: "draftee@example.com",
+          emailed_status: Invite.emailed_status_types[:draft],
+        )
+
+      json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
+
+      expect(json[:emailed]).to eq(false)
+      expect(json[:delivery_status]).to eq("draft")
+    end
+
+    it "serializes recipient_keywords when the viewer can see invite details" do
+      invite =
+        Invite.generate(
+          user,
+          email: "draftee2@example.com",
+          recipient_keywords: "robotics, machine learning",
+        )
+
+      json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
+
+      expect(json[:recipient_keywords]).to eq("robotics, machine learning")
     end
   end
 

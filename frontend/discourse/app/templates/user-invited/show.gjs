@@ -1,11 +1,11 @@
 import { concat, fn, hash } from "@ember/helper";
+import { on } from "@ember/modifier";
 import { LinkTo } from "@ember/routing";
 import { trustHTML } from "@ember/template";
 import SvgEnvelopeZero from "discourse/components/svg/envelope-zero";
 import DMenu from "discourse/float-kit/components/d-menu";
 import bodyClass from "discourse/helpers/body-class";
 import inviteDeliveryStatus from "discourse/helpers/invite-delivery-status";
-import rawDate from "discourse/helpers/raw-date";
 import { groupPath } from "discourse/lib/url";
 import ComboBox from "discourse/select-kit/components/combo-box";
 import { eq, not } from "discourse/truth-helpers";
@@ -97,6 +97,16 @@ export default <template>
               />
             {{/if}}
 
+            {{#if @controller.inviteDraft}}
+              <DButton
+                class="btn-default send-selected-drafts"
+                @action={{@controller.sendSelectedDrafts}}
+                @disabled={{not @controller.selectedDraftIds.size}}
+                @icon="paper-plane"
+                @label="user.invited.send_selected"
+              />
+            {{/if}}
+
             {{#if @controller.invitePending}}
               {{#if @controller.reinvitedAll}}
                 <span class="reinvited-all">
@@ -169,6 +179,9 @@ export default <template>
                     <th class="d-table__header-cell">{{i18n
                         "user.invited.invited_via"
                       }}</th>
+                    <th class="d-table__header-cell">{{i18n
+                        "user.invited.keywords"
+                      }}</th>
                   {{/if}}
                 </tr>
               </thead>
@@ -233,7 +246,101 @@ export default <template>
                         </div>
                         {{trustHTML invite.invite_source}}
                       </td>
+                      <td class="d-table__cell --detail">
+                        <div class="d-table__mobile-label">
+                          {{i18n "user.invited.keywords"}}
+                        </div>
+                        {{invite.recipient_keywords}}
+                      </td>
                     {{/if}}
+                  </tr>
+                {{/each}}
+              </tbody>
+            </table>
+          {{else if @controller.inviteDraft}}
+            <table class="d-table user-invite-list">
+              <thead class="d-table__header">
+                <tr class="d-table__row">
+                  <th class="d-table__header-cell">
+                    <input
+                      checked={{@controller.allDraftsSelected}}
+                      title={{i18n "user.invited.select_all"}}
+                      type="checkbox"
+                      {{on "click" @controller.toggleSelectAllDrafts}}
+                    />
+                  </th>
+                  <th class="d-table__header-cell">{{i18n
+                      "user.invited.invited_via"
+                    }}</th>
+                  <th class="d-table__header-cell">{{i18n
+                      "user.invited.keywords"
+                    }}</th>
+                  <th class="d-table__header-cell">{{i18n
+                      "user.invited.sent"
+                    }}</th>
+                </tr>
+              </thead>
+              <tbody class="d-table__body">
+                {{#each @controller.model.invites as |invite|}}
+                  <tr class="d-table__row">
+                    <td class="d-table__cell --overview">
+                      <input
+                        checked={{@controller.isDraftSelected invite}}
+                        type="checkbox"
+                        {{on
+                          "click"
+                          (fn @controller.toggleDraftSelected invite)
+                        }}
+                      />
+                    </td>
+                    <td class="d-table__cell --overview invite-type">
+                      <div class="invite-shortkey">
+                        {{#if invite.email}}
+                          {{dIcon "envelope"}}
+                          {{invite.email}}
+                        {{else}}
+                          {{dIcon "link"}}
+                          {{invite.description}}
+                        {{/if}}
+                      </div>
+                      <div class="invite-details">
+                        <div class="invite-groups">
+                          {{#each invite.groups as |g|}}
+                            <span class="invite-extra">
+                              <a
+                                class="invite-extra-item-link"
+                                href={{groupPath g.name}}
+                              >{{dIcon "users"}}
+                                {{g.name}}
+                              </a>
+                            </span>
+                          {{/each}}
+                        </div>
+                        {{#if invite.topic}}
+                          <span class="invite-extra invite-topic">
+                            <a
+                              class="invite-extra-item-link"
+                              href={{invite.topic.url}}
+                            >
+                              {{dIcon "file-lines"}}
+                              {{invite.topic.title}}
+                            </a>
+                          </span>
+                        {{/if}}
+                      </div>
+                    </td>
+                    <td class="d-table__cell --detail">
+                      <div class="d-table__mobile-label">
+                        {{i18n "user.invited.keywords"}}
+                      </div>
+                      {{invite.recipient_keywords}}
+                    </td>
+                    <td class="d-table__cell --detail">
+                      <div class="d-table__mobile-label">
+                        {{i18n "user.invited.sent"}}
+                      </div>
+                      {{dFormatDate invite.created_at}}
+                    </td>
                   </tr>
                 {{/each}}
               </tbody>
@@ -249,7 +356,7 @@ export default <template>
                       "user.invited.sent"
                     }}</th>
                   <th class="d-table__header-cell">{{i18n
-                      "user.invited.expires_at"
+                      "user.invited.keywords"
                     }}</th>
                   <th class="d-table__header-cell">{{i18n
                       "user.invited.delivery_status"
@@ -330,17 +437,11 @@ export default <template>
                       {{dFormatDate invite.updated_at}}
                     </td>
 
-                    <td class="d-table__cell --detail invite-expires-at">
+                    <td class="d-table__cell --detail invite-keywords">
                       <div class="d-table__mobile-label">
-                        {{i18n "user.invited.expires_at"}}
+                        {{i18n "user.invited.keywords"}}
                       </div>
-                      {{#if @controller.inviteExpired}}
-                        {{rawDate invite.expires_at}}
-                      {{else if invite.expired}}
-                        {{i18n "user.invited.expired"}}
-                      {{else}}
-                        {{rawDate invite.expires_at}}
-                      {{/if}}
+                      {{invite.recipient_keywords}}
                     </td>
 
                     <td class="d-table__cell --detail invite-delivery-status">

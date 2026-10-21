@@ -522,6 +522,15 @@ export default class CreateInvite extends Component {
               </form.Field>
             {{/if}}
           </Form>
+
+          {{#if this.inviteCreated}}
+            {{#if this.invite.recipient_keywords}}
+              <div class="control-group invite-keywords-display">
+                <label>{{i18n "user.invited.keywords"}}</label>
+                <div class="controls">{{this.invite.recipient_keywords}}</div>
+              </div>
+            {{/if}}
+          {{/if}}
         {{/if}}
       </:body>
       <:footer>

@@ -2,4 +2,17 @@
   &__form {
     padding-top: 1.5em;
   }
+
+  &__review-label {
+    display: block;
+    margin-top: 1em;
+    font-weight: bold;
+  }
+
+  &__review-textarea {
+    width: 100%;
+    margin-top: 0.5em;
+    font-family: monospace;
+    font-size: var(--font-down-1);
+  }
 }

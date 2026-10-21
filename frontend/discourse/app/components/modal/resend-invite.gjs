@@ -4,23 +4,36 @@ import { Textarea } from "@ember/component";
 import { action } from "@ember/object";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import ComboBox from "discourse/select-kit/components/combo-box";
+import { or } from "discourse/truth-helpers";
 import DButton from "discourse/ui-kit/d-button";
 import DModal from "discourse/ui-kit/d-modal";
 import { i18n } from "discourse-i18n";
 
-// Shared by the per-invite "Resend" kebab item and the bulk "Resend
-// Invites" button (see user-invited/show.js) -- @model.onResend is the only
-// thing that differs between the two call sites.
+// Shared by the per-invite "Resend" kebab item, the bulk "Resend Invites"
+// button, and the Draft tab's "Send Selected" action (see
+// user-invited/show.js) -- @model.onResend is the only thing that differs
+// between call sites. @model.drafts additionally surfaces allowAnyEmail/
+// skipPersonalization, which only matter the first time a draft is sent
+// (an ordinary resend's bound-vs-unbound shape and personalization default
+// were already decided when the invite was created).
 export default class ResendInviteModal extends Component {
   @tracked aiPersonalization = "true";
   @tracked scheduleSend = "true";
+  @tracked allowAnyEmail = "true";
+  @tracked skipPersonalization = "false";
 
   keywords;
 
   get title() {
-    return this.args.model.bulk
+    return this.args.model.bulk || this.args.model.drafts
       ? i18n("user.invited.resend_invite.modal.title_all")
       : i18n("user.invited.resend_invite.modal.title");
+  }
+
+  get confirmLabel() {
+    return this.args.model.drafts
+      ? "user.invited.resend_invite.modal.send"
+      : "user.invited.resend_invite.modal.resend";
   }
 
   get aiPersonalizationOptions() {
@@ -49,6 +62,32 @@ export default class ResendInviteModal extends Component {
     ];
   }
 
+  get allowAnyEmailOptions() {
+    return [
+      {
+        id: "true",
+        name: i18n("user.invited.resend_invite.modal.allow_any_email_yes"),
+      },
+      {
+        id: "false",
+        name: i18n("user.invited.resend_invite.modal.allow_any_email_no"),
+      },
+    ];
+  }
+
+  get skipPersonalizationOptions() {
+    return [
+      {
+        id: "true",
+        name: i18n("user.invited.resend_invite.modal.skip_personalization_yes"),
+      },
+      {
+        id: "false",
+        name: i18n("user.invited.resend_invite.modal.skip_personalization_no"),
+      },
+    ];
+  }
+
   @action
   setAiPersonalization(value) {
     this.aiPersonalization = value;
@@ -60,13 +99,28 @@ export default class ResendInviteModal extends Component {
   }
 
   @action
+  setAllowAnyEmail(value) {
+    this.allowAnyEmail = value;
+  }
+
+  @action
+  setSkipPersonalization(value) {
+    this.skipPersonalization = value;
+  }
+
+  @action
   async resend() {
     try {
-      await this.args.model.onResend({
+      const payload = {
         keywords: this.keywords,
         aiPersonalization: this.aiPersonalization,
         scheduleSend: this.scheduleSend,
-      });
+      };
+      if (this.args.model.drafts) {
+        payload.allowAnyEmail = this.allowAnyEmail;
+        payload.skipPersonalization = this.skipPersonalization;
+      }
+      await this.args.model.onResend(payload);
       this.args.closeModal();
     } catch (error) {
       popupAjaxError(error);
@@ -113,7 +167,7 @@ export default class ResendInviteModal extends Component {
           </div>
         </div>
 
-        {{#if @model.bulk}}
+        {{#if (or @model.bulk @model.drafts)}}
           <div class="control-group">
             <label>{{i18n
                 "user.invited.resend_invite.modal.schedule_send_label"
@@ -128,6 +182,36 @@ export default class ResendInviteModal extends Component {
             </div>
           </div>
         {{/if}}
+
+        {{#if @model.drafts}}
+          <div class="control-group">
+            <label>{{i18n
+                "user.invited.resend_invite.modal.allow_any_email_label"
+              }}</label>
+            <div class="controls">
+              <ComboBox
+                class="resend-invite-allow-any-email"
+                @content={{this.allowAnyEmailOptions}}
+                @onChange={{this.setAllowAnyEmail}}
+                @value={{this.allowAnyEmail}}
+              />
+            </div>
+          </div>
+
+          <div class="control-group">
+            <label>{{i18n
+                "user.invited.resend_invite.modal.skip_personalization_label"
+              }}</label>
+            <div class="controls">
+              <ComboBox
+                class="resend-invite-skip-personalization"
+                @content={{this.skipPersonalizationOptions}}
+                @onChange={{this.setSkipPersonalization}}
+                @value={{this.skipPersonalization}}
+              />
+            </div>
+          </div>
+        {{/if}}
       </:body>
 
       <:footer>
@@ -135,7 +219,7 @@ export default class ResendInviteModal extends Component {
           class="btn-primary resend-invite-confirm"
           @action={{this.resend}}
           @icon="paper-plane"
-          @label="user.invited.resend_invite.modal.resend"
+          @label={{this.confirmLabel}}
         />
         <DButton class="cancel" @action={{@closeModal}} @label="cancel" />
       </:footer>

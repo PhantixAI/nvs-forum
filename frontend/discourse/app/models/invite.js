@@ -97,6 +97,50 @@ export default class Invite extends EmberObject {
     return ajax(`/admin/email-logs/invite_sent/${inviteId}.json`);
   }
 
+  // Turns the admin-reviewed CSV text from the "Extract from URL" tab into
+  // draft invites (see InvitesController#create_drafts) -- never sent
+  // immediately.
+  static createDraftsFromCsv(
+    csv,
+    { allowAnyEmail, scheduleSend, skipPersonalization } = {}
+  ) {
+    return ajax("/invites/create-drafts", {
+      type: "POST",
+      data: {
+        csv,
+        allow_any_email: allowAnyEmail,
+        schedule_send: scheduleSend,
+        skip_personalization: skipPersonalization,
+      },
+    });
+  }
+
+  // Sends (or first-sends, for a draft) every invite in inviteIds, reusing
+  // the same resend logic as #reinvite -- see
+  // InvitesController#send_drafts.
+  static sendDrafts(
+    inviteIds,
+    {
+      keywords,
+      aiPersonalization,
+      scheduleSend,
+      allowAnyEmail,
+      skipPersonalization,
+    } = {}
+  ) {
+    return ajax("/invites/send-drafts", {
+      type: "POST",
+      data: {
+        invite_ids: inviteIds,
+        keywords,
+        ai_personalization: aiPersonalization,
+        schedule_send: scheduleSend,
+        allow_any_email: allowAnyEmail,
+        skip_personalization: skipPersonalization,
+      },
+    });
+  }
+
   @computed("topics.firstObject.id")
   get topicId() {
     return this.topics?.firstObject?.id;
@@ -152,21 +196,40 @@ export default class Invite extends EmberObject {
     }).then(() => this.set("destroyed", true));
   }
 
-  reinvite({ keywords, aiPersonalization } = {}) {
+  reinvite({
+    keywords,
+    aiPersonalization,
+    scheduleSend,
+    allowAnyEmail,
+    skipPersonalization,
+  } = {}) {
+    const data = {
+      invite_id: this.id,
+      keywords,
+      ai_personalization: aiPersonalization,
+    };
+    // Omitted params leave the invite's already-persisted values alone
+    // (see InvitesController#resend_overrides_from_params) -- only send
+    // them when the caller actually provided one.
+    if (!isNone(scheduleSend)) {
+      data.schedule_send = scheduleSend;
+    }
+    if (!isNone(allowAnyEmail)) {
+      data.allow_any_email = allowAnyEmail;
+    }
+    if (!isNone(skipPersonalization)) {
+      data.skip_personalization = skipPersonalization;
+    }
+
     // No .catch here, deliberately -- this is awaited from
     // resend-invite.gjs's own try/catch (which calls popupAjaxError and
     // keeps the modal open on failure), matching Invite.reinviteAll's
     // behavior below. Swallowing the error here would resolve this
     // promise regardless, so the modal would close looking successful
     // even when the resend failed.
-    return ajax("/invites/reinvite", {
-      type: "POST",
-      data: {
-        invite_id: this.id,
-        keywords,
-        ai_personalization: aiPersonalization,
-      },
-    }).then(() => this.set("reinvited", true));
+    return ajax("/invites/reinvite", { type: "POST", data }).then(() =>
+      this.set("reinvited", true)
+    );
   }
 
   // Sends this invite immediately, bypassing Jobs::ProcessBulkInviteEmails'

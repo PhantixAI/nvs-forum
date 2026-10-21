@@ -1072,6 +1072,12 @@ RSpec.describe Invite do
       expect(invite.delivery_status).to eq("skipped")
     end
 
+    it "returns draft, ignoring any earlier EmailLog, for a draft invite" do
+      Fabricate(:email_log, invite_id: invite.id, email_type: "invite", delivered_at: Time.current)
+      invite.update!(emailed_status: Invite.emailed_status_types[:draft])
+      expect(invite.delivery_status).to eq("draft")
+    end
+
     context "when emailed_status is sent" do
       before { invite.update!(emailed_status: Invite.emailed_status_types[:sent]) }
 
@@ -1190,6 +1196,42 @@ RSpec.describe Invite do
 
     it "returns nothing for an unknown status" do
       expect(Invite.with_delivery_status(Invite.all, "nope")).to be_empty
+    end
+
+    it "never matches a draft invite against any delivery status, even though #delivery_status returns a value for it" do
+      draft = invite_with(:draft)
+      expect(draft.delivery_status).to eq("draft")
+
+      Invite::DELIVERY_STATUSES.each do |status|
+        expect(Invite.with_delivery_status(Invite.all, status)).not_to include(draft)
+      end
+    end
+  end
+
+  describe ".pending/.expired/.draft" do
+    fab!(:inviter, :user)
+    fab!(:pending_invite) { Fabricate(:invite, invited_by: inviter, expires_at: 1.day.from_now) }
+    fab!(:expired_invite) { Fabricate(:invite, invited_by: inviter, expires_at: 1.day.ago) }
+    fab!(:draft_invite) do
+      Fabricate(
+        :invite,
+        invited_by: inviter,
+        expires_at: 1.day.from_now,
+        emailed_status: Invite.emailed_status_types[:draft],
+      )
+    end
+
+    it "excludes drafts from .pending even though they aren't expired" do
+      expect(Invite.pending(inviter)).to contain_exactly(pending_invite)
+    end
+
+    it "excludes drafts from .expired even if they happen to be past expiry" do
+      draft_invite.update_columns(expires_at: 1.day.ago)
+      expect(Invite.expired(inviter)).to contain_exactly(expired_invite)
+    end
+
+    it ".draft returns only draft invites for that inviter" do
+      expect(Invite.draft(inviter)).to contain_exactly(draft_invite)
     end
   end
 

@@ -3,24 +3,22 @@ import { tracked } from "@glimmer/tracking";
 import { hash } from "@ember/helper";
 import { action } from "@ember/object";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
-import { service } from "@ember/service";
 import { ajax } from "discourse/lib/ajax";
 import { extractError, popupAjaxError } from "discourse/lib/ajax-error";
+import Invite from "discourse/models/invite";
 
 const CSV_HEADER = [
   "email",
+  "name",
   "groups",
   "topic_id",
   "locale",
-  "allow_any_email",
-  "schedule_send",
-  "skip_personalization",
-  "name",
   "keywords",
 ];
 
-// Not shown in the UI -- there's no per-site reason to vary it today, so it's
-// a fixed default rather than a field admins have to think about.
+// Not shown in the UI -- there's no per-row control for it today (see
+// UrlInviteExtractor's class comment), so it's a fixed default rather than
+// a field admins have to think about.
 const DEFAULT_LOCALE = "en";
 
 function csvField(value) {
@@ -28,57 +26,48 @@ function csvField(value) {
   return /["\n,]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-function buildCsv(rows, settings) {
-  const groupNames = (settings.groups ?? [])
-    .map((group) => group.name)
-    .join(";");
+// Broadcasts `rules` (the admin's extraction-rules text) into every row's
+// keywords column, the same way the removed Context field used to -- see
+// the class comment above #extract.
+function buildCsv(rows, rules) {
   const lines = [CSV_HEADER.join(",")];
 
-  rows
-    .filter((row) => row.include)
-    .forEach((row) => {
-      lines.push(
-        [
-          row.email,
-          groupNames,
-          settings.topicId ?? "",
-          settings.locale,
-          settings.allowAnyEmail ? "true" : "false",
-          settings.scheduleSend ? "true" : "false",
-          settings.skipPersonalization ? "true" : "false",
-          row.name,
-          settings.context,
-        ]
-          .map(csvField)
-          .join(",")
-      );
-    });
+  rows.forEach((row) => {
+    lines.push(
+      [row.email, row.name, "", "", DEFAULT_LOCALE, rules]
+        .map(csvField)
+        .join(",")
+    );
+  });
 
   return lines.join("\n");
 }
 
-// Renders nothing itself -- owns the URL-extraction state/logic and yields it,
-// the same way CreateInviteUploader does, so the caller (the bulk invite
-// modal) can render the form fields in its body and the primary action
-// button in its footer from one shared, reactive source.
+// Renders nothing itself -- owns the URL-extraction state/logic and yields
+// it, the same way CreateInviteUploader does, so the caller (the bulk
+// invite modal) can render the form fields in its body and the primary
+// action button in its footer from one shared, reactive source.
+//
+// The extracted result is handed to the admin as one editable CSV blob
+// (see #extract/#createInvites) rather than a row-by-row table -- the
+// admin reviews/edits it directly, then it's submitted as draft invites
+// (InvitesController#create_drafts), not sent immediately.
 export default class UrlInviteExtractor extends Component {
-  @service site;
-
+  @tracked csvText = "";
+  @tracked draftErrors = [];
+  @tracked draftsCreated = null;
+  @tracked creatingDrafts = false;
   @tracked error = null;
   @tracked extracting = false;
-  @tracked rows = null;
   @tracked rules = "";
-  @tracked topics = [];
   @tracked warnings = [];
 
-  // Stable default draft data for the settings fields that don't vary across
-  // renders -- @data's own groups/topicId/etc. values are read from here
-  // rather than constructed inline (e.g. a fresh (array) each render), so an
-  // admin's already-made selections survive the form's @data hash being
+  // Stable default draft data for the settings toggles that don't vary
+  // across renders -- @data's own values are read from here rather than
+  // constructed inline (e.g. a fresh object each render), so an admin's
+  // already-made selections survive the form's @data hash being
   // recomputed when `rules` arrives asynchronously (see #loadLastRules).
   settingsData = {
-    groups: [],
-    topicId: null,
     allowAnyEmail: true,
     scheduleSend: true,
     skipPersonalization: false,
@@ -86,54 +75,55 @@ export default class UrlInviteExtractor extends Component {
 
   #formApi = null;
 
-  get allGroups() {
-    return this.site.groups.filter((group) => !group.automatic);
-  }
-
   get canCreateInvites() {
-    return this.selectedCount > 0 && !this.args.uploader.uploading;
+    return this.csvHasRows && !this.creatingDrafts;
   }
 
-  get selectedCount() {
-    return (this.rows ?? []).filter((row) => row.include).length;
+  // Distinct from a truthy check on draftsCreated -- a result where every
+  // row failed is still a result (created_count: 0, errors: [...]), and
+  // must still show the error summary instead of falling back to the
+  // extraction form.
+  get hasDraftResult() {
+    return this.draftsCreated !== null;
   }
 
-  @action
-  createInvites() {
-    const csv = buildCsv(this.rows, {
-      allowAnyEmail: this.#formApi.get("allowAnyEmail"),
-      context: this.#formApi.get("context"),
-      groups: this.#formApi.get("groups"),
-      locale: DEFAULT_LOCALE,
-      scheduleSend: this.#formApi.get("scheduleSend"),
-      skipPersonalization: this.#formApi.get("skipPersonalization"),
-      topicId: this.#formApi.get("topicId"),
-    });
-    const file = new File([csv], "extracted-invites.csv", {
-      type: "text/csv",
-    });
-
-    this.args.uploader.addFiles(file);
-    this.args.uploader.startUpload();
+  get csvHasRows() {
+    return this.csvText.split("\n").length > 1;
   }
 
   @action
-  async extract({ url, rules, context }) {
+  async createInvites() {
+    this.creatingDrafts = true;
+    this.draftsCreated = null;
+    this.draftErrors = [];
+
+    try {
+      const result = await Invite.createDraftsFromCsv(this.csvText, {
+        allowAnyEmail: this.#formApi.get("allowAnyEmail"),
+        scheduleSend: this.#formApi.get("scheduleSend"),
+        skipPersonalization: this.#formApi.get("skipPersonalization"),
+      });
+      this.draftsCreated = result.created_count;
+      this.draftErrors = result.errors;
+    } catch (err) {
+      this.error = extractError(err);
+    } finally {
+      this.creatingDrafts = false;
+    }
+  }
+
+  @action
+  async extract({ url, rules }) {
     this.error = null;
     this.extracting = true;
-    this.rows = null;
+    this.csvText = "";
 
     try {
       const result = await ajax("/invites/extract-from-url.json", {
         type: "POST",
-        data: { url, rules, context },
+        data: { url, rules },
       });
-      this.rows = result.rows.map((row, index) => ({
-        email: row.email,
-        id: index,
-        include: true,
-        name: row.name,
-      }));
+      this.csvText = buildCsv(result.rows, rules);
       this.warnings = result.warnings;
     } catch (err) {
       this.error = extractError(err);
@@ -154,12 +144,6 @@ export default class UrlInviteExtractor extends Component {
   }
 
   @action
-  onChangeTopic(fieldSet, topicId, topic) {
-    this.topics = [topic];
-    fieldSet(topicId);
-  }
-
-  @action
   registerFormApi(api) {
     this.#formApi = api;
   }
@@ -170,44 +154,29 @@ export default class UrlInviteExtractor extends Component {
   }
 
   @action
-  toggleRow(row) {
-    row.include = !row.include;
-    this.rows = [...this.rows];
-  }
-
-  @action
-  updateRowEmail(row, event) {
-    row.email = event.target.value;
-    this.rows = [...this.rows];
-  }
-
-  @action
-  updateRowName(row, event) {
-    row.name = event.target.value;
-    this.rows = [...this.rows];
+  updateCsvText(event) {
+    this.csvText = event.target.value;
   }
 
   <template>
     <div {{didInsert this.loadLastRules}}>
       {{yield
         (hash
-          allGroups=this.allGroups
           canCreateInvites=this.canCreateInvites
           createInvites=this.createInvites
+          creatingDrafts=this.creatingDrafts
+          csvText=this.csvText
+          draftErrors=this.draftErrors
+          draftsCreated=this.draftsCreated
           error=this.error
           extract=this.extract
           extracting=this.extracting
-          onChangeTopic=this.onChangeTopic
+          hasDraftResult=this.hasDraftResult
           registerFormApi=this.registerFormApi
-          rows=this.rows
           rules=this.rules
-          selectedCount=this.selectedCount
           settingsData=this.settingsData
           submit=this.submit
-          toggleRow=this.toggleRow
-          topics=this.topics
-          updateRowEmail=this.updateRowEmail
-          updateRowName=this.updateRowName
+          updateCsvText=this.updateCsvText
           warnings=this.warnings
         )
       }}

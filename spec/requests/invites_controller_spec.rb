@@ -2418,6 +2418,54 @@ RSpec.describe InvitesController do
         expect(invite.emailed_status).to eq(Invite.emailed_status_types[:skipped])
         expect(Jobs::InviteEmail.jobs.size).to eq(0)
       end
+
+      it "persists allow_any_email and skip_personalization overrides and applies them to this send" do
+        allow(BulkInvitePersonalization::Generator).to receive(:personalize)
+
+        post "/invites/reinvite.json",
+             params: {
+               email: invite.email,
+               allow_any_email: "true",
+               skip_personalization: "true",
+             }
+
+        expect(response.status).to eq(200)
+        invite.reload
+        expect(invite.allow_any_email).to eq(true)
+        expect(invite.skip_personalization).to eq(true)
+        # skip_personalization short-circuits inside
+        # BulkInvitePersonalization::Generator.personalize itself, which is
+        # exactly why persisting the column before calling it is the whole
+        # fix -- not a controller-level skip of the call.
+        expect(BulkInvitePersonalization::Generator).to have_received(:personalize)
+      end
+
+      it "routes through the paced queue instead of sending immediately when schedule_send is explicitly true" do
+        post "/invites/reinvite.json", params: { email: invite.email, schedule_send: "true" }
+
+        expect(response.status).to eq(200)
+        invite.reload
+        expect(invite.schedule_send).to eq(true)
+        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+        expect(Jobs::InviteEmail.jobs.size).to eq(0)
+      end
+
+      it "sends a draft invite for the first time via the same endpoint, moving it off draft status once the enqueued send runs" do
+        draft =
+          Invite.generate(
+            user,
+            email: "draftee@example.com",
+            emailed_status: Invite.emailed_status_types[:draft],
+          )
+
+        post "/invites/reinvite.json", params: { invite_id: draft.id }
+
+        expect(response.status).to eq(200)
+        expect(Jobs::InviteEmail.jobs.size).to eq(1)
+
+        Jobs::InviteEmail.new.execute(invite_id: draft.id)
+        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:sent])
+      end
     end
   end
 
@@ -3392,6 +3440,124 @@ RSpec.describe InvitesController do
       get "/invites/extract-from-url.json"
 
       expect(response.parsed_body["rules"]).to eq("Append RollNo to @example.edu")
+    end
+  end
+
+  describe "#create_drafts" do
+    it "requires to be logged in" do
+      post "/invites/create-drafts.json", params: { csv: "email\nfoo@example.com" }
+      expect(response.status).to eq(403)
+    end
+
+    context "while logged in" do
+      it "fails if you cannot bulk invite to the forum" do
+        sign_in(user)
+        post "/invites/create-drafts.json", params: { csv: "email\nfoo@example.com" }
+        expect(response.status).to eq(403)
+      end
+
+      it "creates draft invites from the given CSV and never sends them" do
+        sign_in(admin)
+
+        csv = <<~CSV
+          email,name,groups,topic_id,locale,keywords
+          priya@iitb.ac.in,Priya,,,en,physics students
+        CSV
+
+        post "/invites/create-drafts.json", params: { csv: csv }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["created_count"]).to eq(1)
+        expect(response.parsed_body["errors"]).to eq([])
+
+        invite = Invite.find_by(email: "priya@iitb.ac.in")
+        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:draft])
+        expect(invite.recipient_name).to eq("Priya")
+        expect(invite.recipient_keywords).to eq("physics students")
+        expect(Jobs::BulkInvite.jobs.size).to eq(0)
+        expect(Jobs::InviteEmail.jobs.size).to eq(0)
+      end
+
+      it "rejects a CSV with more rows than max_bulk_invites" do
+        sign_in(admin)
+        SiteSetting.max_bulk_invites = 1
+
+        csv = <<~CSV
+          email,name,groups,topic_id,locale,keywords
+          a@example.com,,,,,
+          b@example.com,,,,,
+        CSV
+
+        post "/invites/create-drafts.json", params: { csv: csv }
+
+        expect(response.status).to eq(422)
+      end
+
+      it "reports per-row errors without failing the whole batch" do
+        sign_in(admin)
+
+        csv = <<~CSV
+          email,name,groups,topic_id,locale,keywords
+          not-an-email,,,,,
+          valid@example.com,,,,,
+        CSV
+
+        post "/invites/create-drafts.json", params: { csv: csv }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["created_count"]).to eq(1)
+        expect(response.parsed_body["errors"]).to include("Invalid email 'not-an-email'")
+      end
+    end
+  end
+
+  describe "#send_drafts" do
+    it "requires to be logged in" do
+      post "/invites/send-drafts.json", params: { invite_ids: [1] }
+      expect(response.status).to eq(403)
+    end
+
+    context "while logged in" do
+      fab!(:user)
+      fab!(:draft) do
+        Invite.generate(
+          user,
+          email: "draftee@example.com",
+          emailed_status: Invite.emailed_status_types[:draft],
+        )
+      end
+
+      before { sign_in(user) }
+
+      it "sends the selected drafts, reusing the resend logic" do
+        post "/invites/send-drafts.json", params: { invite_ids: [draft.id] }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["sent_count"]).to eq(1)
+        expect(Jobs::InviteEmail.jobs.size).to eq(1)
+      end
+
+      it "only sends invites that belong to the current user" do
+        other_draft =
+          Invite.generate(
+            admin,
+            email: "otherdraftee@example.com",
+            emailed_status: Invite.emailed_status_types[:draft],
+          )
+
+        post "/invites/send-drafts.json", params: { invite_ids: [draft.id, other_draft.id] }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["sent_count"]).to eq(1)
+      end
+
+      it "is rate-limited per request, not per invite" do
+        RateLimiter.enable
+
+        11.times { post "/invites/send-drafts.json", params: { invite_ids: [draft.id] } }
+
+        expect(response.status).to eq(429)
+      end
     end
   end
 end

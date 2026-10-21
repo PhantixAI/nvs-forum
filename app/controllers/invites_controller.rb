@@ -44,6 +44,8 @@ class InvitesController < ApplicationController
                    upload_csv
                    extract_from_url
                    last_url_extraction_rules
+                   create_drafts
+                   send_drafts
                  ]
 
   skip_before_action :check_xhr, except: [:perform_accept_invitation]
@@ -536,47 +538,12 @@ class InvitesController < ApplicationController
       end
     raise Discourse::InvalidParameters.new(:email) if invite.blank?
 
-    # A single invite's LLM call is fast enough to run inline here -- unlike
-    # resend_all_invites below, which can touch a batch too large to
-    # regenerate within one web request.
-    #
-    # An explicit "No" here means "just resend this invite as it already
-    # is" -- custom_subject/custom_message (if this invite has ever been
-    # personalized or given a manual note before) are left untouched, so
-    # InviteMailer#send_invite's existing template selection reuses that
-    # exact email again. A brand new invite that was never personalized
-    # has nothing in those columns to begin with, so it still falls
-    # through to the plain invite_forum_mailer template unchanged.
-    if params[:ai_personalization] != "false"
-      begin
-        result =
-          BulkInvitePersonalization::Generator.personalize(
-            invite,
-            extra_keywords: params[:keywords],
-          )
-        if result.present?
-          invite.update_columns(custom_subject: result[:subject], custom_message: result[:body])
-        end
-      rescue BulkInvitePersonalization::Generator::GenerationFailed => e
-        Discourse.warn_exception(
-          e,
-          message: "Resend personalization failed for invite #{invite.id}",
-        )
-        # Must not fall through to invite.resend_invite below: with AI
-        # personalization on, sending anyway here would mean either the
-        # plain unpersonalized template or -- worse -- a stale body left
-        # over from a previous attempt, neither of which the admin asked
-        # for. Mark it :skipped (same status the batch paths use for this)
-        # so it's visibly held back and can be resent once this clears.
-        invite.update_columns(emailed_status: Invite.emailed_status_types[:skipped])
-        return render_json_error(I18n.t("invite.ai_personalization_failed"))
-      end
-    end
-
-    invite.resend_invite
+    perform_resend(invite, resend_overrides_from_params)
     render json: success_json
   rescue RateLimiter::LimitExceeded
     render_json_error(I18n.t("rate_limiter.slow_down"))
+  rescue BulkInvitePersonalization::Generator::GenerationFailed
+    render_json_error(I18n.t("invite.ai_personalization_failed"))
   end
 
   # "Send Now" on a row still showing the Scheduled status (emailed_status
@@ -859,10 +826,8 @@ class InvitesController < ApplicationController
   # Feeds the "From URL" step of the bulk invite UI -- extracts a reviewable
   # list of {email, name} rows from an admin-supplied page, following
   # admin-supplied free-text rules. Never creates an Invite itself: the
-  # admin reviews/edits the returned rows client-side, which then get
-  # resubmitted as a CSV through #upload_csv like any other bulk invite, so
-  # every safeguard there (size/row caps, ReviewableBulkInvite gating,
-  # per-row validation) applies unchanged.
+  # admin reviews/edits the result as CSV text client-side, which then gets
+  # submitted as draft invites through #create_drafts.
   def extract_from_url
     guardian.ensure_can_bulk_invite_to_forum!
     RateLimiter.new(
@@ -875,7 +840,6 @@ class InvitesController < ApplicationController
 
     url = params[:url].to_s.strip
     rules = params[:rules].to_s.strip
-    context = params[:context].to_s.strip
 
     if url.blank? || rules.blank?
       return(
@@ -888,7 +852,7 @@ class InvitesController < ApplicationController
     PluginStore.set("bulk_invite_url_extraction", "last_rules", rules)
 
     hijack do
-      result = BulkInviteUrlExtraction::Generator.extract(url: url, rules: rules, context: context)
+      result = BulkInviteUrlExtraction::Generator.extract(url: url, rules: rules)
       render json: success_json.merge(rows: result.rows, warnings: result.warnings)
     rescue BulkInviteUrlExtraction::Generator::ExtractionFailed => e
       render json: failed_json.merge(errors: [e.message]), status: :unprocessable_entity
@@ -909,7 +873,164 @@ class InvitesController < ApplicationController
              )
   end
 
+  # Turns the (admin-reviewed) CSV text from the "Extract from URL" tab into
+  # draft Invite rows -- held for review on the Draft tab until an explicit
+  # #send_drafts, never auto-sent. See BulkInviteUrlExtraction::DraftCreator
+  # for why this doesn't reuse Jobs::BulkInvite/#upload_csv.
+  def create_drafts
+    guardian.ensure_can_bulk_invite_to_forum!
+
+    csv_text = params[:csv].to_s
+    if csv_text.blank?
+      return(
+        render json: failed_json.merge(errors: [I18n.t("bulk_invite.error")]),
+               status: :unprocessable_entity
+      )
+    end
+
+    row_count = csv_text.each_line.count - 1 # minus header
+    if row_count > SiteSetting.max_bulk_invites
+      return(
+        render json:
+                 failed_json.merge(
+                   errors: [
+                     I18n.t("bulk_invite.max_rows", max_bulk_invites: SiteSetting.max_bulk_invites),
+                   ],
+                 ),
+               status: :unprocessable_entity
+      )
+    end
+
+    hijack do
+      result =
+        BulkInviteUrlExtraction::DraftCreator.create_drafts(
+          current_user: current_user,
+          csv_text: csv_text,
+          allow_any_email: Invite.truthy_param?(params[:allow_any_email]),
+          schedule_send: Invite.truthy_param?(params[:schedule_send]),
+          skip_personalization: Invite.truthy_param?(params[:skip_personalization]),
+        )
+      render json: success_json.merge(created_count: result.created_count, errors: result.errors)
+    end
+  end
+
+  # Sends (or first-sends, for a draft) a batch of invites the admin
+  # selected on the Invited page, reusing the exact same personalize +
+  # schedule-or-immediate-send logic as #resend_invite (see #perform_resend)
+  # -- not a separate send mechanism. Rate-limited once per request rather
+  # than per invite (unlike resend-invite-per-hour, which is sized for an
+  # occasional single resend, not a deliberate bulk action on dozens of
+  # freshly created drafts).
+  def send_drafts
+    if !SiteSetting.allow_email_invites
+      return render_json_error(I18n.t("invite.email_invites_disabled"))
+    end
+
+    RateLimiter.new(
+      current_user,
+      "send-draft-invites-per-hour",
+      10,
+      1.hour,
+      apply_limit_to_staff: true,
+    ).performed!
+
+    invite_ids = Array(params[:invite_ids]).map(&:to_i)
+    invites = Invite.where(invited_by_id: current_user.id, id: invite_ids)
+
+    overrides = resend_overrides_from_params
+    errors = []
+    sent_count = 0
+
+    invites.find_each do |invite|
+      perform_resend(invite, overrides)
+      sent_count += 1
+    rescue StandardError => e
+      errors << "#{invite.id}: #{e.message}"
+    end
+
+    render json: success_json.merge(sent_count: sent_count, errors: errors)
+  end
+
   private
+
+  # Shared by #resend_invite (single, rate-limited per-invite) and
+  # #send_drafts (bulk, rate-limited per-request): persists any explicitly
+  # provided override, then personalizes (unless skip_personalization,
+  # which BulkInvitePersonalization::Generator.personalize already honors
+  # once persisted) and dispatches paced-or-immediate. Works unmodified for
+  # an invite whose current emailed_status is :draft -- neither
+  # Invite#resend_invite nor #requeue_for_paced_resend branch on prior
+  # status, so a draft's first send and a normal invite's resend share this
+  # one path.
+  def perform_resend(invite, overrides)
+    invite.update_columns(overrides) if overrides.present?
+    # Absence of an explicit schedule_send override means "resend/send this
+    # one right now" -- the same default resend_all_invites already uses
+    # (`params[:schedule_send] == "true"`, not the invite's own persisted
+    # column, which defaults true for nearly every invite and would
+    # otherwise silently turn every plain resend into a paced one).
+    schedule_send_now = overrides.fetch(:schedule_send, false)
+
+    # An explicit "No" here means "just (re)send this invite as it already
+    # is" -- custom_subject/custom_message (if this invite has ever been
+    # personalized or given a manual note before) are left untouched, so
+    # InviteMailer#send_invite's existing template selection reuses that
+    # exact email again. A brand new invite that was never personalized
+    # has nothing in those columns to begin with, so it still falls
+    # through to the plain invite_forum_mailer template unchanged.
+    if params[:ai_personalization] != "false"
+      begin
+        result =
+          BulkInvitePersonalization::Generator.personalize(
+            invite,
+            extra_keywords: params[:keywords],
+          )
+        if result.present?
+          invite.update_columns(custom_subject: result[:subject], custom_message: result[:body])
+        end
+      rescue BulkInvitePersonalization::Generator::GenerationFailed => e
+        Discourse.warn_exception(
+          e,
+          message: "Resend personalization failed for invite #{invite.id}",
+        )
+        # Must not fall through to the send below: with AI personalization
+        # on, sending anyway here would mean either the plain
+        # unpersonalized template or -- worse -- a stale body left over
+        # from a previous attempt, neither of which the admin asked for.
+        # Mark it :skipped (same status the batch paths use for this) so
+        # it's visibly held back and can be resent once this clears.
+        invite.update_columns(emailed_status: Invite.emailed_status_types[:skipped])
+        raise
+      end
+    end
+
+    if schedule_send_now
+      invite.requeue_for_paced_resend
+      ::Jobs::ProcessBulkInviteEmails.ensure_chain!
+    else
+      invite.resend_invite
+    end
+  end
+
+  # allow_any_email/schedule_send/skip_personalization are only touched when
+  # explicitly present in the request -- an admin resending/sending without
+  # opening the override controls leaves the invite's already-persisted
+  # values alone. keywords doesn't need the same "only if present" handling:
+  # BulkInvitePersonalization::Generator.personalize's extra_keywords is
+  # already additive-and-optional (see #perform_resend), not an override.
+  def resend_overrides_from_params
+    overrides = {}
+    if params[:allow_any_email].present?
+      overrides[:allow_any_email] = Invite.truthy_param?(params[:allow_any_email])
+    end
+    if params[:schedule_send].present?
+      overrides[:schedule_send] = Invite.truthy_param?(params[:schedule_send])
+    end
+    if params[:skip_personalization].present?
+      overrides[:skip_personalization] = Invite.truthy_param?(params[:skip_personalization])
+    end
+    overrides
+  end
 
   def skip_email_param
     !SiteSetting.allow_email_invites || params[:skip_email]
