@@ -86,17 +86,9 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
 
   describe ".system_message" do
     it "includes the admin-provided extraction rules" do
-      message = described_class.send(:system_message, "Construct emails as RollNo@example.edu", "")
+      message = described_class.send(:system_message, "Construct emails as RollNo@example.edu")
 
       expect(message).to include("Construct emails as RollNo@example.edu")
-    end
-
-    it "includes additional context when given, but omits the context line entirely when blank" do
-      with_context = described_class.send(:system_message, "rules", "IIT Madras physics students")
-      expect(with_context).to include("IIT Madras physics students")
-
-      without_context = described_class.send(:system_message, "rules", "")
-      expect(without_context).not_to include("Additional context")
     end
   end
 
@@ -106,7 +98,7 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
 
       it "raises ExtractionFailed regardless of whether the plugin is loaded" do
         expect {
-          described_class.extract(url: "https://example.com", rules: "rules", context: "")
+          described_class.extract(url: "https://example.com", rules: "rules")
         }.to raise_error(described_class::ExtractionFailed, /not enabled/)
       end
     end
@@ -116,7 +108,7 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
 
       it "raises ExtractionFailed without needing discourse-ai at all" do
         expect {
-          described_class.extract(url: "https://example.com", rules: "rules", context: "")
+          described_class.extract(url: "https://example.com", rules: "rules")
         }.to raise_error(described_class::ExtractionFailed, /not enabled/)
       end
     end
@@ -142,7 +134,7 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
           llm_model.destroy!
 
           expect {
-            described_class.extract(url: "https://example.com", rules: "rules", context: "")
+            described_class.extract(url: "https://example.com", rules: "rules")
           }.to raise_error(described_class::ExtractionFailed, /No AI language model/)
         end
 
@@ -152,7 +144,7 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
           )
 
           expect {
-            described_class.extract(url: "https://example.com", rules: "rules", context: "")
+            described_class.extract(url: "https://example.com", rules: "rules")
           }.to raise_error(described_class::ExtractionFailed, /Could not fetch the page/)
         end
 
@@ -160,7 +152,7 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
           allow(DiscourseAi::Rag::WebPageFetcher).to receive(:fetch).and_return(text: "")
 
           expect {
-            described_class.extract(url: "https://example.com", rules: "rules", context: "")
+            described_class.extract(url: "https://example.com", rules: "rules")
           }.to raise_error(described_class::ExtractionFailed, /did not contain any readable text/)
         end
 
@@ -177,8 +169,7 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
 
           result = nil
           DiscourseAi::Completions::Llm.with_prepared_responses([canned]) do
-            result =
-              described_class.extract(url: "https://example.com", rules: "rules", context: "")
+            result = described_class.extract(url: "https://example.com", rules: "rules")
           end
 
           expect(result.rows).to eq([{ email: "priya@iitb.ac.in", name: "Priya" }])
@@ -193,11 +184,24 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
 
           result = nil
           DiscourseAi::Completions::Llm.with_prepared_responses([canned]) do
-            result =
-              described_class.extract(url: "https://example.com", rules: "rules", context: "")
+            result = described_class.extract(url: "https://example.com", rules: "rules")
           end
 
           expect(result.rows).to eq([{ email: "ok@example.edu", name: "Ok" }])
+        end
+
+        it "salvages complete rows from a chunk whose structured-output JSON got cut off mid-array (e.g. by max_tokens) instead of losing the whole chunk" do
+          schema_properties = described_class::ROW_SCHEMA[:json_schema][:schema][:properties]
+          truncated = DiscourseAi::Completions::StructuredOutput.new(schema_properties)
+          truncated << '{"rows":[{"email":"first@example.edu","name":"First"},{"email":"second@ex'
+          truncated.finish
+
+          llm = Object.new
+          llm.define_singleton_method(:generate) { |*_args, **_kwargs, &blk| blk.call(truncated) }
+
+          rows = described_class.send(:extract_chunk, llm, "chunk text", "rules")
+
+          expect(rows).to include({ email: "first@example.edu", name: "First" })
         end
 
         it "merges rows across multiple chunks, recording a warning for a chunk whose extraction call fails rather than failing the whole run" do
@@ -213,8 +217,7 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
 
           result = nil
           DiscourseAi::Completions::Llm.with_prepared_responses(responses) do
-            result =
-              described_class.extract(url: "https://example.com", rules: "rules", context: "")
+            result = described_class.extract(url: "https://example.com", rules: "rules")
           end
 
           expect(result.rows).to eq([{ email: "first@example.edu", name: "First" }])
@@ -226,7 +229,7 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
 
           expect {
             DiscourseAi::Completions::Llm.with_prepared_responses([StandardError.new("boom")]) do
-              described_class.extract(url: "https://example.com", rules: "rules", context: "")
+              described_class.extract(url: "https://example.com", rules: "rules")
             end
           }.to raise_error(described_class::ExtractionFailed, /No rows could be extracted/)
         end

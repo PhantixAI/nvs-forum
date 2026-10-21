@@ -573,6 +573,8 @@ class UsersController < ApplicationController
           Invite.includes(:topics, :groups).expired(inviter, domain:, status:)
         elsif filter == "redeemed"
           Invite.redeemed_users(inviter, domain:)
+        elsif filter == "draft" && can_see_invite_details
+          Invite.draft(inviter, domain:)
         else
           Invite.none
         end
@@ -604,6 +606,8 @@ class UsersController < ApplicationController
           end
         )
       redeemed_count = Invite.redeemed_users(inviter, domain:).reorder(nil).count.to_i
+      draft_count =
+        can_see_invite_details ? Invite.draft(inviter, domain:).reorder(nil).count.to_i : 0
       # Same gate as pending_count/expired_count above -- without it, a viewer who can't
       # see this inviter's invite details (e.g. a TL2 user viewing someone else's invited
       # page) could still learn every domain the inviter has invited to, via a field that
@@ -663,6 +667,7 @@ class UsersController < ApplicationController
                        pending: pending_count,
                        expired: expired_count,
                        redeemed: redeemed_count,
+                       draft: draft_count,
                        total: pending_count + expired_count,
                      },
                    ),

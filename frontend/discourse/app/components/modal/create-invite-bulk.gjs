@@ -1,6 +1,6 @@
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
-import { fn, hash } from "@ember/helper";
+import { hash } from "@ember/helper";
 import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
@@ -9,9 +9,7 @@ import { trustHTML } from "@ember/template";
 import CreateInviteUploader from "discourse/components/create-invite-uploader";
 import Form from "discourse/components/form";
 import UrlInviteExtractor from "discourse/components/url-invite-extractor";
-import GroupChooser from "discourse/select-kit/components/group-chooser";
-import TopicChooser from "discourse/select-kit/components/topic-chooser";
-import { eq, not } from "discourse/truth-helpers";
+import { eq, not, or } from "discourse/truth-helpers";
 import DButton from "discourse/ui-kit/d-button";
 import DModal from "discourse/ui-kit/d-modal";
 import { i18n } from "discourse-i18n";
@@ -35,7 +33,6 @@ export default class CreateInviteBulk extends Component {
     <CreateInviteUploader @autoFindInput={{false}} as |uploader setElement|>
       <UrlInviteExtractor
         @enabled={{this.siteSettings.bulk_invite_url_extraction_enabled}}
-        @uploader={{uploader}}
         as |extractor|
       >
         <DModal
@@ -50,6 +47,14 @@ export default class CreateInviteBulk extends Component {
               {{else}}
                 {{i18n "user.invited.bulk_invite.success"}}
               {{/if}}
+            {{else if extractor.hasDraftResult}}
+              {{i18n
+                "user.invited.bulk_invite.url_extraction.drafts_created"
+                count=extractor.draftsCreated
+              }}
+              {{#each extractor.draftErrors as |draftError|}}
+                <div class="alert alert-warning">{{draftError}}</div>
+              {{/each}}
             {{else}}
               {{#if this.siteSettings.bulk_invite_url_extraction_enabled}}
                 <div class="create-invite-bulk-modal__tabs">
@@ -89,9 +94,6 @@ export default class CreateInviteBulk extends Component {
                   @data={{hash
                     url=""
                     rules=extractor.rules
-                    context=""
-                    groups=extractor.settingsData.groups
-                    topicId=extractor.settingsData.topicId
                     allowAnyEmail=extractor.settingsData.allowAnyEmail
                     scheduleSend=extractor.settingsData.scheduleSend
                     skipPersonalization=extractor.settingsData.skipPersonalization
@@ -122,56 +124,6 @@ export default class CreateInviteBulk extends Component {
                     as |field|
                   >
                     <field.Control @height={{120}} />
-                  </form.Field>
-
-                  <form.Field
-                    @description={{i18n
-                      "user.invited.bulk_invite.url_extraction.context_description"
-                    }}
-                    @name="context"
-                    @title={{i18n
-                      "user.invited.bulk_invite.url_extraction.context_label"
-                    }}
-                    @type="input"
-                    as |field|
-                  >
-                    <field.Control />
-                  </form.Field>
-
-                  <form.Field
-                    @name="groups"
-                    @title={{i18n
-                      "user.invited.bulk_invite.url_extraction.groups_label"
-                    }}
-                    @type="custom"
-                    as |field|
-                  >
-                    <field.Control>
-                      <GroupChooser
-                        @content={{extractor.allGroups}}
-                        @labelProperty="name"
-                        @onChange={{field.set}}
-                        @value={{field.value}}
-                      />
-                    </field.Control>
-                  </form.Field>
-
-                  <form.Field
-                    @name="topicId"
-                    @title={{i18n
-                      "user.invited.bulk_invite.url_extraction.topic_label"
-                    }}
-                    @type="custom"
-                    as |field|
-                  >
-                    <field.Control>
-                      <TopicChooser
-                        @content={{extractor.topics}}
-                        @onChange={{fn extractor.onChangeTopic field.set}}
-                        @options={{hash additionalFilters="status:public"}}
-                        @value={{field.value}}
-                      />
-                    </field.Control>
                   </form.Field>
 
                   <form.Field
@@ -212,65 +164,28 @@ export default class CreateInviteBulk extends Component {
                   <div class="alert alert-error">{{extractor.error}}</div>
                 {{/if}}
 
-                {{#if extractor.rows}}
+                {{#if extractor.csvText}}
                   {{#each extractor.warnings as |warning|}}
                     <div class="alert alert-warning">{{warning}}</div>
                   {{/each}}
 
-                  <table class="url-invite-extractor__review-table">
-                    <thead>
-                      <tr>
-                        <th></th>
-                        <th>{{i18n
-                            "user.invited.bulk_invite.url_extraction.email_column"
-                          }}</th>
-                        <th>{{i18n
-                            "user.invited.bulk_invite.url_extraction.name_column"
-                          }}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {{#each extractor.rows key="id" as |row|}}
-                        <tr>
-                          <td>
-                            <input
-                              checked={{row.include}}
-                              type="checkbox"
-                              {{on "click" (fn extractor.toggleRow row)}}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="text"
-                              value={{row.email}}
-                              {{on "input" (fn extractor.updateRowEmail row)}}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              type="text"
-                              value={{row.name}}
-                              {{on "input" (fn extractor.updateRowName row)}}
-                            />
-                          </td>
-                        </tr>
-                      {{/each}}
-                    </tbody>
-                  </table>
-
-                  <div class="url-invite-extractor__review-footer">
+                  <label class="url-invite-extractor__review-label">
                     {{i18n
-                      "user.invited.bulk_invite.url_extraction.selected_count"
-                      count=extractor.selectedCount
-                      total=extractor.rows.length
+                      "user.invited.bulk_invite.url_extraction.csv_review_label"
                     }}
-                  </div>
+                  </label>
+                  <textarea
+                    class="url-invite-extractor__review-textarea"
+                    rows="12"
+                    value={{extractor.csvText}}
+                    {{on "input" extractor.updateCsvText}}
+                  ></textarea>
                 {{/if}}
               {{/if}}
             {{/if}}
           </:body>
           <:footer>
-            {{#unless uploader.uploaded}}
+            {{#unless (or uploader.uploaded extractor.hasDraftResult)}}
               {{#if (eq this.activeTab "csv")}}
                 <DButton
                   class="btn-primary"
@@ -286,13 +201,19 @@ export default class CreateInviteBulk extends Component {
                     (i18n "user.invited.bulk_invite.text")
                   }}
                 />
-              {{else if extractor.rows}}
+              {{else if extractor.csvText}}
                 <DButton
                   class="btn-primary"
                   @action={{extractor.createInvites}}
                   @disabled={{not extractor.canCreateInvites}}
-                  @translatedLabel={{i18n
-                    "user.invited.bulk_invite.url_extraction.create_invites_button"
+                  @translatedLabel={{if
+                    extractor.creatingDrafts
+                    (i18n
+                      "user.invited.bulk_invite.url_extraction.creating_invites"
+                    )
+                    (i18n
+                      "user.invited.bulk_invite.url_extraction.create_invites_button"
+                    )
                   }}
                 />
               {{else}}

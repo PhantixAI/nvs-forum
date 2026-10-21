@@ -24,7 +24,10 @@ class Invite < ActiveRecord::Base
   # domain_filter_condition) covering every *.ac.in institute domain in one
   # view, not just a literal "ac.in" address.
   AC_IN_UMBRELLA_DOMAIN = "ac.in"
-  # Every value Invite#delivery_status can return, in pipeline order.
+  # Every value Invite#delivery_status can return, in pipeline order -- except
+  # "draft" (and nil, for not_required), which aren't filterable statuses: a
+  # draft invite lives in its own tab, never the Pending/Expired tabs this
+  # filter dropdown applies to.
   DELIVERY_STATUSES = %w[scheduled pending skipped sent delivered bounced complained].freeze
   DESCRIPTION_MAX_LENGTH = 100
   RECIPIENT_NAME_MAX_LENGTH = 100
@@ -89,6 +92,16 @@ class Invite < ActiveRecord::Base
 
   attribute :email_already_exists
 
+  # ActiveModel::Type::Boolean#cast fails open (anything not in its narrow
+  # FALSE_VALUES list, e.g. "no"/"n"/a typo, casts to true), which is wrong
+  # for a security-relevant flag filled in free-text by an admin -- only an
+  # explicit truthy spelling counts, everything else (including typos)
+  # stays false. Mirrors the inline check Jobs::BulkInvite#send_invite has
+  # used for this since the CSV columns were introduced.
+  def self.truthy_param?(value)
+    %w[true t 1 yes y].include?(value.to_s.strip.downcase)
+  end
+
   def self.email_code_enabled?(user = nil)
     UpcomingChanges.enabled_for_user?(:enable_local_logins_via_code, user) &&
       SiteSetting.enable_local_logins && SiteSetting.enable_local_logins_via_email &&
@@ -97,7 +110,15 @@ class Invite < ActiveRecord::Base
 
   def self.emailed_status_types
     @emailed_status_types ||=
-      Enum.new(not_required: 0, pending: 1, bulk_pending: 2, sending: 3, sent: 4, skipped: 5)
+      Enum.new(
+        not_required: 0,
+        pending: 1,
+        bulk_pending: 2,
+        sending: 3,
+        sent: 4,
+        skipped: 5,
+        draft: 6,
+      )
   end
 
   # Staff-sent invites (admin, moderator, or Batch Moderator -- see
@@ -341,6 +362,7 @@ class Invite < ActiveRecord::Base
         .where(invited_by_id: inviter.id)
         .where("redemption_count < max_redemptions_allowed")
         .where("expires_at > ?", Time.zone.now)
+        .where("emailed_status IS NULL OR emailed_status != ?", emailed_status_types[:draft])
         .order("invites.updated_at DESC")
     invites = invites.where(*domain_filter_condition(domain)) if domain.present?
     invites = with_delivery_status(invites, status) if status.present?
@@ -356,9 +378,23 @@ class Invite < ActiveRecord::Base
         .where(invited_by_id: inviter.id)
         .where("redemption_count < max_redemptions_allowed")
         .where("expires_at < ?", Time.zone.now)
+        .where("emailed_status IS NULL OR emailed_status != ?", emailed_status_types[:draft])
         .order("invites.expires_at ASC")
     invites = invites.where(*domain_filter_condition(domain)) if domain.present?
     invites = with_delivery_status(invites, status) if status.present?
+    invites
+  end
+
+  # Invites created by BulkInviteUrlExtraction::DraftCreator, held for admin
+  # review before an explicit send -- never auto-enqueued, so no delivery
+  # status/domain-join complexity is needed here unlike pending/expired.
+  def self.draft(inviter, domain: nil)
+    invites =
+      Invite
+        .includes(:topics, :groups)
+        .where(invited_by_id: inviter.id, emailed_status: emailed_status_types[:draft])
+        .order(created_at: :desc)
+    invites = invites.where(*domain_filter_condition(domain)) if domain.present?
     invites
   end
 
@@ -486,6 +522,8 @@ class Invite < ActiveRecord::Base
   # EmailLog query per invite.
   def delivery_status(email_log = latest_sent_email_log)
     case emailed_status
+    when Invite.emailed_status_types[:draft]
+      "draft"
     when Invite.emailed_status_types[:not_required]
       nil
     when Invite.emailed_status_types[:pending], Invite.emailed_status_types[:bulk_pending]
@@ -541,7 +579,7 @@ class Invite < ActiveRecord::Base
         SQL
         .where(
           "invites.emailed_status IS NULL OR invites.emailed_status NOT IN (?)",
-          types.values_at(:not_required, :pending, :bulk_pending, :sending, :skipped),
+          types.values_at(:not_required, :pending, :bulk_pending, :sending, :skipped, :draft),
         )
         .where(outcome)
     else

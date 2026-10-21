@@ -2739,6 +2739,28 @@ RSpec.describe UsersController do
       expect(response.parsed_body["counts"]["total"]).to eq(1)
     end
 
+    it "lists draft invites separately from pending, with their own count" do
+      user = Fabricate(:user, trust_level: TrustLevel[2])
+      Fabricate(:invite, invited_by: user)
+      draft =
+        Fabricate(
+          :invite,
+          invited_by: user,
+          email: "draftee@example.com",
+          emailed_status: Invite.emailed_status_types[:draft],
+        )
+
+      sign_in(user)
+      get "/u/#{user.username}/invited.json", params: { filter: "draft" }
+
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["counts"]["pending"]).to eq(1)
+      expect(response.parsed_body["counts"]["draft"]).to eq(1)
+      invites = response.parsed_body["invites"]
+      expect(invites.size).to eq(1)
+      expect(invites.first).to include("email" => draft.email)
+    end
+
     it "filters by all if viewing self" do
       inviter = Fabricate(:user, trust_level: TrustLevel[2])
       sign_in(inviter)

@@ -1110,7 +1110,7 @@ users:
     area: "users"
     hidden: true
   invite_expiry_days:
-    default: 90
+    default: 365
     client: true
     max: 36500
     area: "users"
@@ -4354,7 +4354,7 @@ uncategorized:
     area: "users"
 
   bulk_invite_url_extraction_max_tokens:
-    default: 4000
+    default: 8000
     type: integer
     min: 500
     max: 16000

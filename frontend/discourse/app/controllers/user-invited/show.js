@@ -33,6 +33,8 @@ export default class UserInvitedShowController extends Controller {
   @tracked selectedDomain = null;
   @tracked selectedStatus = null;
 
+  @tracked selectedDraftIds = new Set();
+
   /** @type {import("discourse/models/user").default | null} */
   user = null;
 
@@ -41,8 +43,8 @@ export default class UserInvitedShowController extends Controller {
 
   /** @type {{ pending: number, redeemed: number, expired: number, total: number } | null | undefined} */
   invitesCount = null;
-
   reinvitedAll = false;
+
   searchTerm = "";
 
   @tracked _canInviteToForumOverride;
@@ -72,6 +74,11 @@ export default class UserInvitedShowController extends Controller {
   @dependentKeyCompat
   get invitePending() {
     return this.filter === "pending";
+  }
+
+  @dependentKeyCompat
+  get inviteDraft() {
+    return this.filter === "draft";
   }
 
   @computed("user.id", "currentUser.id")
@@ -152,12 +159,22 @@ export default class UserInvitedShowController extends Controller {
 
   @computed("statusOptions", "currentUser.staff", "filter")
   get showStatusFilter() {
-    // Redeemed invites don't show a delivery status, so there's nothing to
-    // filter by on that tab.
+    // Redeemed and Draft invites don't show a delivery status, so there's
+    // nothing to filter by on those tabs.
     return (
       this.currentUser?.staff &&
       this.filter !== "redeemed" &&
+      this.filter !== "draft" &&
       this.statusOptions.length > 0
+    );
+  }
+
+  @dependentKeyCompat
+  get allDraftsSelected() {
+    const invites = this.model?.invites || [];
+    return (
+      invites.length > 0 &&
+      invites.every((invite) => this.selectedDraftIds.has(invite.id))
     );
   }
 
@@ -235,8 +252,69 @@ export default class UserInvitedShowController extends Controller {
     this.modal.show(ResendInviteModal, {
       model: {
         bulk: false,
-        onResend: ({ keywords, aiPersonalization }) =>
-          invite.reinvite({ keywords, aiPersonalization }),
+        onResend: ({ keywords, aiPersonalization, scheduleSend }) =>
+          invite.reinvite({ keywords, aiPersonalization, scheduleSend }),
+      },
+    });
+  }
+
+  @action
+  isDraftSelected(invite) {
+    return this.selectedDraftIds.has(invite.id);
+  }
+
+  @action
+  toggleDraftSelected(invite) {
+    const selected = new Set(this.selectedDraftIds);
+    if (selected.has(invite.id)) {
+      selected.delete(invite.id);
+    } else {
+      selected.add(invite.id);
+    }
+    this.selectedDraftIds = selected;
+  }
+
+  @action
+  toggleSelectAllDrafts() {
+    this.selectedDraftIds = this.allDraftsSelected
+      ? new Set()
+      : new Set((this.model?.invites || []).map((invite) => invite.id));
+  }
+
+  @action
+  sendSelectedDrafts() {
+    const inviteIds = [...this.selectedDraftIds];
+    if (inviteIds.length === 0) {
+      return;
+    }
+
+    this.modal.show(ResendInviteModal, {
+      model: {
+        bulk: true,
+        drafts: true,
+        confirmMessage: i18n("user.invited.send_selected_confirm", {
+          count: inviteIds.length,
+        }),
+        onResend: async ({
+          keywords,
+          aiPersonalization,
+          scheduleSend,
+          allowAnyEmail,
+          skipPersonalization,
+        }) => {
+          await Invite.sendDrafts(inviteIds, {
+            keywords,
+            aiPersonalization,
+            scheduleSend,
+            allowAnyEmail,
+            skipPersonalization,
+          });
+          this.selectedDraftIds = new Set();
+          this.toasts.success({
+            data: { message: i18n("user.invited.sent_selected") },
+          });
+          this.send("triggerRefresh");
+        },
       },
     });
   }

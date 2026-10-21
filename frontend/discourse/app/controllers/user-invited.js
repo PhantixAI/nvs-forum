@@ -42,4 +42,15 @@ export default class UserInvitedController extends Controller {
       return i18n("user.invited.redeemed_tab");
     }
   }
+
+  @computed("invitesCount.draft")
+  get draftLabel() {
+    if (this.invitesCount?.draft > 0) {
+      return i18n("user.invited.draft_tab_with_count", {
+        count: this.invitesCount?.draft,
+      });
+    } else {
+      return i18n("user.invited.draft_tab");
+    }
+  }
 }

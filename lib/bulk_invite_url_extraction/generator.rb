@@ -5,9 +5,9 @@ module BulkInviteUrlExtraction
   # model to extract a list of {email, name} rows from it, following
   # admin-provided free-text rules (e.g. "emails are printed directly" or
   # "build the email by appending RollNo to @example.edu"). Used to seed the
-  # review step ahead of the existing bulk-invite CSV upload
-  # (InvitesController#upload_csv) -- this module never creates an Invite or
-  # sends anything itself.
+  # admin-editable CSV review step ahead of draft-invite creation
+  # (BulkInviteUrlExtraction::DraftCreator) -- this module never creates an
+  # Invite or sends anything itself.
   module Generator
     ExtractionFailed = Class.new(StandardError)
 
@@ -63,7 +63,7 @@ module BulkInviteUrlExtraction
     # preview, not a send, so a partial result (with warnings) from a large
     # page where one section failed is more useful than discarding the whole
     # run over that one section.
-    def self.extract(url:, rules:, context:)
+    def self.extract(url:, rules:)
       raise ExtractionFailed, "AI extraction is not enabled" unless enabled?
 
       llm = resolve_llm
@@ -75,7 +75,7 @@ module BulkInviteUrlExtraction
       rows = []
       warnings = []
       chunks.each_with_index do |chunk, index|
-        rows.concat(extract_chunk(llm, chunk, rules, context))
+        rows.concat(extract_chunk(llm, chunk, rules))
       rescue StandardError => e
         Rails.logger.warn(
           "[BulkInviteUrlExtraction] chunk #{index + 1}/#{chunks.size} failed for #{url}: #{e.class}: #{e.message}",
@@ -153,10 +153,10 @@ module BulkInviteUrlExtraction
     end
     private_class_method :chunk_by_line
 
-    def self.extract_chunk(llm, chunk_text, rules, context)
+    def self.extract_chunk(llm, chunk_text, rules)
       prompt =
         DiscourseAi::Completions::Prompt.new(
-          system_message(rules, context),
+          system_message(rules),
           messages: [{ type: :user, content: chunk_text }],
         )
 
@@ -176,12 +176,26 @@ module BulkInviteUrlExtraction
         end
       end
 
-      parsed =
-        JSON.parse(
-          DiscourseAi::Completions::Llm.text_from_response(response),
-          symbolize_names: true,
-        )
-      Array(parsed[:rows]).filter_map do |row|
+      raw_rows =
+        if response.is_a?(DiscourseAi::Completions::StructuredOutput)
+          # read_buffered_property tracks the best-effort-completed value of
+          # "rows" as it streamed in, so if the model's JSON got cut off
+          # (typically by max_tokens on a dense chunk) before it could close,
+          # this still returns whatever complete rows exist before the
+          # cutoff instead of losing the whole chunk to a raw JSON.parse
+          # failure on the still-truncated text.
+          response.read_buffered_property(:rows)
+        else
+          JSON.parse(
+            DiscourseAi::Completions::Llm.text_from_response(response),
+            symbolize_names: true,
+          )[
+            :rows
+          ]
+        end
+
+      Array(raw_rows).filter_map do |row|
+        row = row.is_a?(Hash) ? row.transform_keys(&:to_sym) : {}
         email = row[:email].to_s.strip
         next if email.blank?
 
@@ -190,7 +204,7 @@ module BulkInviteUrlExtraction
     end
     private_class_method :extract_chunk
 
-    def self.system_message(rules, context)
+    def self.system_message(rules)
       <<~TEXT
         You extract a list of people's email addresses (and names, where
         shown) from a webpage's text content. The user message contains one
@@ -200,8 +214,6 @@ module BulkInviteUrlExtraction
         Follow these admin-provided extraction rules exactly:
 
         #{rules}
-
-        #{"Additional context about who this page lists: #{context}" if context.present?}
 
         Only include a row if you can determine, or construct per the rules
         above, a real email address. Never invent an email address the rules
