@@ -20,6 +20,16 @@ module BulkInviteUrlExtraction
     # long roster doesn't get silently truncated before every row is seen.
     CHUNK_CHAR_BUDGET = 12_000
 
+    # Chunks are extracted concurrently (see #extract) rather than one after
+    # another, since a page that splits into several chunks (e.g. a 200+ row
+    # roster) otherwise has to complete that many sequential LLM calls
+    # before the request can respond -- long enough on a dense page to trip
+    # a reverse proxy's gateway timeout even though no single call is slow.
+    # This caps how many of those calls run at once, since each holds its
+    # own ActiveRecord connection (for its AiApiAuditLog row) for the
+    # duration.
+    MAX_CONCURRENT_CHUNKS = 4
+
     # A GitHub-flavored-markdown pipe-table separator row, e.g. "| --- | --- |"
     # -- this is exactly what WebPageFetcher#table_to_markdown emits for an
     # HTML <table>, used below to detect a table's header so it can be
@@ -79,14 +89,23 @@ module BulkInviteUrlExtraction
 
       rows = []
       warnings = []
-      chunks.each_with_index do |chunk, index|
-        rows.concat(extract_chunk(llm, chunk, rules))
-      rescue StandardError => e
-        Rails.logger.warn(
-          "[BulkInviteUrlExtraction] chunk #{index + 1}/#{chunks.size} failed for #{url}: #{e.class}: #{e.message}",
-        )
-        warnings << "Part #{index + 1} of #{chunks.size} of the page could not be processed."
-      end
+      chunks
+        .each_with_index
+        .each_slice(MAX_CONCURRENT_CHUNKS) do |batch|
+          threads =
+            batch.map do |chunk, index|
+              Thread.new { extract_chunk_safely(llm, chunk, rules, index, chunks.size, url) }
+            end
+
+          threads.each do |thread|
+            result = thread.value
+            if result[:warning]
+              warnings << result[:warning]
+            else
+              rows.concat(result[:rows])
+            end
+          end
+        end
 
       if rows.empty? && warnings.present?
         raise ExtractionFailed, "No rows could be extracted -- #{warnings.join(" ")}"
@@ -157,6 +176,24 @@ module BulkInviteUrlExtraction
       chunks
     end
     private_class_method :chunk_by_line
+
+    # Runs on its own thread (see #extract) with its own checked-out
+    # ActiveRecord connection -- extract_chunk's LLM call writes an
+    # AiApiAuditLog row, and a thread doesn't inherit the request thread's
+    # connection. Turns a failed call into the same per-chunk warning the
+    # old serial loop produced, instead of raising out of the thread and
+    # losing the whole batch.
+    def self.extract_chunk_safely(llm, chunk_text, rules, index, chunk_count, url)
+      rows =
+        ActiveRecord::Base.connection_pool.with_connection { extract_chunk(llm, chunk_text, rules) }
+      { rows: rows }
+    rescue StandardError => e
+      Rails.logger.warn(
+        "[BulkInviteUrlExtraction] chunk #{index + 1}/#{chunk_count} failed for #{url}: #{e.class}: #{e.message}",
+      )
+      { warning: "Part #{index + 1} of #{chunk_count} of the page could not be processed." }
+    end
+    private_class_method :extract_chunk_safely
 
     def self.extract_chunk(llm, chunk_text, rules)
       prompt =
