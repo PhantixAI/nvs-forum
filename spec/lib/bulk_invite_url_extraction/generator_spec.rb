@@ -227,23 +227,36 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
           expect(rows).to include({ email: "first@example.edu", name: "First", keywords: "" })
         end
 
-        it "merges rows across multiple chunks, recording a warning for a chunk whose extraction call fails rather than failing the whole run" do
+        it "merges rows across multiple chunks, extracted concurrently, recording a warning for a chunk whose extraction call fails rather than failing the whole run" do
           long_text = (1..400).map { |i| "Entry #{i}: #{"filler " * 5}" }.join("\n")
           allow(DiscourseAi::Rag::WebPageFetcher).to receive(:fetch).and_return(text: long_text)
           chunk_count =
             described_class.send(:chunk_by_line, long_text, described_class::CHUNK_CHAR_BUDGET).size
           expect(chunk_count).to be >= 2
 
-          first_chunk_response = {
-            rows: [{ email: "first@example.edu", name: "First", keywords: "" }],
-          }.to_json
-          responses =
-            [first_chunk_response] + Array.new(chunk_count - 1) { StandardError.new("boom") }
+          # Exercises genuine thread concurrency (see Generator::MAX_CONCURRENT_CHUNKS),
+          # so this can't reuse DiscourseAi::Completions::Llm.with_prepared_responses --
+          # CannedResponse tracks `completions` with a plain read-then-increment, which
+          # races under real concurrent callers. A Mutex-guarded counter here keeps the
+          # "exactly one chunk succeeds" setup deterministic under real threads.
+          schema_properties = described_class::ROW_SCHEMA[:json_schema][:schema][:properties]
+          mutex = Mutex.new
+          call_count = 0
+          llm = Object.new
+          llm.define_singleton_method(:generate) do |*_args, **_kwargs, &blk|
+            my_turn = mutex.synchronize { call_count += 1 }
+            raise "boom" if my_turn > 1
 
-          result = nil
-          DiscourseAi::Completions::Llm.with_prepared_responses(responses) do
-            result = described_class.extract(url: "https://example.com", rules: "rules")
+            structured = DiscourseAi::Completions::StructuredOutput.new(schema_properties)
+            structured << {
+              rows: [{ email: "first@example.edu", name: "First", keywords: "" }],
+            }.to_json
+            structured.finish
+            blk.call(structured)
           end
+          allow(described_class).to receive(:resolve_llm).and_return(llm)
+
+          result = described_class.extract(url: "https://example.com", rules: "rules")
 
           expect(result.rows).to eq([{ email: "first@example.edu", name: "First", keywords: "" }])
           expect(result.warnings.size).to eq(chunk_count - 1)
