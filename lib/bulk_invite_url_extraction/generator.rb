@@ -2,9 +2,11 @@
 
 module BulkInviteUrlExtraction
   # Fetches an admin-supplied URL and asks the site's configured AI language
-  # model to extract a list of {email, name} rows from it, following
-  # admin-provided free-text rules (e.g. "emails are printed directly" or
-  # "build the email by appending RollNo to @example.edu"). Used to seed the
+  # model to extract a list of {email, name, keywords} rows from it,
+  # following admin-provided free-text rules (e.g. "emails are printed
+  # directly", "build the email by appending RollNo to @example.edu", or
+  # "use Department, Program, Advisor as keywords" -- the rules can drive
+  # per-row keywords the same way they drive email/name). Used to seed the
   # admin-editable CSV review step ahead of draft-invite creation
   # (BulkInviteUrlExtraction::DraftCreator) -- this module never creates an
   # Invite or sends anything itself.
@@ -43,8 +45,11 @@ module BulkInviteUrlExtraction
                   name: {
                     type: "string",
                   },
+                  keywords: {
+                    type: "string",
+                  },
                 },
-                required: %w[email name],
+                required: %w[email name keywords],
                 additionalProperties: false,
               },
             },
@@ -199,17 +204,17 @@ module BulkInviteUrlExtraction
         email = row[:email].to_s.strip
         next if email.blank?
 
-        { email: email, name: row[:name].to_s.strip }
+        { email: email, name: row[:name].to_s.strip, keywords: row[:keywords].to_s.strip }
       end
     end
     private_class_method :extract_chunk
 
     def self.system_message(rules)
       <<~TEXT
-        You extract a list of people's email addresses (and names, where
-        shown) from a webpage's text content. The user message contains one
-        section of that page -- it may be a partial table or list, cut off
-        at either end; extract whatever complete rows it contains.
+        You extract a list of people from a webpage's text content, as rows
+        of {email, name, keywords}. The user message contains one section of
+        that page -- it may be a partial table or list, cut off at either
+        end; extract whatever complete rows it contains.
 
         Follow these admin-provided extraction rules exactly:
 
@@ -217,8 +222,17 @@ module BulkInviteUrlExtraction
 
         Only include a row if you can determine, or construct per the rules
         above, a real email address. Never invent an email address the rules
-        don't support constructing. If this section contains no matching
-        people, return an empty rows array.
+        don't support constructing.
+
+        The rules may also say what to use as each row's "keywords" value --
+        e.g. "use Department, Program, Advisor as keywords" means you should
+        read that specific person's actual Department/Program/Advisor off
+        the page and put those values in `keywords` for their row, not
+        repeat the rule text itself. If the rules don't say anything about
+        keywords, leave `keywords` blank for every row.
+
+        If this section contains no matching people, return an empty rows
+        array.
       TEXT
     end
     private_class_method :system_message
