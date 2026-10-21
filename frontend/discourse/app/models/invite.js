@@ -141,6 +141,17 @@ export default class Invite extends EmberObject {
     });
   }
 
+  // Permanently deletes a batch of draft invites -- see
+  // InvitesController#destroy_drafts. Unlike #destroy (which soft-trashes a
+  // real invite), this hard-deletes since a draft has no send/redemption
+  // history worth keeping.
+  static destroyDrafts(inviteIds) {
+    return ajax("/invites/destroy-drafts", {
+      type: "POST",
+      data: { invite_ids: inviteIds },
+    });
+  }
+
   @computed("topics.firstObject.id")
   get topicId() {
     return this.topics?.firstObject?.id;

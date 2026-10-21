@@ -1229,6 +1229,12 @@ RSpec.describe InvitesController do
         expect(Jobs::InviteEmail.jobs.size).to eq(0)
       end
 
+      it "updates recipient_keywords" do
+        put "/invites/#{invite.id}", params: { recipient_keywords: "Physics, Ph.D" }
+        expect(response.status).to eq(200)
+        expect(invite.reload.recipient_keywords).to eq("Physics, Ph.D")
+      end
+
       it "cannot create duplicated invites" do
         Fabricate(:invite, invited_by: admin, email: "test2@example.com")
 
@@ -1411,6 +1417,20 @@ RSpec.describe InvitesController do
         delete "/invites.json", params: { id: invite.id }
         expect(response.status).to eq(200)
         expect(invite.reload.trashed?).to be_truthy
+      end
+
+      it "hard-deletes a draft invite instead of trashing it" do
+        draft =
+          Invite.generate(
+            user,
+            email: "draftee@example.com",
+            emailed_status: Invite.emailed_status_types[:draft],
+          )
+
+        delete "/invites.json", params: { id: draft.id }
+
+        expect(response.status).to eq(200)
+        expect(Invite.with_deleted.exists?(id: draft.id)).to eq(false)
       end
     end
   end
@@ -3555,6 +3575,67 @@ RSpec.describe InvitesController do
         RateLimiter.enable
 
         11.times { post "/invites/send-drafts.json", params: { invite_ids: [draft.id] } }
+
+        expect(response.status).to eq(429)
+      end
+    end
+  end
+
+  describe "#destroy_drafts" do
+    it "requires to be logged in" do
+      post "/invites/destroy-drafts.json", params: { invite_ids: [1] }
+      expect(response.status).to eq(403)
+    end
+
+    context "while logged in" do
+      fab!(:user)
+      fab!(:draft) do
+        Invite.generate(
+          user,
+          email: "draftee@example.com",
+          emailed_status: Invite.emailed_status_types[:draft],
+        )
+      end
+
+      before { sign_in(user) }
+
+      it "permanently deletes the selected drafts" do
+        post "/invites/destroy-drafts.json", params: { invite_ids: [draft.id] }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["destroyed_count"]).to eq(1)
+        expect(Invite.with_deleted.exists?(id: draft.id)).to eq(false)
+      end
+
+      it "only deletes invites that belong to the current user" do
+        other_draft =
+          Invite.generate(
+            admin,
+            email: "otherdraftee@example.com",
+            emailed_status: Invite.emailed_status_types[:draft],
+          )
+
+        post "/invites/destroy-drafts.json", params: { invite_ids: [draft.id, other_draft.id] }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["destroyed_count"]).to eq(1)
+        expect(Invite.with_deleted.exists?(id: other_draft.id)).to eq(true)
+      end
+
+      it "never deletes a non-draft invite, even if selected" do
+        sent_invite = Fabricate(:invite, invited_by: user)
+
+        post "/invites/destroy-drafts.json", params: { invite_ids: [sent_invite.id] }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["destroyed_count"]).to eq(0)
+        expect(Invite.exists?(id: sent_invite.id)).to eq(true)
+      end
+
+      it "is rate-limited per request, not per invite" do
+        RateLimiter.enable
+
+        11.times { post "/invites/destroy-drafts.json", params: { invite_ids: [draft.id] } }
 
         expect(response.status).to eq(429)
       end
