@@ -23,11 +23,6 @@ export default <template>
           @route="userInvited.show"
           @routeParam="redeemed"
         />
-        <DNavItem
-          @i18nLabel={{@controller.draftLabel}}
-          @route="userInvited.show"
-          @routeParam="draft"
-        />
       </DHorizontalOverflowNav>
     </div>
   {{/if}}

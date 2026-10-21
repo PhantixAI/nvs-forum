@@ -8,7 +8,7 @@ import bodyClass from "discourse/helpers/body-class";
 import inviteDeliveryStatus from "discourse/helpers/invite-delivery-status";
 import { groupPath } from "discourse/lib/url";
 import ComboBox from "discourse/select-kit/components/combo-box";
-import { eq, not } from "discourse/truth-helpers";
+import { and, eq, not } from "discourse/truth-helpers";
 import DButton from "discourse/ui-kit/d-button";
 import DComboButton from "discourse/ui-kit/d-combo-button";
 import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
@@ -107,7 +107,9 @@ export default <template>
               />
             {{/if}}
 
-            {{#if @controller.invitePending}}
+            {{#if
+              (and @controller.invitePending (not @controller.inviteDraft))
+            }}
               {{#if @controller.reinvitedAll}}
                 <span class="reinvited-all">
                   <DButton
@@ -257,98 +259,20 @@ export default <template>
                 {{/each}}
               </tbody>
             </table>
-          {{else if @controller.inviteDraft}}
-            <table class="d-table user-invite-list">
-              <thead class="d-table__header">
-                <tr class="d-table__row">
-                  <th class="d-table__header-cell">
-                    <input
-                      checked={{@controller.allDraftsSelected}}
-                      title={{i18n "user.invited.select_all"}}
-                      type="checkbox"
-                      {{on "click" @controller.toggleSelectAllDrafts}}
-                    />
-                  </th>
-                  <th class="d-table__header-cell">{{i18n
-                      "user.invited.invited_via"
-                    }}</th>
-                  <th class="d-table__header-cell">{{i18n
-                      "user.invited.keywords"
-                    }}</th>
-                  <th class="d-table__header-cell">{{i18n
-                      "user.invited.sent"
-                    }}</th>
-                </tr>
-              </thead>
-              <tbody class="d-table__body">
-                {{#each @controller.model.invites as |invite|}}
-                  <tr class="d-table__row">
-                    <td class="d-table__cell --overview">
-                      <input
-                        checked={{@controller.isDraftSelected invite}}
-                        type="checkbox"
-                        {{on
-                          "click"
-                          (fn @controller.toggleDraftSelected invite)
-                        }}
-                      />
-                    </td>
-                    <td class="d-table__cell --overview invite-type">
-                      <div class="invite-shortkey">
-                        {{#if invite.email}}
-                          {{dIcon "envelope"}}
-                          {{invite.email}}
-                        {{else}}
-                          {{dIcon "link"}}
-                          {{invite.description}}
-                        {{/if}}
-                      </div>
-                      <div class="invite-details">
-                        <div class="invite-groups">
-                          {{#each invite.groups as |g|}}
-                            <span class="invite-extra">
-                              <a
-                                class="invite-extra-item-link"
-                                href={{groupPath g.name}}
-                              >{{dIcon "users"}}
-                                {{g.name}}
-                              </a>
-                            </span>
-                          {{/each}}
-                        </div>
-                        {{#if invite.topic}}
-                          <span class="invite-extra invite-topic">
-                            <a
-                              class="invite-extra-item-link"
-                              href={{invite.topic.url}}
-                            >
-                              {{dIcon "file-lines"}}
-                              {{invite.topic.title}}
-                            </a>
-                          </span>
-                        {{/if}}
-                      </div>
-                    </td>
-                    <td class="d-table__cell --detail">
-                      <div class="d-table__mobile-label">
-                        {{i18n "user.invited.keywords"}}
-                      </div>
-                      {{invite.recipient_keywords}}
-                    </td>
-                    <td class="d-table__cell --detail">
-                      <div class="d-table__mobile-label">
-                        {{i18n "user.invited.sent"}}
-                      </div>
-                      {{dFormatDate invite.created_at}}
-                    </td>
-                  </tr>
-                {{/each}}
-              </tbody>
-            </table>
           {{else}}
             <table class="d-table user-invite-list">
               <thead class="d-table__header">
                 <tr class="d-table__row">
+                  {{#if @controller.inviteDraft}}
+                    <th class="d-table__header-cell">
+                      <input
+                        checked={{@controller.allDraftsSelected}}
+                        title={{i18n "user.invited.select_all"}}
+                        type="checkbox"
+                        {{on "click" @controller.toggleSelectAllDrafts}}
+                      />
+                    </th>
+                  {{/if}}
                   <th class="d-table__header-cell">{{i18n
                       "user.invited.invited_via"
                     }}</th>
@@ -367,6 +291,18 @@ export default <template>
               <tbody class="d-table__body">
                 {{#each @controller.model.invites as |invite|}}
                   <tr class="d-table__row">
+                    {{#if @controller.inviteDraft}}
+                      <td class="d-table__cell --overview">
+                        <input
+                          checked={{@controller.isDraftSelected invite}}
+                          type="checkbox"
+                          {{on
+                            "click"
+                            (fn @controller.toggleDraftSelected invite)
+                          }}
+                        />
+                      </td>
+                    {{/if}}
                     <td class="d-table__cell --overview invite-type">
                       <div class="invite-shortkey">
                         {{#if invite.link}}

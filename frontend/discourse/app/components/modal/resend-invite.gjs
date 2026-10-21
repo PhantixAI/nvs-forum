@@ -1,9 +1,8 @@
 import Component from "@glimmer/component";
-import { tracked } from "@glimmer/tracking";
-import { Textarea } from "@ember/component";
+import { hash } from "@ember/helper";
 import { action } from "@ember/object";
+import Form from "discourse/components/form";
 import { popupAjaxError } from "discourse/lib/ajax-error";
-import ComboBox from "discourse/select-kit/components/combo-box";
 import { or } from "discourse/truth-helpers";
 import DButton from "discourse/ui-kit/d-button";
 import DModal from "discourse/ui-kit/d-modal";
@@ -12,17 +11,15 @@ import { i18n } from "discourse-i18n";
 // Shared by the per-invite "Resend" kebab item, the bulk "Resend Invites"
 // button, and the Draft tab's "Send Selected" action (see
 // user-invited/show.js) -- @model.onResend is the only thing that differs
-// between call sites. @model.drafts additionally surfaces allowAnyEmail/
-// skipPersonalization, which only matter the first time a draft is sent
-// (an ordinary resend's bound-vs-unbound shape and personalization default
-// were already decided when the invite was created).
+// between call sites. @model.drafts additionally surfaces allowAnyEmail,
+// which only matters the first time a draft is sent (an ordinary resend's
+// bound-vs-unbound shape was already decided when the invite was created).
+// scheduleSend is submitted on every resend regardless of @model.bulk/
+// @model.drafts (matching resend_all_invites' own default) -- only its
+// field is hidden for a plain single resend, where changing it rarely
+// makes sense.
 export default class ResendInviteModal extends Component {
-  @tracked aiPersonalization = "true";
-  @tracked scheduleSend = "true";
-  @tracked allowAnyEmail = "true";
-  @tracked skipPersonalization = "false";
-
-  keywords;
+  #formApi = null;
 
   get title() {
     return this.args.model.bulk || this.args.model.drafts
@@ -36,89 +33,22 @@ export default class ResendInviteModal extends Component {
       : "user.invited.resend_invite.modal.resend";
   }
 
-  get aiPersonalizationOptions() {
-    return [
-      {
-        id: "true",
-        name: i18n("user.invited.resend_invite.modal.ai_personalization_yes"),
-      },
-      {
-        id: "false",
-        name: i18n("user.invited.resend_invite.modal.ai_personalization_no"),
-      },
-    ];
-  }
-
-  get scheduleSendOptions() {
-    return [
-      {
-        id: "true",
-        name: i18n("user.invited.resend_invite.modal.schedule_send_yes"),
-      },
-      {
-        id: "false",
-        name: i18n("user.invited.resend_invite.modal.schedule_send_no"),
-      },
-    ];
-  }
-
-  get allowAnyEmailOptions() {
-    return [
-      {
-        id: "true",
-        name: i18n("user.invited.resend_invite.modal.allow_any_email_yes"),
-      },
-      {
-        id: "false",
-        name: i18n("user.invited.resend_invite.modal.allow_any_email_no"),
-      },
-    ];
-  }
-
-  get skipPersonalizationOptions() {
-    return [
-      {
-        id: "true",
-        name: i18n("user.invited.resend_invite.modal.skip_personalization_yes"),
-      },
-      {
-        id: "false",
-        name: i18n("user.invited.resend_invite.modal.skip_personalization_no"),
-      },
-    ];
+  @action
+  registerFormApi(api) {
+    this.#formApi = api;
   }
 
   @action
-  setAiPersonalization(value) {
-    this.aiPersonalization = value;
+  submit() {
+    this.#formApi.submit();
   }
 
   @action
-  setScheduleSend(value) {
-    this.scheduleSend = value;
-  }
-
-  @action
-  setAllowAnyEmail(value) {
-    this.allowAnyEmail = value;
-  }
-
-  @action
-  setSkipPersonalization(value) {
-    this.skipPersonalization = value;
-  }
-
-  @action
-  async resend() {
+  async resend({ keywords, aiPersonalization, scheduleSend, allowAnyEmail }) {
     try {
-      const payload = {
-        keywords: this.keywords,
-        aiPersonalization: this.aiPersonalization,
-        scheduleSend: this.scheduleSend,
-      };
+      const payload = { keywords, aiPersonalization, scheduleSend };
       if (this.args.model.drafts) {
-        payload.allowAnyEmail = this.allowAnyEmail;
-        payload.skipPersonalization = this.skipPersonalization;
+        payload.allowAnyEmail = allowAnyEmail;
       }
       await this.args.model.onResend(payload);
       this.args.closeModal();
@@ -138,86 +68,75 @@ export default class ResendInviteModal extends Component {
           <p>{{@model.confirmMessage}}</p>
         {{/if}}
 
-        <div class="control-group">
-          <label>{{i18n
-              "user.invited.resend_invite.modal.keywords_label"
-            }}</label>
-          <div class="controls">
-            <Textarea
+        <Form
+          @data={{hash
+            keywords=""
+            aiPersonalization=true
+            scheduleSend=true
+            allowAnyEmail=true
+          }}
+          @onRegisterApi={{this.registerFormApi}}
+          @onSubmit={{this.resend}}
+          as |form|
+        >
+          <form.Field
+            @format="full"
+            @name="keywords"
+            @title={{i18n "user.invited.resend_invite.modal.keywords_label"}}
+            @type="textarea"
+            as |field|
+          >
+            <field.Control
               maxlength="100000"
               placeholder={{i18n
                 "user.invited.resend_invite.modal.keywords_placeholder"
               }}
-              @value={{this.keywords}}
             />
-          </div>
-        </div>
+          </form.Field>
 
-        <div class="control-group">
-          <label>{{i18n
+          <form.Field
+            @name="aiPersonalization"
+            @title={{i18n
               "user.invited.resend_invite.modal.ai_personalization_label"
-            }}</label>
-          <div class="controls">
-            <ComboBox
-              class="resend-invite-ai-personalization"
-              @content={{this.aiPersonalizationOptions}}
-              @onChange={{this.setAiPersonalization}}
-              @value={{this.aiPersonalization}}
-            />
-          </div>
-        </div>
+            }}
+            @type="toggle"
+            as |field|
+          >
+            <field.Control />
+          </form.Field>
 
-        {{#if (or @model.bulk @model.drafts)}}
-          <div class="control-group">
-            <label>{{i18n
+          {{#if (or @model.bulk @model.drafts)}}
+            <form.Field
+              @name="scheduleSend"
+              @title={{i18n
                 "user.invited.resend_invite.modal.schedule_send_label"
-              }}</label>
-            <div class="controls">
-              <ComboBox
-                class="resend-invite-schedule-send"
-                @content={{this.scheduleSendOptions}}
-                @onChange={{this.setScheduleSend}}
-                @value={{this.scheduleSend}}
-              />
-            </div>
-          </div>
-        {{/if}}
+              }}
+              @type="toggle"
+              as |field|
+            >
+              <field.Control />
+            </form.Field>
+          {{/if}}
 
-        {{#if @model.drafts}}
-          <div class="control-group">
-            <label>{{i18n
+          {{#if @model.drafts}}
+            <form.Field
+              @name="allowAnyEmail"
+              @title={{i18n
                 "user.invited.resend_invite.modal.allow_any_email_label"
-              }}</label>
-            <div class="controls">
-              <ComboBox
-                class="resend-invite-allow-any-email"
-                @content={{this.allowAnyEmailOptions}}
-                @onChange={{this.setAllowAnyEmail}}
-                @value={{this.allowAnyEmail}}
-              />
-            </div>
-          </div>
-
-          <div class="control-group">
-            <label>{{i18n
-                "user.invited.resend_invite.modal.skip_personalization_label"
-              }}</label>
-            <div class="controls">
-              <ComboBox
-                class="resend-invite-skip-personalization"
-                @content={{this.skipPersonalizationOptions}}
-                @onChange={{this.setSkipPersonalization}}
-                @value={{this.skipPersonalization}}
-              />
-            </div>
-          </div>
-        {{/if}}
+              }}
+              @type="toggle"
+              as |field|
+            >
+              <field.Control />
+            </form.Field>
+          {{/if}}
+        </Form>
       </:body>
 
       <:footer>
         <DButton
           class="btn-primary resend-invite-confirm"
-          @action={{this.resend}}
+          @action={{this.submit}}
           @icon="paper-plane"
           @label={{this.confirmLabel}}
         />

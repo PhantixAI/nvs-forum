@@ -103,6 +103,7 @@ export default class CreateInviteBulk extends Component {
                   as |form|
                 >
                   <form.Field
+                    @format="full"
                     @name="url"
                     @title={{i18n
                       "user.invited.bulk_invite.url_extraction.url_label"
@@ -115,6 +116,7 @@ export default class CreateInviteBulk extends Component {
                   </form.Field>
 
                   <form.Field
+                    @format="full"
                     @name="rules"
                     @title={{i18n
                       "user.invited.bulk_invite.url_extraction.rules_label"
