@@ -105,6 +105,13 @@ export default <template>
                 @icon="paper-plane"
                 @label="user.invited.send_selected"
               />
+              <DButton
+                class="btn-danger delete-selected-drafts"
+                @action={{@controller.deleteSelectedDrafts}}
+                @disabled={{not @controller.selectedDraftIds.size}}
+                @icon="trash-can"
+                @label="user.invited.delete_selected"
+              />
             {{/if}}
 
             {{#if

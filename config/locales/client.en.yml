@@ -2658,6 +2658,11 @@ en:
           one: "Send %{count} selected draft invite?"
           other: "Send %{count} selected draft invites?"
         sent_selected: "Selected draft invites have been sent."
+        delete_selected: "Delete Selected"
+        delete_selected_confirm:
+          one: "Permanently delete %{count} selected draft invite? This cannot be undone."
+          other: "Permanently delete %{count} selected draft invites? This cannot be undone."
+        deleted_selected: "Selected draft invites have been deleted."
         search: "type to search invites…"
         all_domains: "All domains"
         all_statuses: "All statuses"

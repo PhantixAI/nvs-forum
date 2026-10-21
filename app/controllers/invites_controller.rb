@@ -46,6 +46,7 @@ class InvitesController < ApplicationController
                    last_url_extraction_rules
                    create_drafts
                    send_drafts
+                   destroy_drafts
                  ]
 
   skip_before_action :check_xhr, except: [:perform_accept_invitation]
@@ -368,6 +369,7 @@ class InvitesController < ApplicationController
             :custom_message,
             :max_redemptions_allowed,
             :expires_at,
+            :recipient_keywords,
           ),
         )
       rescue ActiveRecord::RecordInvalid => e
@@ -398,7 +400,13 @@ class InvitesController < ApplicationController
 
     guardian.ensure_can_destroy_invite!(invite)
 
-    invite.trash!(current_user)
+    # A draft was never sent and has no redemption/audit history worth
+    # keeping, so remove it outright instead of trashing it.
+    if invite.emailed_status == Invite.emailed_status_types[:draft]
+      invite.destroy
+    else
+      invite.trash!(current_user)
+    end
 
     render json: success_json
   end
@@ -949,6 +957,41 @@ class InvitesController < ApplicationController
     end
 
     render json: success_json.merge(sent_count: sent_count, errors: errors)
+  end
+
+  # Permanently deletes a batch of draft invites the admin selected on the
+  # Invited page. Hard-deleted (not Trashable#trash!, unlike #destroy for a
+  # real invite) -- a draft was never sent and has no redemption/audit
+  # history worth keeping, so there's nothing a soft delete would preserve.
+  # Rate-limited once per request, same reasoning as #send_drafts.
+  def destroy_drafts
+    RateLimiter.new(
+      current_user,
+      "destroy-draft-invites-per-hour",
+      10,
+      1.hour,
+      apply_limit_to_staff: true,
+    ).performed!
+
+    invite_ids = Array(params[:invite_ids]).map(&:to_i)
+    invites =
+      Invite.where(
+        invited_by_id: current_user.id,
+        id: invite_ids,
+        emailed_status: Invite.emailed_status_types[:draft],
+      )
+
+    destroyed_count = 0
+    errors = []
+
+    invites.find_each do |invite|
+      invite.destroy
+      destroyed_count += 1
+    rescue StandardError => e
+      errors << "#{invite.id}: #{e.message}"
+    end
+
+    render json: success_json.merge(destroyed_count: destroyed_count, errors: errors)
   end
 
   private

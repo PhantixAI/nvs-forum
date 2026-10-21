@@ -326,6 +326,31 @@ export default class UserInvitedShowController extends Controller {
   }
 
   @action
+  deleteSelectedDrafts() {
+    const inviteIds = [...this.selectedDraftIds];
+    if (inviteIds.length === 0) {
+      return;
+    }
+
+    this.dialog.deleteConfirm({
+      message: i18n("user.invited.delete_selected_confirm", {
+        count: inviteIds.length,
+      }),
+      didConfirm: () => {
+        return Invite.destroyDrafts(inviteIds)
+          .then(() => {
+            this.selectedDraftIds = new Set();
+            this.toasts.success({
+              data: { message: i18n("user.invited.deleted_selected") },
+            });
+            this.send("triggerRefresh");
+          })
+          .catch(popupAjaxError);
+      },
+    });
+  }
+
+  @action
   reinviteAll() {
     const domain = this.selectedDomain;
     const status = this.selectedStatus;
