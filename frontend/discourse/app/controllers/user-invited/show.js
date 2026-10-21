@@ -76,9 +76,12 @@ export default class UserInvitedShowController extends Controller {
     return this.filter === "pending";
   }
 
+  // No longer a separate tab -- "draft" is just another value of the
+  // Pending tab's own status filter (see statusOptions), reusing its table
+  // (and that table's Edit/kebab actions) instead of a dedicated one.
   @dependentKeyCompat
   get inviteDraft() {
-    return this.filter === "draft";
+    return this.filter === "pending" && this.selectedStatus === "draft";
   }
 
   @computed("user.id", "currentUser.id")
@@ -149,22 +152,27 @@ export default class UserInvitedShowController extends Controller {
     return this.currentUser?.staff && this.domainOptions.length > 0;
   }
 
-  @computed("model.available_statuses")
+  @computed("model.available_statuses", "filter")
   get statusOptions() {
-    return (this.model?.available_statuses || []).map((status) => ({
-      id: status,
-      name: i18n(`user.invited.delivery_status_${status}`),
-    }));
+    // "draft" is only a meaningful filter on the Pending tab -- Expired has
+    // no real draft state (see Invite.expired, which never returns one
+    // regardless of status), so offering it there would just be a filter
+    // option that always empties the list.
+    return (this.model?.available_statuses || [])
+      .filter((status) => status !== "draft" || this.filter === "pending")
+      .map((status) => ({
+        id: status,
+        name: i18n(`user.invited.delivery_status_${status}`),
+      }));
   }
 
   @computed("statusOptions", "currentUser.staff", "filter")
   get showStatusFilter() {
-    // Redeemed and Draft invites don't show a delivery status, so there's
-    // nothing to filter by on those tabs.
+    // Redeemed invites don't show a delivery status, so there's nothing to
+    // filter by on that tab.
     return (
       this.currentUser?.staff &&
       this.filter !== "redeemed" &&
-      this.filter !== "draft" &&
       this.statusOptions.length > 0
     );
   }
@@ -300,14 +308,12 @@ export default class UserInvitedShowController extends Controller {
           aiPersonalization,
           scheduleSend,
           allowAnyEmail,
-          skipPersonalization,
         }) => {
           await Invite.sendDrafts(inviteIds, {
             keywords,
             aiPersonalization,
             scheduleSend,
             allowAnyEmail,
-            skipPersonalization,
           });
           this.selectedDraftIds = new Set();
           this.toasts.success({
@@ -374,6 +380,10 @@ export default class UserInvitedShowController extends Controller {
   statusChanged(status) {
     this.selectedStatus = status;
     this.set("reinvitedAll", false);
+    // Leaving the "draft" status behind a stale checked selection would
+    // otherwise resurface (against a now-different row set) if the admin
+    // flips back to it later.
+    this.selectedDraftIds = new Set();
     this._refetch();
   }
 

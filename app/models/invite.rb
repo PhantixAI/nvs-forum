@@ -25,10 +25,11 @@ class Invite < ActiveRecord::Base
   # view, not just a literal "ac.in" address.
   AC_IN_UMBRELLA_DOMAIN = "ac.in"
   # Every value Invite#delivery_status can return, in pipeline order -- except
-  # "draft" (and nil, for not_required), which aren't filterable statuses: a
-  # draft invite lives in its own tab, never the Pending/Expired tabs this
-  # filter dropdown applies to.
-  DELIVERY_STATUSES = %w[scheduled pending skipped sent delivered bounced complained].freeze
+  # nil (for not_required), which isn't a filterable status. "draft" only
+  # ever matches on the Pending tab (see .pending/.with_delivery_status) --
+  # Expired has no meaningful "draft" state, so the frontend hides that
+  # option there; selecting it anyway just returns no rows.
+  DELIVERY_STATUSES = %w[scheduled pending skipped sent delivered bounced complained draft].freeze
   DESCRIPTION_MAX_LENGTH = 100
   RECIPIENT_NAME_MAX_LENGTH = 100
   RECIPIENT_KEYWORDS_MAX_LENGTH = 100_000
@@ -353,6 +354,14 @@ class Invite < ActiveRecord::Base
     User.with_email(Email.downcase(email)).where(staged: false).first
   end
 
+  # A draft only ever shows up here when explicitly filtered to the "draft"
+  # status -- with no status filter, drafts stay excluded (same as before
+  # drafts existed), so the ordinary Pending view isn't cluttered with
+  # invites nobody has reviewed/sent yet.
+  # :id tiebreaker on the order -- a bulk draft-creation request can insert
+  # hundreds of rows sharing the same updated_at, and OFFSET/LIMIT over a
+  # non-unique ORDER BY isn't guaranteed stable across requests, so the
+  # status=draft view's infinite scroll could skip or repeat rows without it.
   def self.pending(inviter, domain: nil, status: nil)
     invites =
       Invite
@@ -362,10 +371,14 @@ class Invite < ActiveRecord::Base
         .where(invited_by_id: inviter.id)
         .where("redemption_count < max_redemptions_allowed")
         .where("expires_at > ?", Time.zone.now)
-        .where("emailed_status IS NULL OR emailed_status != ?", emailed_status_types[:draft])
-        .order("invites.updated_at DESC")
+        .order("invites.updated_at DESC, invites.id DESC")
     invites = invites.where(*domain_filter_condition(domain)) if domain.present?
-    invites = with_delivery_status(invites, status) if status.present?
+    if status.present?
+      invites = with_delivery_status(invites, status)
+    else
+      invites =
+        invites.where("emailed_status IS NULL OR emailed_status != ?", emailed_status_types[:draft])
+    end
     invites
   end
 
@@ -382,19 +395,6 @@ class Invite < ActiveRecord::Base
         .order("invites.expires_at ASC")
     invites = invites.where(*domain_filter_condition(domain)) if domain.present?
     invites = with_delivery_status(invites, status) if status.present?
-    invites
-  end
-
-  # Invites created by BulkInviteUrlExtraction::DraftCreator, held for admin
-  # review before an explicit send -- never auto-enqueued, so no delivery
-  # status/domain-join complexity is needed here unlike pending/expired.
-  def self.draft(inviter, domain: nil)
-    invites =
-      Invite
-        .includes(:topics, :groups)
-        .where(invited_by_id: inviter.id, emailed_status: emailed_status_types[:draft])
-        .order(created_at: :desc)
-    invites = invites.where(*domain_filter_condition(domain)) if domain.present?
     invites
   end
 
@@ -554,6 +554,8 @@ class Invite < ActiveRecord::Base
       relation.where(emailed_status: types[:sending])
     when "skipped"
       relation.where(emailed_status: types[:skipped])
+    when "draft"
+      relation.where(emailed_status: types[:draft])
     when "sent", "delivered", "bounced", "complained"
       outcome =
         case status.to_s

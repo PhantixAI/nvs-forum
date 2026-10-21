@@ -1198,17 +1198,19 @@ RSpec.describe Invite do
       expect(Invite.with_delivery_status(Invite.all, "nope")).to be_empty
     end
 
-    it "never matches a draft invite against any delivery status, even though #delivery_status returns a value for it" do
+    it "matches a draft invite only against the \"draft\" status, never any other, even though #delivery_status returns a value for it" do
       draft = invite_with(:draft)
       expect(draft.delivery_status).to eq("draft")
 
-      Invite::DELIVERY_STATUSES.each do |status|
+      expect(Invite.with_delivery_status(Invite.all, "draft")).to include(draft)
+
+      (Invite::DELIVERY_STATUSES - ["draft"]).each do |status|
         expect(Invite.with_delivery_status(Invite.all, status)).not_to include(draft)
       end
     end
   end
 
-  describe ".pending/.expired/.draft" do
+  describe ".pending/.expired" do
     fab!(:inviter, :user)
     fab!(:pending_invite) { Fabricate(:invite, invited_by: inviter, expires_at: 1.day.from_now) }
     fab!(:expired_invite) { Fabricate(:invite, invited_by: inviter, expires_at: 1.day.ago) }
@@ -1221,17 +1223,17 @@ RSpec.describe Invite do
       )
     end
 
-    it "excludes drafts from .pending even though they aren't expired" do
+    it "excludes drafts from .pending by default, even though they aren't expired" do
       expect(Invite.pending(inviter)).to contain_exactly(pending_invite)
+    end
+
+    it "returns only drafts from .pending when explicitly filtered to the \"draft\" status" do
+      expect(Invite.pending(inviter, status: "draft")).to contain_exactly(draft_invite)
     end
 
     it "excludes drafts from .expired even if they happen to be past expiry" do
       draft_invite.update_columns(expires_at: 1.day.ago)
       expect(Invite.expired(inviter)).to contain_exactly(expired_invite)
-    end
-
-    it ".draft returns only draft invites for that inviter" do
-      expect(Invite.draft(inviter)).to contain_exactly(draft_invite)
     end
   end
 

@@ -2739,7 +2739,7 @@ RSpec.describe UsersController do
       expect(response.parsed_body["counts"]["total"]).to eq(1)
     end
 
-    it "lists draft invites separately from pending, with their own count" do
+    it "excludes drafts from the Pending tab by default, but lists them (and only them) when explicitly filtered to the \"draft\" status" do
       user = Fabricate(:user, trust_level: TrustLevel[2])
       Fabricate(:invite, invited_by: user)
       draft =
@@ -2751,11 +2751,18 @@ RSpec.describe UsersController do
         )
 
       sign_in(user)
-      get "/u/#{user.username}/invited.json", params: { filter: "draft" }
+      get "/u/#{user.username}/invited.json", params: { filter: "pending" }
 
       expect(response.status).to eq(200)
       expect(response.parsed_body["counts"]["pending"]).to eq(1)
-      expect(response.parsed_body["counts"]["draft"]).to eq(1)
+      invites = response.parsed_body["invites"]
+      expect(invites.size).to eq(1)
+      expect(invites.first).not_to include("email" => draft.email)
+
+      get "/u/#{user.username}/invited.json", params: { filter: "pending", status: "draft" }
+
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["counts"]["pending"]).to eq(1)
       invites = response.parsed_body["invites"]
       expect(invites.size).to eq(1)
       expect(invites.first).to include("email" => draft.email)

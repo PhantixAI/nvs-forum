@@ -187,13 +187,12 @@ acceptance("User invited - delivery status filter", function (needs) {
 
     await click(".user-invite-buttons .btn .d-icon-arrows-rotate");
 
-    const aiPersonalization = selectKit(".resend-invite-ai-personalization");
-    await aiPersonalization.expand();
-    await aiPersonalization.selectRowByValue("false");
-
-    const scheduleSend = selectKit(".resend-invite-schedule-send");
-    await scheduleSend.expand();
-    await scheduleSend.selectRowByValue("false");
+    await click(
+      '.resend-invite-modal [data-name="aiPersonalization"] .form-kit__control-toggle'
+    );
+    await click(
+      '.resend-invite-modal [data-name="scheduleSend"] .form-kit__control-toggle'
+    );
 
     await click(".resend-invite-modal .resend-invite-confirm");
 
@@ -207,12 +206,12 @@ acceptance("User invited - delivery status filter", function (needs) {
 
     await click(".user-invite-buttons .btn .d-icon-arrows-rotate");
 
-    const aiPersonalization = selectKit(".resend-invite-ai-personalization");
-    await aiPersonalization.expand();
-    await aiPersonalization.selectRowByValue("false");
+    await click(
+      '.resend-invite-modal [data-name="aiPersonalization"] .form-kit__control-toggle'
+    );
 
-    // scheduleSend already defaults to "true" -- left untouched here to also
-    // cover the default, rather than redundantly reselecting it.
+    // scheduleSend already defaults to true -- left untouched here to also
+    // cover the default, rather than redundantly re-toggling it.
     await click(".resend-invite-modal .resend-invite-confirm");
 
     assert.strictEqual(reinviteAllRequests.length, 1);

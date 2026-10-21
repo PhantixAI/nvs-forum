@@ -107,6 +107,63 @@ RSpec.describe BulkInviteUrlExtraction::DraftCreator do
       expect(invite.allow_any_email).to eq(true)
     end
 
+    it "skips a duplicate row within the same CSV (case-insensitively), keeping only the first" do
+      result =
+        described_class.create_drafts(
+          current_user: admin,
+          csv_text: csv(%w[dup@example.com,First,,,, DUP@example.com,Second,,,,]),
+          allow_any_email: false,
+          schedule_send: true,
+          skip_personalization: false,
+        )
+
+      expect(result.created_count).to eq(1)
+      expect(result.errors.join).to include("Duplicate row for 'DUP@example.com'")
+      expect(Invite.where(email: "dup@example.com").count).to eq(1)
+      expect(Invite.find_by(email: "dup@example.com").recipient_name).to eq("First")
+    end
+
+    it "skips creating a duplicate draft when a live bound invite already exists for the email" do
+      Invite.generate(admin, email: "existing@example.com")
+
+      result =
+        described_class.create_drafts(
+          current_user: admin,
+          csv_text: csv(["existing@example.com,,,,,"]),
+          allow_any_email: false,
+          schedule_send: true,
+          skip_personalization: false,
+        )
+
+      expect(result.created_count).to eq(0)
+      expect(result.errors.join).to include("'existing@example.com' already has an invite")
+      expect(Invite.where(email: "existing@example.com").count).to eq(1)
+    end
+
+    it "skips creating a duplicate draft when a live unbound (allow_any_email) invite already has this email in its description" do
+      described_class.create_drafts(
+        current_user: admin,
+        csv_text: csv(["repeat@example.com,,,,,"]),
+        allow_any_email: true,
+        schedule_send: true,
+        skip_personalization: false,
+      )
+      expect(Invite.where(description: "repeat@example.com").count).to eq(1)
+
+      result =
+        described_class.create_drafts(
+          current_user: admin,
+          csv_text: csv(["repeat@example.com,,,,,"]),
+          allow_any_email: true,
+          schedule_send: true,
+          skip_personalization: false,
+        )
+
+      expect(result.created_count).to eq(0)
+      expect(result.errors.join).to include("'repeat@example.com' already has an invite")
+      expect(Invite.where(description: "repeat@example.com").count).to eq(1)
+    end
+
     it "does not let a non-staff user without bulk invite permission create drafts for a restricted group" do
       user = Fabricate(:user)
       restricted_group = Fabricate(:group)

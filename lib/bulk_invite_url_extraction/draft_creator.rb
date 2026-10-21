@@ -29,6 +29,13 @@ module BulkInviteUrlExtraction
       guardian = Guardian.new(current_user)
       errors = []
       created = 0
+      # Tracks emails already handled by this same CSV, since a row-level
+      # duplicate (the same roster entry appearing twice, e.g. from a
+      # re-extraction merged into an already-edited textarea) would
+      # otherwise sail past the one-at-a-time existing-invite check below --
+      # each iteration only sees what's already in the database, not its own
+      # earlier iterations within the same call.
+      seen_emails = Set.new
 
       CSV
         .parse(csv_text.to_s, headers: true, skip_blanks: true)
@@ -38,6 +45,29 @@ module BulkInviteUrlExtraction
 
           if !EmailAddressValidator.valid_value?(email)
             errors << "Invalid email '#{email}'"
+            next
+          end
+
+          normalized_email = Email.downcase(email)
+          if !seen_emails.add?(normalized_email)
+            errors << "Duplicate row for '#{email}' -- skipped"
+            next
+          end
+
+          # allow_any_email leaves Invite.generate's own email: opt nil (see
+          # below), which also disables its built-in existing-invite lookup
+          # (keyed on the email column) -- Jobs::BulkInvite#send_invite has
+          # the exact same gap for the same reason. Check both columns
+          # ourselves so re-extracting/re-submitting the same roster updates
+          # the existing invite instead of creating another one for the same
+          # recipient. The default scope already excludes soft-deleted
+          # invites (see Trashable); only a still-live one blocks a new row.
+          if Invite
+               .where(invited_by_id: current_user.id)
+               .where("email = :email OR description = :email", email: normalized_email)
+               .where("expires_at > ?", Time.zone.now)
+               .exists?
+            errors << "'#{email}' already has an invite -- skipped"
             next
           end
 

@@ -8,7 +8,7 @@ class InvitedSerializer < ApplicationSerializer
       object.invite_list,
       each_serializer:
         (
-          if object.type == "pending" || object.type == "expired" || object.type == "draft"
+          if object.type == "pending" || object.type == "expired"
             InviteSerializer
           else
             InvitedUserSerializer
