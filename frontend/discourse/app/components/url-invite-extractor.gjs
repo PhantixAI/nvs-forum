@@ -26,15 +26,16 @@ function csvField(value) {
   return /["\n,]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-// Broadcasts `rules` (the admin's extraction-rules text) into every row's
-// keywords column, the same way the removed Context field used to -- see
-// the class comment above #extract.
-function buildCsv(rows, rules) {
+// Each row's keywords come from the LLM's own per-row extraction (see
+// BulkInviteUrlExtraction::Generator#system_message) -- driven by the
+// admin's rules (e.g. "use Department, Program, Advisor as keywords"), but
+// a per-person value, not the rules text itself repeated on every row.
+function buildCsv(rows) {
   const lines = [CSV_HEADER.join(",")];
 
   rows.forEach((row) => {
     lines.push(
-      [row.email, row.name, "", "", DEFAULT_LOCALE, rules]
+      [row.email, row.name, "", "", DEFAULT_LOCALE, row.keywords]
         .map(csvField)
         .join(",")
     );
@@ -123,7 +124,7 @@ export default class UrlInviteExtractor extends Component {
         type: "POST",
         data: { url, rules },
       });
-      this.csvText = buildCsv(result.rows, rules);
+      this.csvText = buildCsv(result.rows);
       this.warnings = result.warnings;
     } catch (err) {
       this.error = extractError(err);

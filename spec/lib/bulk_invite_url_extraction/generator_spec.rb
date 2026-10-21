@@ -162,8 +162,8 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
           )
           canned = {
             rows: [
-              { email: "priya@iitb.ac.in", name: "Priya" },
-              { email: "PRIYA@iitb.ac.in", name: "Priya" },
+              { email: "priya@iitb.ac.in", name: "Priya", keywords: "" },
+              { email: "PRIYA@iitb.ac.in", name: "Priya", keywords: "" },
             ],
           }.to_json
 
@@ -172,14 +172,37 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
             result = described_class.extract(url: "https://example.com", rules: "rules")
           end
 
-          expect(result.rows).to eq([{ email: "priya@iitb.ac.in", name: "Priya" }])
+          expect(result.rows).to eq([{ email: "priya@iitb.ac.in", name: "Priya", keywords: "" }])
           expect(result.warnings).to eq([])
+        end
+
+        it "returns each row's own extracted keywords, not the admin's rules text" do
+          allow(DiscourseAi::Rag::WebPageFetcher).to receive(:fetch).and_return(
+            text:
+              "| Name | Email | Dept |\n| --- | --- | --- |\n| Priya | priya@iitb.ac.in | Physics |\n",
+          )
+          canned = {
+            rows: [{ email: "priya@iitb.ac.in", name: "Priya", keywords: "Physics" }],
+          }.to_json
+
+          result = nil
+          DiscourseAi::Completions::Llm.with_prepared_responses([canned]) do
+            result =
+              described_class.extract(url: "https://example.com", rules: "use Dept as keywords")
+          end
+
+          expect(result.rows).to eq(
+            [{ email: "priya@iitb.ac.in", name: "Priya", keywords: "Physics" }],
+          )
         end
 
         it "drops a row with a blank email" do
           allow(DiscourseAi::Rag::WebPageFetcher).to receive(:fetch).and_return(text: "some text")
           canned = {
-            rows: [{ email: "", name: "No Email" }, { email: "ok@example.edu", name: "Ok" }],
+            rows: [
+              { email: "", name: "No Email", keywords: "" },
+              { email: "ok@example.edu", name: "Ok", keywords: "" },
+            ],
           }.to_json
 
           result = nil
@@ -187,13 +210,13 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
             result = described_class.extract(url: "https://example.com", rules: "rules")
           end
 
-          expect(result.rows).to eq([{ email: "ok@example.edu", name: "Ok" }])
+          expect(result.rows).to eq([{ email: "ok@example.edu", name: "Ok", keywords: "" }])
         end
 
         it "salvages complete rows from a chunk whose structured-output JSON got cut off mid-array (e.g. by max_tokens) instead of losing the whole chunk" do
           schema_properties = described_class::ROW_SCHEMA[:json_schema][:schema][:properties]
           truncated = DiscourseAi::Completions::StructuredOutput.new(schema_properties)
-          truncated << '{"rows":[{"email":"first@example.edu","name":"First"},{"email":"second@ex'
+          truncated << '{"rows":[{"email":"first@example.edu","name":"First","keywords":""},{"email":"second@ex'
           truncated.finish
 
           llm = Object.new
@@ -201,7 +224,7 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
 
           rows = described_class.send(:extract_chunk, llm, "chunk text", "rules")
 
-          expect(rows).to include({ email: "first@example.edu", name: "First" })
+          expect(rows).to include({ email: "first@example.edu", name: "First", keywords: "" })
         end
 
         it "merges rows across multiple chunks, recording a warning for a chunk whose extraction call fails rather than failing the whole run" do
@@ -211,7 +234,9 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
             described_class.send(:chunk_by_line, long_text, described_class::CHUNK_CHAR_BUDGET).size
           expect(chunk_count).to be >= 2
 
-          first_chunk_response = { rows: [{ email: "first@example.edu", name: "First" }] }.to_json
+          first_chunk_response = {
+            rows: [{ email: "first@example.edu", name: "First", keywords: "" }],
+          }.to_json
           responses =
             [first_chunk_response] + Array.new(chunk_count - 1) { StandardError.new("boom") }
 
@@ -220,7 +245,7 @@ RSpec.describe BulkInviteUrlExtraction::Generator do
             result = described_class.extract(url: "https://example.com", rules: "rules")
           end
 
-          expect(result.rows).to eq([{ email: "first@example.edu", name: "First" }])
+          expect(result.rows).to eq([{ email: "first@example.edu", name: "First", keywords: "" }])
           expect(result.warnings.size).to eq(chunk_count - 1)
         end
 
