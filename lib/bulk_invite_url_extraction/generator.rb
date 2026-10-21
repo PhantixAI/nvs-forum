@@ -26,8 +26,8 @@ module BulkInviteUrlExtraction
     # before the request can respond -- long enough on a dense page to trip
     # a reverse proxy's gateway timeout even though no single call is slow.
     # This caps how many of those calls run at once, since each holds its
-    # own ActiveRecord connection (for its AiApiAuditLog row) for the
-    # duration.
+    # own multisite db connection (for its AiApiAuditLog row and
+    # SiteSetting reads -- see #extract_chunk_safely) for the duration.
     MAX_CONCURRENT_CHUNKS = 4
 
     # A GitHub-flavored-markdown pipe-table separator row, e.g. "| --- | --- |"
@@ -87,6 +87,13 @@ module BulkInviteUrlExtraction
       text = fetch_page_text(url)
       chunks = chunk_by_line(text, CHUNK_CHAR_BUDGET)
 
+      # Captured on the request thread and re-applied inside each spawned
+      # thread below -- RailsMultisite::ConnectionManagement's db selection
+      # is per-thread state (see Scheduler::Deferrable#later for the same
+      # pattern), so a bare Thread.new here would silently run against the
+      # "default" site's database/settings instead of this request's site.
+      current_db = RailsMultisite::ConnectionManagement.current_db
+
       rows = []
       warnings = []
       chunks
@@ -94,7 +101,9 @@ module BulkInviteUrlExtraction
         .each_slice(MAX_CONCURRENT_CHUNKS) do |batch|
           threads =
             batch.map do |chunk, index|
-              Thread.new { extract_chunk_safely(llm, chunk, rules, index, chunks.size, url) }
+              Thread.new do
+                extract_chunk_safely(llm, chunk, rules, index, chunks.size, url, current_db)
+              end
             end
 
           threads.each do |thread|
@@ -177,15 +186,18 @@ module BulkInviteUrlExtraction
     end
     private_class_method :chunk_by_line
 
-    # Runs on its own thread (see #extract) with its own checked-out
-    # ActiveRecord connection -- extract_chunk's LLM call writes an
-    # AiApiAuditLog row, and a thread doesn't inherit the request thread's
-    # connection. Turns a failed call into the same per-chunk warning the
-    # old serial loop produced, instead of raising out of the thread and
-    # losing the whole batch.
-    def self.extract_chunk_safely(llm, chunk_text, rules, index, chunk_count, url)
+    # Runs on its own thread (see #extract), re-establishing the request's
+    # multisite db/connection there -- extract_chunk's LLM call writes an
+    # AiApiAuditLog row, and reads SiteSetting, neither of which a bare
+    # thread would otherwise resolve against the right site. Turns a
+    # failed call into the same per-chunk warning the old serial loop
+    # produced, instead of raising out of the thread and losing the whole
+    # batch.
+    def self.extract_chunk_safely(llm, chunk_text, rules, index, chunk_count, url, db)
       rows =
-        ActiveRecord::Base.connection_pool.with_connection { extract_chunk(llm, chunk_text, rules) }
+        RailsMultisite::ConnectionManagement.with_connection(db) do
+          extract_chunk(llm, chunk_text, rules)
+        end
       { rows: rows }
     rescue StandardError => e
       Rails.logger.warn(
