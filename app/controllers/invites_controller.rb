@@ -662,41 +662,7 @@ class InvitesController < ApplicationController
     personalize = params[:ai_personalization] != "false"
     schedule_send = params[:schedule_send] == "true"
 
-    if personalize && schedule_send
-      resend_all_invites_paced(invites_to_resend)
-    elsif personalize
-      # A filtered batch can be hundreds to low thousands of invites, so
-      # regenerating each one's AI text has to happen off-request -- unlike
-      # resend_invite above. Keywords are an optional extra here, not what
-      # decides whether this path is taken.
-      # reorder(nil): invites_to_resend inherits a DISTINCT + ORDER BY
-      # invites.updated_at from Invite.pending, and plucking just :id would
-      # otherwise violate Postgres's "ORDER BY expressions must appear in
-      # the SELECT DISTINCT list" rule.
-      Jobs.enqueue(
-        :resend_invites_with_keywords,
-        invite_ids: invites_to_resend.reorder(nil).pluck(:id),
-        extra_keywords: keywords,
-      )
-    elsif schedule_send
-      # Resend each invite exactly as it already is (leave
-      # custom_subject/custom_message untouched -- InviteMailer#send_invite's
-      # template selection reuses them as-is; an invite with nothing in
-      # those columns still falls through to the plain template unchanged),
-      # but still paced one-at-a-time rather than Jobs::ProcessBulkInviteEmails,
-      # which has no way to skip its own unconditional personalize call for
-      # this batch.
-      cumulative_delay = 0
-      invites_to_resend.find_each do |invite|
-        Jobs.enqueue_in(cumulative_delay.seconds, :resend_invites_paced, invite_id: invite.id)
-        cumulative_delay +=
-          rand(
-            SiteSetting.bulk_invite_email_delay_min_seconds..SiteSetting.bulk_invite_email_delay_max_seconds,
-          )
-      end
-    else
-      invites_to_resend.find_each { |invite| invite.resend_invite }
-    end
+    dispatch_bulk_resend(invites_to_resend, keywords:, personalize:, schedule_send:)
 
     render json: success_json
   end
@@ -923,12 +889,25 @@ class InvitesController < ApplicationController
   end
 
   # Sends (or first-sends, for a draft) a batch of invites the admin
-  # selected on the Invited page, reusing the exact same personalize +
-  # schedule-or-immediate-send logic as #resend_invite (see #perform_resend)
-  # -- not a separate send mechanism. Rate-limited once per request rather
-  # than per invite (unlike resend-invite-per-hour, which is sized for an
-  # occasional single resend, not a deliberate bulk action on dozens of
-  # freshly created drafts).
+  # selected on the Invited page. A selected batch can be in the hundreds
+  # (an admin "Send Selected"-ing an entire bulk-drafted CSV at once), and
+  # personalizing even one invite is a live LLM call (see
+  # BulkInvitePersonalization::Generator) -- doing that inline, synchronously,
+  # for a few hundred invites in one HTTP request overran the request
+  # timeout and 500'd. Reuses #resend_all_invites's own dispatch
+  # (#dispatch_bulk_resend) instead of a bespoke job -- same params, same
+  # four cells. In practice this always lands on a paced cell: the frontend
+  # modal hides the Schedule Send toggle for this flow and always submits
+  # schedule_send: true (see ResendInviteModal), so sending a batch of
+  # drafts isn't a user choice between burst and paced the way
+  # #resend_all_invites still is -- it's just not enforced a second time
+  # here, trusting what the UI sends. Overrides (allow_any_email/
+  # schedule_send/skip_personalization) persist inline first via a single
+  # bulk update_all -- cheap, no LLM involved -- same as #resend_invite's
+  # single-invite path (see #resend_overrides_from_params). Rate-limited
+  # once per request rather than per invite (unlike resend-invite-per-hour,
+  # which is sized for an occasional single resend, not a deliberate bulk
+  # action on dozens-to-hundreds of freshly created drafts).
   def send_drafts
     if !SiteSetting.allow_email_invites
       return render_json_error(I18n.t("invite.email_invites_disabled"))
@@ -946,17 +925,16 @@ class InvitesController < ApplicationController
     invites = Invite.where(invited_by_id: current_user.id, id: invite_ids)
 
     overrides = resend_overrides_from_params
-    errors = []
-    sent_count = 0
+    invites.update_all(overrides) if overrides.present?
 
-    invites.find_each do |invite|
-      perform_resend(invite, overrides)
-      sent_count += 1
-    rescue StandardError => e
-      errors << "#{invite.id}: #{e.message}"
-    end
+    dispatch_bulk_resend(
+      invites,
+      keywords: params[:keywords].presence,
+      personalize: params[:ai_personalization] != "false",
+      schedule_send: params[:schedule_send] == "true",
+    )
 
-    render json: success_json.merge(sent_count: sent_count, errors: errors)
+    render json: success_json
   end
 
   # Permanently deletes a batch of draft invites the admin selected on the
@@ -1079,13 +1057,62 @@ class InvitesController < ApplicationController
     !SiteSetting.allow_email_invites || params[:skip_email]
   end
 
+  # Shared bulk personalize/schedule_send dispatch for a backgrounded batch
+  # of invites -- used by both #resend_all_invites (a filtered resend of
+  # invites already sent at least once) and #send_drafts (the first send of
+  # a batch of drafts). Same four cells, same jobs either way; only the
+  # source `invites` relation and whatever request-specific setup happens
+  # before this call (rate-limit key, override persistence) differ between
+  # the two callers. `invites` must be an un-plucked relation -- this method
+  # decides itself whether to pluck, find_each, or hand it to
+  # resend_all_invites_paced.
+  def dispatch_bulk_resend(invites, keywords:, personalize:, schedule_send:)
+    if personalize && schedule_send
+      resend_all_invites_paced(invites)
+    elsif personalize
+      # A filtered batch can be hundreds to low thousands of invites, so
+      # regenerating each one's AI text has to happen off-request -- unlike
+      # resend_invite/perform_resend. Keywords are an optional extra here,
+      # not what decides whether this path is taken.
+      # reorder(nil): invites_to_resend (resend_all_invites's relation)
+      # inherits a DISTINCT + ORDER BY invites.updated_at from
+      # Invite.pending, and plucking just :id would otherwise violate
+      # Postgres's "ORDER BY expressions must appear in the SELECT DISTINCT
+      # list" rule.
+      Jobs.enqueue(
+        :resend_invites_with_keywords,
+        invite_ids: invites.reorder(nil).pluck(:id),
+        extra_keywords: keywords,
+      )
+    elsif schedule_send
+      # Resend/send each invite exactly as it already is (leave
+      # custom_subject/custom_message untouched -- InviteMailer#send_invite's
+      # template selection reuses them as-is; an invite with nothing in
+      # those columns still falls through to the plain template unchanged),
+      # but still paced one-at-a-time rather than Jobs::ProcessBulkInviteEmails,
+      # which has no way to skip its own unconditional personalize call for
+      # this batch.
+      cumulative_delay = 0
+      invites.find_each do |invite|
+        Jobs.enqueue_in(cumulative_delay.seconds, :resend_invites_paced, invite_id: invite.id)
+        cumulative_delay +=
+          rand(
+            SiteSetting.bulk_invite_email_delay_min_seconds..SiteSetting.bulk_invite_email_delay_max_seconds,
+          )
+      end
+    else
+      invites.find_each { |invite| invite.resend_invite }
+    end
+  end
+
   # Re-queues every matching invite through the same one-at-a-time, randomly
   # paced throttle a fresh bulk CSV upload uses (Jobs::ProcessBulkInviteEmails),
   # instead of firing an immediate, undelayed email for each one -- otherwise
-  # "resend all" is an easy way to trigger the exact burst-send pattern this
-  # feature exists to avoid, especially for an admin with a large invite list.
-  # Invites still mid-throttle (bulk_pending/sending) are left untouched
-  # rather than requeued, so this can't double-send or reorder them.
+  # a bulk resend or a bulk first-send of drafts is an easy way to trigger
+  # the exact burst-send pattern this feature exists to avoid, especially
+  # for an admin with a large invite list. Invites still mid-throttle
+  # (bulk_pending/sending) are left untouched rather than requeued, so this
+  # can't double-send or reorder them.
   def resend_all_invites_paced(invites)
     in_flight_statuses = [
       Invite.emailed_status_types[:bulk_pending],
