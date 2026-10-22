@@ -50,7 +50,7 @@ class InviteSerializer < ApplicationSerializer
   end
 
   def emailed
-    ![Invite.emailed_status_types[:not_required], Invite.emailed_status_types[:draft]].include?(
+    ![Invite.emailed_status_types[:not_required], Invite.emailed_status_types[:review]].include?(
       object.emailed_status,
     )
   end

@@ -97,7 +97,7 @@ export default <template>
               />
             {{/if}}
 
-            {{#if @controller.inviteDraft}}
+            {{#if @controller.inviteReview}}
               <DComboButton
                 class="send-delete-selected-combo"
                 @btnTypeClass="btn-default"
@@ -131,7 +131,7 @@ export default <template>
             {{/if}}
 
             {{#if
-              (and @controller.invitePending (not @controller.inviteDraft))
+              (and @controller.invitePending (not @controller.inviteReview))
             }}
               {{#if @controller.reinvitedAll}}
                 <span class="reinvited-all">
@@ -286,7 +286,7 @@ export default <template>
             <table class="d-table user-invite-list">
               <thead class="d-table__header">
                 <tr class="d-table__row">
-                  {{#if @controller.inviteDraft}}
+                  {{#if @controller.inviteReview}}
                     <th class="d-table__header-cell">
                       <input
                         checked={{@controller.allDraftsSelected}}
@@ -314,7 +314,7 @@ export default <template>
               <tbody class="d-table__body">
                 {{#each @controller.model.invites as |invite|}}
                   <tr class="d-table__row">
-                    {{#if @controller.inviteDraft}}
+                    {{#if @controller.inviteReview}}
                       <td class="d-table__cell --overview">
                         <input
                           checked={{@controller.isDraftSelected invite}}

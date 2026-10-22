@@ -4348,6 +4348,25 @@ uncategorized:
     depends_behavior: "hidden"
     dependent_setting_display: "inline"
 
+  # How many invites Jobs::GenerateInvitePersonalization personalizes
+  # concurrently in one batch -- each concurrent call holds its own
+  # multisite db connection (for its AiApiAuditLog row and SiteSetting
+  # reads) for the duration of one LLM call, so this bounds how many of
+  # those a single job run holds open at once. Mirrors
+  # BulkInviteUrlExtraction::Generator::MAX_CONCURRENT_CHUNKS's own
+  # reasoning -- same underlying LLM-provider-rate-limit tradeoff.
+  bulk_invite_personalization_max_concurrency:
+    default: 4
+    type: integer
+    min: 1
+    max: 20
+    client: false
+    area: "users"
+    depends_on:
+      - bulk_invite_ai_personalization_enabled
+    depends_behavior: "hidden"
+    dependent_setting_display: "inline"
+
   bulk_invite_url_extraction_enabled:
     default: false
     client: true

@@ -9,7 +9,7 @@ const STATUSES = [
   "delivered",
   "bounced",
   "complained",
-  "draft",
+  "review",
 ];
 
 /**

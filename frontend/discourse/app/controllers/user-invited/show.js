@@ -76,12 +76,14 @@ export default class UserInvitedShowController extends Controller {
     return this.filter === "pending";
   }
 
-  // No longer a separate tab -- "draft" is just another value of the
+  // No longer a separate tab -- "review" is just another value of the
   // Pending tab's own status filter (see statusOptions), reusing its table
-  // (and that table's Edit/kebab actions) instead of a dedicated one.
+  // (and that table's Edit/kebab actions) instead of a dedicated one. Named
+  // "review" rather than "draft" to stay distinct from the :drafting
+  // emailed_status (the system is drafting; the admin reviews).
   @dependentKeyCompat
-  get inviteDraft() {
-    return this.filter === "pending" && this.selectedStatus === "draft";
+  get inviteReview() {
+    return this.filter === "pending" && this.selectedStatus === "review";
   }
 
   @computed("user.id", "currentUser.id")
@@ -154,12 +156,12 @@ export default class UserInvitedShowController extends Controller {
 
   @computed("model.available_statuses", "filter")
   get statusOptions() {
-    // "draft" is only a meaningful filter on the Pending tab -- Expired has
-    // no real draft state (see Invite.expired, which never returns one
+    // "review" is only a meaningful filter on the Pending tab -- Expired has
+    // no real review state (see Invite.expired, which never returns one
     // regardless of status), so offering it there would just be a filter
     // option that always empties the list.
     return (this.model?.available_statuses || [])
-      .filter((status) => status !== "draft" || this.filter === "pending")
+      .filter((status) => status !== "review" || this.filter === "pending")
       .map((status) => ({
         id: status,
         name: i18n(`user.invited.delivery_status_${status}`),
@@ -408,7 +410,7 @@ export default class UserInvitedShowController extends Controller {
   statusChanged(status) {
     this.selectedStatus = status;
     this.set("reinvitedAll", false);
-    // Leaving the "draft" status behind a stale checked selection would
+    // Leaving the "review" status behind a stale checked selection would
     // otherwise resurface (against a now-different row set) if the admin
     // flips back to it later.
     this.selectedDraftIds = new Set();

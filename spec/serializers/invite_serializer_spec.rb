@@ -139,18 +139,18 @@ RSpec.describe InviteSerializer do
   describe "draft invites" do
     fab!(:user)
 
-    it "reports emailed as false for a draft, unlike an ordinary never-emailed invite link" do
+    it "reports emailed as false for a review invite, unlike an ordinary never-emailed invite link" do
       invite =
         Invite.generate(
           user,
           email: "draftee@example.com",
-          emailed_status: Invite.emailed_status_types[:draft],
+          emailed_status: Invite.emailed_status_types[:review],
         )
 
       json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
 
       expect(json[:emailed]).to eq(false)
-      expect(json[:delivery_status]).to eq("draft")
+      expect(json[:delivery_status]).to eq("review")
     end
 
     it "serializes recipient_keywords when the viewer can see invite details" do

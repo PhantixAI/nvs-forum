@@ -2645,7 +2645,7 @@ en:
         delivery_status_delivered: "Delivered"
         delivery_status_bounced: "Bounced"
         delivery_status_complained: "Marked as spam"
-        delivery_status_draft: "Draft"
+        delivery_status_review: "Review"
         edit: "Edit"
         remove: "Remove"
         copy_link: "Get Link"
@@ -2851,11 +2851,11 @@ en:
               <li><code>locale</code> – the language the invitation and signup flow are shown in for that row.</li>
               <li><code>allow_any_email</code> – set to <code>true</code> to let that invite be redeemed with any email address instead of only the one it was sent to.</li>
               <li><code>schedule_send</code> – set to <code>false</code> to send that row immediately instead of through the paced, one-at-a-time queue. Defaults to <code>true</code> when left blank.</li>
-              <li><code>skip_personalization</code> – set to <code>true</code> to send that row the plain, non-personalized invitation email.</li>
+              <li><code>ai_personalization</code> – set to <code>false</code> to send that row the plain, non-personalized invitation email. Defaults to <code>true</code> when left blank.</li>
               <li><code>name</code> and <code>keywords</code> – recipient context (e.g. their role or interests) used to personalize the invitation email, when enabled.</li>
             </ul>
-            <pre>email,groups,topic_id,locale,allow_any_email,schedule_send,skip_personalization,name,keywords</pre>
-            <pre>john@smith.com,first_group_name;second_group_name,topic_id,en,true,true,false,Jane Doe,machine learning;robotics</pre>
+            <pre>email,groups,topic_id,locale,allow_any_email,schedule_send,ai_personalization,name,keywords</pre>
+            <pre>john@smith.com,first_group_name;second_group_name,topic_id,en,true,true,true,Jane Doe,machine learning;robotics</pre>
 
           progress: "Uploaded %{progress}%…"
           success: "File uploaded successfully. You will be notified via message when the process is complete."
@@ -2871,13 +2871,12 @@ en:
             extracting: "Extracting…"
             allow_any_email_label: "Allow any email"
             schedule_send_label: "Schedule send"
-            skip_personalization_label: "Skip personalization"
             csv_review_label: "Review and edit before creating drafts"
             create_invites_button: "Create Draft Invites"
             creating_invites: "Creating drafts…"
             drafts_created:
-              one: "%{count} draft invite created. Review and send it from the Draft tab."
-              other: "%{count} draft invites created. Review and send them from the Draft tab."
+              one: "%{count} draft invite created. Review and send it from the Pending tab's Review filter."
+              other: "%{count} draft invites created. Review and send them from the Pending tab's Review filter."
 
       confirm_access:
         title: "Confirm access"

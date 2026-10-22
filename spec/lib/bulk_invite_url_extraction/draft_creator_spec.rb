@@ -18,7 +18,7 @@ RSpec.describe BulkInviteUrlExtraction::DraftCreator do
           csv_text: csv(["priya@iitb.ac.in,Priya,,,en,physics students"]),
           allow_any_email: false,
           schedule_send: true,
-          skip_personalization: false,
+          ai_personalization: true,
         )
 
       expect(result.created_count).to eq(1)
@@ -26,11 +26,11 @@ RSpec.describe BulkInviteUrlExtraction::DraftCreator do
 
       invite = Invite.find_by(email: "priya@iitb.ac.in")
       expect(invite).to be_present
-      expect(invite.emailed_status).to eq(Invite.emailed_status_types[:draft])
+      expect(invite.emailed_status).to eq(Invite.emailed_status_types[:review])
       expect(invite.recipient_name).to eq("Priya")
       expect(invite.recipient_keywords).to eq("physics students")
       expect(invite.schedule_send).to eq(true)
-      expect(invite.skip_personalization).to eq(false)
+      expect(invite.ai_personalization).to eq(true)
       expect(Jobs::InviteEmail.jobs.size).to eq(0)
       expect(Jobs::BulkInvite.jobs.size).to eq(0)
     end
@@ -42,7 +42,7 @@ RSpec.describe BulkInviteUrlExtraction::DraftCreator do
           csv_text: csv([",,,,,"]),
           allow_any_email: false,
           schedule_send: true,
-          skip_personalization: false,
+          ai_personalization: true,
         )
 
       expect(result.created_count).to eq(0)
@@ -56,7 +56,7 @@ RSpec.describe BulkInviteUrlExtraction::DraftCreator do
           csv_text: csv(["not-an-email,,,,,"]),
           allow_any_email: false,
           schedule_send: true,
-          skip_personalization: false,
+          ai_personalization: true,
         )
 
       expect(result.created_count).to eq(0)
@@ -70,7 +70,7 @@ RSpec.describe BulkInviteUrlExtraction::DraftCreator do
           csv_text: csv(["a@example.com,,#{group.name};unknown-group,,,"]),
           allow_any_email: false,
           schedule_send: true,
-          skip_personalization: false,
+          ai_personalization: true,
         )
 
       invite = Invite.find_by(email: "a@example.com")
@@ -85,7 +85,7 @@ RSpec.describe BulkInviteUrlExtraction::DraftCreator do
           csv_text: csv(["a@example.com,,,#{topic.id},,", "b@example.com,,,-1,,"]),
           allow_any_email: false,
           schedule_send: true,
-          skip_personalization: false,
+          ai_personalization: true,
         )
 
       bound_invite = Invite.find_by(email: "a@example.com")
@@ -99,7 +99,7 @@ RSpec.describe BulkInviteUrlExtraction::DraftCreator do
         csv_text: csv(["a@example.com,,,,,"]),
         allow_any_email: true,
         schedule_send: true,
-        skip_personalization: false,
+        ai_personalization: true,
       )
 
       invite = Invite.find_by(description: "a@example.com")
@@ -114,7 +114,7 @@ RSpec.describe BulkInviteUrlExtraction::DraftCreator do
           csv_text: csv(%w[dup@example.com,First,,,, DUP@example.com,Second,,,,]),
           allow_any_email: false,
           schedule_send: true,
-          skip_personalization: false,
+          ai_personalization: true,
         )
 
       expect(result.created_count).to eq(1)
@@ -132,7 +132,7 @@ RSpec.describe BulkInviteUrlExtraction::DraftCreator do
           csv_text: csv(["existing@example.com,,,,,"]),
           allow_any_email: false,
           schedule_send: true,
-          skip_personalization: false,
+          ai_personalization: true,
         )
 
       expect(result.created_count).to eq(0)
@@ -146,7 +146,7 @@ RSpec.describe BulkInviteUrlExtraction::DraftCreator do
         csv_text: csv(["repeat@example.com,,,,,"]),
         allow_any_email: true,
         schedule_send: true,
-        skip_personalization: false,
+        ai_personalization: true,
       )
       expect(Invite.where(description: "repeat@example.com").count).to eq(1)
 
@@ -156,7 +156,7 @@ RSpec.describe BulkInviteUrlExtraction::DraftCreator do
           csv_text: csv(["repeat@example.com,,,,,"]),
           allow_any_email: true,
           schedule_send: true,
-          skip_personalization: false,
+          ai_personalization: true,
         )
 
       expect(result.created_count).to eq(0)
@@ -174,7 +174,7 @@ RSpec.describe BulkInviteUrlExtraction::DraftCreator do
           csv_text: csv(["a@example.com,,#{restricted_group.name},,,"]),
           allow_any_email: false,
           schedule_send: true,
-          skip_personalization: false,
+          ai_personalization: true,
         )
 
       invite = Invite.find_by(email: "a@example.com")
