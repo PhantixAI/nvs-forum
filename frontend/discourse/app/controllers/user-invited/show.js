@@ -298,7 +298,6 @@ export default class UserInvitedShowController extends Controller {
 
     this.modal.show(ResendInviteModal, {
       model: {
-        bulk: true,
         drafts: true,
         confirmMessage: i18n("user.invited.send_selected_confirm", {
           count: inviteIds.length,
@@ -309,6 +308,10 @@ export default class UserInvitedShowController extends Controller {
           scheduleSend,
           allowAnyEmail,
         }) => {
+          // Sending is always paced, not a burst (InvitesController#send_drafts,
+          // ResendInviteModal) -- a selected batch can be in the hundreds, and
+          // personalizing even one invite is a live LLM call, so this resolves
+          // once the batch is queued/scheduled, not once it's actually sent.
           await Invite.sendDrafts(inviteIds, {
             keywords,
             aiPersonalization,

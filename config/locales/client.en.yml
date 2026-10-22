@@ -2657,7 +2657,7 @@ en:
         send_selected_confirm:
           one: "Send %{count} selected draft invite?"
           other: "Send %{count} selected draft invites?"
-        sent_selected: "Selected draft invites have been sent."
+        sent_selected: "Selected draft invites have been queued for sending."
         delete_selected: "Delete Selected"
         delete_selected_confirm:
           one: "Permanently delete %{count} selected draft invite? This cannot be undone."
@@ -2805,6 +2805,8 @@ en:
           member_email_label: "Send to"
           member_email_help: "We'll email an invitation link to this address."
           email_placeholder: "name@example.com"
+          recipient_email_label: "Recipient email"
+          recipient_email_help: "Who this link was created for. The link can still be redeemed by any email allowed by the domain above."
           invite_by: "Invite by"
           invite_by_link: "Shareable link"
           invite_by_email: "Email"

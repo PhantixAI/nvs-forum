@@ -19,7 +19,8 @@ class InviteSerializer < ApplicationSerializer
              :expired,
              :grants_admin,
              :grants_moderator,
-             :recipient_keywords
+             :recipient_keywords,
+             :allow_any_email
 
   has_many :topics, embed: :object, serializer: BasicTopicSerializer
   has_many :groups, embed: :object, serializer: BasicGroupSerializer
@@ -118,6 +119,10 @@ class InviteSerializer < ApplicationSerializer
   end
 
   def include_recipient_keywords?
+    can_see_invite_details?
+  end
+
+  def include_allow_any_email?
     can_see_invite_details?
   end
 

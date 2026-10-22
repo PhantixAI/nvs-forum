@@ -98,20 +98,36 @@ export default <template>
             {{/if}}
 
             {{#if @controller.inviteDraft}}
-              <DButton
-                class="btn-default send-selected-drafts"
-                @action={{@controller.sendSelectedDrafts}}
-                @disabled={{not @controller.selectedDraftIds.size}}
-                @icon="paper-plane"
-                @label="user.invited.send_selected"
-              />
-              <DButton
-                class="btn-danger delete-selected-drafts"
-                @action={{@controller.deleteSelectedDrafts}}
-                @disabled={{not @controller.selectedDraftIds.size}}
-                @icon="trash-can"
-                @label="user.invited.delete_selected"
-              />
+              <DComboButton
+                class="send-delete-selected-combo"
+                @btnTypeClass="btn-default"
+                @hasMenu={{true}}
+                as |combo|
+              >
+                <combo.Button
+                  class="send-selected-drafts"
+                  @action={{@controller.sendSelectedDrafts}}
+                  @disabled={{not @controller.selectedDraftIds.size}}
+                  @icon="paper-plane"
+                  @label="user.invited.send_selected"
+                />
+
+                <combo.Menu
+                  @disabled={{not @controller.selectedDraftIds.size}}
+                  @identifier="draft-bulk-actions-menu"
+                >
+                  <DDropdownMenu as |dropdown|>
+                    <dropdown.item>
+                      <DButton
+                        class="btn-danger delete-selected-drafts"
+                        @action={{@controller.deleteSelectedDrafts}}
+                        @icon="trash-can"
+                        @label="user.invited.delete_selected"
+                      />
+                    </dropdown.item>
+                  </DDropdownMenu>
+                </combo.Menu>
+              </DComboButton>
             {{/if}}
 
             {{#if

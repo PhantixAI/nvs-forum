@@ -3549,15 +3549,60 @@ RSpec.describe InvitesController do
 
       before { sign_in(user) }
 
-      it "sends the selected drafts, reusing the resend logic" do
-        post "/invites/send-drafts.json", params: { invite_ids: [draft.id] }
+      it "enqueues the keyword-regeneration job when personalizing without scheduling" do
+        post "/invites/send-drafts.json", params: { invite_ids: [draft.id], schedule_send: "false" }
 
         expect(response.status).to eq(200)
-        expect(response.parsed_body["sent_count"]).to eq(1)
-        expect(Jobs::InviteEmail.jobs.size).to eq(1)
+        expect(Jobs::ResendInvitesWithKeywords.jobs.size).to eq(1)
+        job_args = Jobs::ResendInvitesWithKeywords.jobs.first["args"].first
+        expect(job_args["invite_ids"]).to eq([draft.id])
+        # The actual send only happens once the job runs -- not inline.
+        expect(Jobs::InviteEmail.jobs).to be_empty
       end
 
-      it "only sends invites that belong to the current user" do
+      it "requeues through the paced throttle (bulk_pending) when personalizing and scheduled (the UI default)" do
+        post "/invites/send-drafts.json", params: { invite_ids: [draft.id], schedule_send: "true" }
+
+        expect(response.status).to eq(200)
+        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+        expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
+        expect(Jobs::InviteEmail.jobs).to be_empty
+      end
+
+      it "paces the send one invite at a time, with no personalization, when scheduled but ai_personalization is false" do
+        post "/invites/send-drafts.json",
+             params: {
+               invite_ids: [draft.id],
+               ai_personalization: "false",
+               schedule_send: "true",
+             }
+
+        expect(response.status).to eq(200)
+        expect(Jobs::ResendInvitesPaced.jobs.map { |job| job["args"].first["invite_id"] }).to eq(
+          [draft.id],
+        )
+        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:draft])
+        expect(Jobs::InviteEmail.jobs).to be_empty
+      end
+
+      it "sends immediately inline when neither personalizing nor scheduling" do
+        post "/invites/send-drafts.json",
+             params: {
+               invite_ids: [draft.id],
+               ai_personalization: "false",
+               schedule_send: "false",
+             }
+
+        expect(response.status).to eq(200)
+        expect(Jobs::InviteEmail.jobs.map { |job| job["args"].first["invite_id"] }).to include(
+          draft.id,
+        )
+        expect(Jobs::ResendInvitesWithKeywords.jobs).to be_empty
+        expect(Jobs::ResendInvitesPaced.jobs).to be_empty
+        expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
+      end
+
+      it "only dispatches invites that belong to the current user" do
         other_draft =
           Invite.generate(
             admin,
@@ -3565,10 +3610,43 @@ RSpec.describe InvitesController do
             emailed_status: Invite.emailed_status_types[:draft],
           )
 
-        post "/invites/send-drafts.json", params: { invite_ids: [draft.id, other_draft.id] }
+        post "/invites/send-drafts.json",
+             params: {
+               invite_ids: [draft.id, other_draft.id],
+               schedule_send: "true",
+             }
 
         expect(response.status).to eq(200)
-        expect(response.parsed_body["sent_count"]).to eq(1)
+        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+        expect(other_draft.reload.emailed_status).to eq(Invite.emailed_status_types[:draft])
+      end
+
+      it "persists allow_any_email/skip_personalization overrides inline before dispatch" do
+        post "/invites/send-drafts.json",
+             params: {
+               invite_ids: [draft.id],
+               allow_any_email: "true",
+               skip_personalization: "true",
+               schedule_send: "true",
+             }
+
+        expect(response.status).to eq(200)
+        expect(draft.reload.allow_any_email).to eq(true)
+        expect(draft.skip_personalization).to eq(true)
+        expect(draft.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+      end
+
+      it "forwards ad hoc keywords to the personalize-only job" do
+        post "/invites/send-drafts.json",
+             params: {
+               invite_ids: [draft.id],
+               schedule_send: "false",
+               keywords: "robotics club",
+             }
+
+        expect(response.status).to eq(200)
+        job_args = Jobs::ResendInvitesWithKeywords.jobs.first["args"].first
+        expect(job_args["extra_keywords"]).to eq("robotics club")
       end
 
       it "is rate-limited per request, not per invite" do
