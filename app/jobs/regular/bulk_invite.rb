@@ -18,6 +18,7 @@ module Jobs
       @user_fields = {}
       @valid_groups = {}
       @valid_topics = {}
+      @drafting_invite_ids = []
     end
 
     def execute(args)
@@ -33,11 +34,22 @@ module Jobs
 
       process_invites(@invites)
 
-      # Every bound invite created below is routed through :bulk_pending (see
-      # send_invite), so this always has something to pick up -- except when
-      # every row failed/was skipped/was allow_any_email, in which case it's
-      # a harmless no-op (Jobs::ProcessBulkInviteEmails finds nothing pending).
+      # Rows routed straight to :bulk_pending (ai_personalization: false, see
+      # send_invite) are ready for the paced chain as-is -- this always has
+      # something to pick up for those, except when every row failed/was
+      # skipped/was allow_any_email under the limit, in which case it's a
+      # harmless no-op (Jobs::ProcessBulkInviteEmails finds nothing pending).
       ::Jobs::ProcessBulkInviteEmails.ensure_chain!
+
+      # Rows routed to :drafting (ai_personalization: true) instead need
+      # their content generated first -- Jobs::GenerateInvitePersonalization
+      # flips each to :bulk_pending (and nudges ensure_chain! itself,
+      # incrementally) once its content is ready. A single CSV upload can
+      # contain a mix of both kinds of row, so both enqueues above/below run
+      # independently rather than one replacing the other.
+      if @drafting_invite_ids.present?
+        ::Jobs.enqueue(:generate_invite_personalization, invite_ids: @drafting_invite_ids)
+      end
     ensure
       notify_user
     end
@@ -164,9 +176,14 @@ module Jobs
       # security-relevant flag filled in free-text by an admin -- only treat an explicit
       # truthy spelling as true, everything else (including typos) stays false/bound.
       allow_any_email = %w[true t 1 yes y].include?(invite[:allow_any_email].to_s.strip.downcase)
-      skip_personalization = %w[true t 1 yes y].include?(
-        invite[:skip_personalization].to_s.strip.downcase,
-      )
+      # Unlike allow_any_email above, blank/absent defaults true (personalize),
+      # not false -- so an existing CSV that predates this column keeps
+      # today's personalize-by-default behavior rather than silently
+      # switching every row to the plain template the moment this ships. An
+      # explicit false is required to opt out of personalization.
+      ai_personalization =
+        invite[:ai_personalization].to_s.strip.blank? ||
+          %w[true t 1 yes y].include?(invite[:ai_personalization].to_s.strip.downcase)
       # Unlike the other boolean columns here, blank/absent defaults true
       # (paced), not false -- so an existing CSV that predates this column
       # keeps today's always-paced behavior rather than silently switching
@@ -186,7 +203,7 @@ module Jobs
             :locale,
             :allow_any_email,
             :schedule_send,
-            :skip_personalization,
+            :ai_personalization,
             :name,
             :keywords,
           ),
@@ -257,7 +274,7 @@ module Jobs
             skip_email: @skip_email,
             recipient_name: recipient_name,
             recipient_keywords: recipient_keywords,
-            skip_personalization: skip_personalization,
+            ai_personalization: ai_personalization,
             schedule_send: schedule_send,
             allow_any_email: allow_any_email,
           }
@@ -265,16 +282,24 @@ module Jobs
           # allow_any_email rows keep their original immediate-send-under-the-limit
           # behavior (delivered explicitly via to_override below), unaffected by
           # schedule_send. A bound invite's own routing is decided purely by
-          # schedule_send: true queues it through Jobs::ProcessBulkInviteEmails'
-          # one-at-a-time, randomly-paced throttle (and AI personalization);
-          # false leaves emailed_status unset, so Invite.generate's own default
-          # (:pending) sends it immediately instead, the same way it always has.
+          # schedule_send: true queues it for paced sending; false leaves
+          # emailed_status unset, so Invite.generate's own default (:pending)
+          # sends it immediately instead, the same way it always has. Either
+          # paced path further splits on ai_personalization: true routes
+          # through :drafting first (Jobs::GenerateInvitePersonalization
+          # generates its content, then flips it to :bulk_pending itself --
+          # see #execute); false has no content to generate, so it goes
+          # straight to :bulk_pending for Jobs::ProcessBulkInviteEmails to
+          # send as-is. Without this split, a personalized row would
+          # silently stop getting personalized at all once
+          # Jobs::ProcessBulkInviteEmails#deliver stopped calling the
+          # generator inline.
           if allow_any_email
             if @invites.length > Invite::BULK_INVITE_EMAIL_LIMIT
-              invite_opts[:emailed_status] = Invite.emailed_status_types[:bulk_pending]
+              invite_opts[:emailed_status] = bulk_send_status(ai_personalization)
             end
           elsif schedule_send
-            invite_opts[:emailed_status] = Invite.emailed_status_types[:bulk_pending]
+            invite_opts[:emailed_status] = bulk_send_status(ai_personalization)
           end
 
           # Invite.generate's own reinvites-per-day limiter only runs when email is
@@ -300,14 +325,22 @@ module Jobs
 
           invite = Invite.generate(@current_user, invite_opts)
 
+          if invite.emailed_status == Invite.emailed_status_types[:drafting]
+            @drafting_invite_ids << invite.id
+          end
+
           # Invite.generate only auto-sends when email is present, so an unbound invite
           # needs to be delivered explicitly -- to_override tells InviteMailer where to
           # send it without binding the invite to that address. Skip this when the invite
-          # is bulk_pending: Jobs::ProcessBulkInviteEmails already re-enqueues delivery for
+          # is bulk_pending or drafting: Jobs::ProcessBulkInviteEmails (directly, or via
+          # Jobs::GenerateInvitePersonalization first) already re-enqueues delivery for
           # those on its own throttle, and Jobs::InviteEmail falls back to invite.description
           # for the recipient in that case -- enqueuing here too would double-send.
           if allow_any_email && !@skip_email &&
-               invite.emailed_status != Invite.emailed_status_types[:bulk_pending]
+               !Invite
+                 .emailed_status_types
+                 .values_at(:bulk_pending, :drafting)
+                 .include?(invite.emailed_status)
             # Invite.generate leaves emailed_status at :not_required for an unbound invite
             # (it only auto-assigns :pending when email is present), which would make
             # InvitesController#resend_all_invites treat this as never-emailed and skip it
@@ -324,6 +357,19 @@ module Jobs
         save_log "Error inviting '#{email}' -- #{Rails::Html::FullSanitizer.new.sanitize(e.message)}"
 
         nil
+      end
+    end
+
+    # :drafting needs Jobs::GenerateInvitePersonalization to run before this
+    # row is ready to send; :bulk_pending is already final/ready for
+    # Jobs::ProcessBulkInviteEmails to pick up as-is. Shared by both the
+    # bound-row and allow_any_email-over-limit routing branches above so
+    # they can't drift out of sync on this decision.
+    def bulk_send_status(ai_personalization)
+      if ai_personalization
+        Invite.emailed_status_types[:drafting]
+      else
+        Invite.emailed_status_types[:bulk_pending]
       end
     end
 

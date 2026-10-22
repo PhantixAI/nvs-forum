@@ -4,7 +4,7 @@ require "csv"
 
 module BulkInviteUrlExtraction
   # Turns the admin-reviewed CSV textarea from the "Extract from URL" bulk
-  # invite tab into draft Invite rows (emailed_status: :draft), held for
+  # invite tab into draft Invite rows (emailed_status: :review), held for
   # review until an explicit send (see InvitesController#send_drafts).
   #
   # Deliberately not routed through Jobs::BulkInvite: that job's
@@ -24,7 +24,7 @@ module BulkInviteUrlExtraction
       csv_text:,
       allow_any_email:,
       schedule_send:,
-      skip_personalization:
+      ai_personalization:
     )
       guardian = Guardian.new(current_user)
       errors = []
@@ -85,8 +85,8 @@ module BulkInviteUrlExtraction
               recipient_keywords: row["keywords"].presence,
               allow_any_email: allow_any_email,
               schedule_send: schedule_send,
-              skip_personalization: skip_personalization,
-              emailed_status: Invite.emailed_status_types[:draft],
+              ai_personalization: ai_personalization,
+              emailed_status: Invite.emailed_status_types[:review],
             )
             created += 1
           rescue Invite::UserExists, ActiveRecord::RecordInvalid, RateLimiter::LimitExceeded => e

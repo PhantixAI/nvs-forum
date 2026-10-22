@@ -25,14 +25,22 @@ class Invite < ActiveRecord::Base
   # view, not just a literal "ac.in" address.
   AC_IN_UMBRELLA_DOMAIN = "ac.in"
   # Every value Invite#delivery_status can return, in pipeline order -- except
-  # nil (for not_required), which isn't a filterable status. "draft" only
+  # nil (for not_required), which isn't a filterable status. "review" only
   # ever matches on the Pending tab (see .pending/.with_delivery_status) --
-  # Expired has no meaningful "draft" state, so the frontend hides that
-  # option there; selecting it anyway just returns no rows.
-  DELIVERY_STATUSES = %w[scheduled pending skipped sent delivered bounced complained draft].freeze
+  # Expired has no meaningful "review" state, so the frontend hides that
+  # option there; selecting it anyway just returns no rows. Covers both the
+  # :review and :drafting emailed_status values -- the latter is deliberately
+  # not its own filterable status, since it's a transient (seconds-to-low-
+  # minutes) in-progress state, not something an admin filters for. Named
+  # "review" rather than "draft" specifically to stay visually/verbally
+  # distinct from :drafting (the system is drafting; the admin reviews).
+  DELIVERY_STATUSES = %w[scheduled pending skipped sent delivered bounced complained review].freeze
   DESCRIPTION_MAX_LENGTH = 100
   RECIPIENT_NAME_MAX_LENGTH = 100
   RECIPIENT_KEYWORDS_MAX_LENGTH = 100_000
+
+  self.ignored_columns += %i[skip_personalization]
+  # TODO(04-2027): Remove this line once DropSkipPersonalizationFromInvites has been promoted.
 
   rate_limit :limit_invites_per_day
 
@@ -118,7 +126,17 @@ class Invite < ActiveRecord::Base
         sending: 3,
         sent: 4,
         skipped: 5,
-        draft: 6,
+        # Created (e.g. via Extract-from-URL), sitting on the admin's Pending
+        # tab for review before an explicit send -- named "review" rather
+        # than "draft" specifically to stay distinct from :drafting below.
+        review: 6,
+        # Set while Jobs::GenerateInvitePersonalization is generating this
+        # invite's AI-personalized content, between an admin triggering a
+        # send and the invite becoming :bulk_pending -- see that job's class
+        # comment for why this exists as its own status rather than content
+        # being generated lazily inside Jobs::ProcessBulkInviteEmails (the
+        # old approach let a slow LLM call block that job's send pacing).
+        drafting: 7,
       )
   end
 
@@ -250,7 +268,7 @@ class Invite < ActiveRecord::Base
       # the per-row personalization context. Only keys actually passed are
       # touched, so callers that don't know about them leave them alone.
       context =
-        opts.slice(:recipient_name, :recipient_keywords, :skip_personalization, :schedule_send)
+        opts.slice(:recipient_name, :recipient_keywords, :ai_personalization, :schedule_send)
       invite.update!(context) if context.present?
       invite.update_columns(
         created_at: Time.zone.now,
@@ -275,7 +293,7 @@ class Invite < ActiveRecord::Base
           :max_redemptions_allowed,
           :recipient_name,
           :recipient_keywords,
-          :skip_personalization,
+          :ai_personalization,
           :schedule_send,
           :allow_any_email,
         )
@@ -354,14 +372,14 @@ class Invite < ActiveRecord::Base
     User.with_email(Email.downcase(email)).where(staged: false).first
   end
 
-  # A draft only ever shows up here when explicitly filtered to the "draft"
-  # status -- with no status filter, drafts stay excluded (same as before
-  # drafts existed), so the ordinary Pending view isn't cluttered with
-  # invites nobody has reviewed/sent yet.
+  # A :review invite only ever shows up here when explicitly filtered to the
+  # "review" status -- with no status filter, it stays excluded (same as
+  # before this status existed), so the ordinary Pending view isn't
+  # cluttered with invites nobody has reviewed/sent yet.
   # :id tiebreaker on the order -- a bulk draft-creation request can insert
   # hundreds of rows sharing the same updated_at, and OFFSET/LIMIT over a
   # non-unique ORDER BY isn't guaranteed stable across requests, so the
-  # status=draft view's infinite scroll could skip or repeat rows without it.
+  # status=review view's infinite scroll could skip or repeat rows without it.
   def self.pending(inviter, domain: nil, status: nil)
     invites =
       Invite
@@ -377,7 +395,10 @@ class Invite < ActiveRecord::Base
       invites = with_delivery_status(invites, status)
     else
       invites =
-        invites.where("emailed_status IS NULL OR emailed_status != ?", emailed_status_types[:draft])
+        invites.where(
+          "emailed_status IS NULL OR emailed_status NOT IN (?)",
+          emailed_status_types.values_at(:review, :drafting),
+        )
     end
     invites
   end
@@ -391,11 +412,22 @@ class Invite < ActiveRecord::Base
         .where(invited_by_id: inviter.id)
         .where("redemption_count < max_redemptions_allowed")
         .where("expires_at < ?", Time.zone.now)
-        .where("emailed_status IS NULL OR emailed_status != ?", emailed_status_types[:draft])
+        .where(
+          "emailed_status IS NULL OR emailed_status NOT IN (?)",
+          emailed_status_types.values_at(:review, :drafting),
+        )
         .order("invites.expires_at ASC")
     invites = invites.where(*domain_filter_condition(domain)) if domain.present?
     invites = with_delivery_status(invites, status) if status.present?
     invites
+  end
+
+  # Invites a Jobs::GenerateInvitePersonalization run has claimed but not yet
+  # finished generating content for -- a ready-made hook for a future "N
+  # invites still generating" UI affordance, mirroring .pending/.expired's
+  # own scope convention.
+  def self.drafting
+    where(emailed_status: emailed_status_types[:drafting])
   end
 
   def self.redeemed_users(inviter, domain: nil)
@@ -522,8 +554,8 @@ class Invite < ActiveRecord::Base
   # EmailLog query per invite.
   def delivery_status(email_log = latest_sent_email_log)
     case emailed_status
-    when Invite.emailed_status_types[:draft]
-      "draft"
+    when Invite.emailed_status_types[:review], Invite.emailed_status_types[:drafting]
+      "review"
     when Invite.emailed_status_types[:not_required]
       nil
     when Invite.emailed_status_types[:pending], Invite.emailed_status_types[:bulk_pending]
@@ -554,8 +586,8 @@ class Invite < ActiveRecord::Base
       relation.where(emailed_status: types[:sending])
     when "skipped"
       relation.where(emailed_status: types[:skipped])
-    when "draft"
-      relation.where(emailed_status: types[:draft])
+    when "review"
+      relation.where(emailed_status: types.values_at(:review, :drafting))
     when "sent", "delivered", "bounced", "complained"
       outcome =
         case status.to_s
@@ -581,7 +613,15 @@ class Invite < ActiveRecord::Base
         SQL
         .where(
           "invites.emailed_status IS NULL OR invites.emailed_status NOT IN (?)",
-          types.values_at(:not_required, :pending, :bulk_pending, :sending, :skipped, :draft),
+          types.values_at(
+            :not_required,
+            :pending,
+            :bulk_pending,
+            :sending,
+            :skipped,
+            :review,
+            :drafting,
+          ),
         )
         .where(outcome)
     else
@@ -678,6 +718,7 @@ end
 #
 #  id                      :integer          not null, primary key
 #  admin                   :boolean          default(FALSE), not null
+#  ai_personalization      :boolean          default(TRUE), not null
 #  allow_any_email         :boolean          default(FALSE), not null
 #  custom_message          :text
 #  custom_subject          :string
@@ -697,7 +738,6 @@ end
 #  recipient_name          :string(100)
 #  redemption_count        :integer          default(0), not null
 #  schedule_send           :boolean          default(TRUE), not null
-#  skip_personalization    :boolean          default(FALSE), not null
 #  created_at              :datetime         not null
 #  updated_at              :datetime         not null
 #  deleted_by_id           :integer

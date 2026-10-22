@@ -96,7 +96,7 @@ export default class CreateInviteBulk extends Component {
                     rules=extractor.rules
                     allowAnyEmail=extractor.settingsData.allowAnyEmail
                     scheduleSend=extractor.settingsData.scheduleSend
-                    skipPersonalization=extractor.settingsData.skipPersonalization
+                    aiPersonalization=extractor.settingsData.aiPersonalization
                   }}
                   @onRegisterApi={{extractor.registerFormApi}}
                   @onSubmit={{extractor.extract}}
@@ -151,9 +151,9 @@ export default class CreateInviteBulk extends Component {
                   </form.Field>
 
                   <form.Field
-                    @name="skipPersonalization"
+                    @name="aiPersonalization"
                     @title={{i18n
-                      "user.invited.bulk_invite.url_extraction.skip_personalization_label"
+                      "user.invited.resend_invite.modal.ai_personalization_label"
                     }}
                     @type="toggle"
                     as |field|

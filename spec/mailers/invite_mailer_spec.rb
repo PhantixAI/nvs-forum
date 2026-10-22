@@ -158,8 +158,8 @@ RSpec.describe InviteMailer do
           )
         end
 
-        it "falls back to the wrapped custom template when skip_personalization is set on this row" do
-          invite.update!(skip_personalization: true)
+        it "falls back to the wrapped custom template when ai_personalization is disabled on this row" do
+          invite.update!(ai_personalization: false)
 
           mail = InviteMailer.send_invite(invite)
 

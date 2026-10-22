@@ -3,7 +3,6 @@ import { hash } from "@ember/helper";
 import { action } from "@ember/object";
 import Form from "discourse/components/form";
 import { popupAjaxError } from "discourse/lib/ajax-error";
-import { or } from "discourse/truth-helpers";
 import DButton from "discourse/ui-kit/d-button";
 import DModal from "discourse/ui-kit/d-modal";
 import { i18n } from "discourse-i18n";
@@ -14,10 +13,13 @@ import { i18n } from "discourse-i18n";
 // between call sites. @model.drafts additionally surfaces allowAnyEmail,
 // which only matters the first time a draft is sent (an ordinary resend's
 // bound-vs-unbound shape was already decided when the invite was created).
-// scheduleSend is submitted on every resend regardless of @model.bulk/
-// @model.drafts (matching resend_all_invites' own default) -- only its
-// field is hidden for a plain single resend, where changing it rarely
-// makes sense.
+// scheduleSend is submitted on every resend regardless of which of these
+// modes is active -- its field is hidden for a plain single resend (where
+// changing it rarely makes sense) and for drafts (sending a batch of drafts
+// should always be paced, never a burst, so it isn't a user choice here the
+// way it still is for a plain bulk resend -- see
+// InvitesController#send_drafts). The form's seeded default (true) is what
+// gets submitted either way the field is hidden.
 export default class ResendInviteModal extends Component {
   #formApi = null;
 
@@ -105,7 +107,7 @@ export default class ResendInviteModal extends Component {
             <field.Control />
           </form.Field>
 
-          {{#if (or @model.bulk @model.drafts)}}
+          {{#if @model.bulk}}
             <form.Field
               @name="scheduleSend"
               @title={{i18n

@@ -71,7 +71,7 @@ export default class UrlInviteExtractor extends Component {
   settingsData = {
     allowAnyEmail: true,
     scheduleSend: true,
-    skipPersonalization: false,
+    aiPersonalization: true,
   };
 
   #formApi = null;
@@ -102,7 +102,7 @@ export default class UrlInviteExtractor extends Component {
       const result = await Invite.createDraftsFromCsv(this.csvText, {
         allowAnyEmail: this.#formApi.get("allowAnyEmail"),
         scheduleSend: this.#formApi.get("scheduleSend"),
-        skipPersonalization: this.#formApi.get("skipPersonalization"),
+        aiPersonalization: this.#formApi.get("aiPersonalization"),
       });
       this.draftsCreated = result.created_count;
       this.draftErrors = result.errors;

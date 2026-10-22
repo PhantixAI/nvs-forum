@@ -102,7 +102,7 @@ export default class Invite extends EmberObject {
   // immediately.
   static createDraftsFromCsv(
     csv,
-    { allowAnyEmail, scheduleSend, skipPersonalization } = {}
+    { allowAnyEmail, scheduleSend, aiPersonalization } = {}
   ) {
     return ajax("/invites/create-drafts", {
       type: "POST",
@@ -110,7 +110,7 @@ export default class Invite extends EmberObject {
         csv,
         allow_any_email: allowAnyEmail,
         schedule_send: scheduleSend,
-        skip_personalization: skipPersonalization,
+        ai_personalization: aiPersonalization,
       },
     });
   }
@@ -120,13 +120,7 @@ export default class Invite extends EmberObject {
   // InvitesController#send_drafts.
   static sendDrafts(
     inviteIds,
-    {
-      keywords,
-      aiPersonalization,
-      scheduleSend,
-      allowAnyEmail,
-      skipPersonalization,
-    } = {}
+    { keywords, aiPersonalization, scheduleSend, allowAnyEmail } = {}
   ) {
     return ajax("/invites/send-drafts", {
       type: "POST",
@@ -136,7 +130,6 @@ export default class Invite extends EmberObject {
         ai_personalization: aiPersonalization,
         schedule_send: scheduleSend,
         allow_any_email: allowAnyEmail,
-        skip_personalization: skipPersonalization,
       },
     });
   }
@@ -207,13 +200,7 @@ export default class Invite extends EmberObject {
     }).then(() => this.set("destroyed", true));
   }
 
-  reinvite({
-    keywords,
-    aiPersonalization,
-    scheduleSend,
-    allowAnyEmail,
-    skipPersonalization,
-  } = {}) {
+  reinvite({ keywords, aiPersonalization, scheduleSend, allowAnyEmail } = {}) {
     const data = {
       invite_id: this.id,
       keywords,
@@ -227,9 +214,6 @@ export default class Invite extends EmberObject {
     }
     if (!isNone(allowAnyEmail)) {
       data.allow_any_email = allowAnyEmail;
-    }
-    if (!isNone(skipPersonalization)) {
-      data.skip_personalization = skipPersonalization;
     }
 
     // No .catch here, deliberately -- this is awaited from

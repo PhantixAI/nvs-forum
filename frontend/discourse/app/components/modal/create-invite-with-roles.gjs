@@ -710,17 +710,35 @@ export default class CreateInviteWithRoles extends Component {
               </form.ConditionalContent>
 
               {{#if this.showAdvanced}}
-                <form.Field
-                  @description={{i18n "user.invited.invite.description_help"}}
-                  @format="full"
-                  @name="description"
-                  @title={{i18n "user.invited.invite.description"}}
-                  @type="input"
-                  @validation={{this.descriptionValidation}}
-                  as |field|
-                >
-                  <field.Control />
-                </form.Field>
+                {{#if this.invite.allow_any_email}}
+                  <form.Field
+                    @description={{i18n
+                      "user.invited.invite_roles.recipient_email_help"
+                    }}
+                    @format="full"
+                    @name="description"
+                    @title={{i18n
+                      "user.invited.invite_roles.recipient_email_label"
+                    }}
+                    @type="input-email"
+                    @validate={{this.validateEmail}}
+                    as |field|
+                  >
+                    <field.Control />
+                  </form.Field>
+                {{else}}
+                  <form.Field
+                    @description={{i18n "user.invited.invite.description_help"}}
+                    @format="full"
+                    @name="description"
+                    @title={{i18n "user.invited.invite.description"}}
+                    @type="input"
+                    @validation={{this.descriptionValidation}}
+                    as |field|
+                  >
+                    <field.Control />
+                  </form.Field>
+                {{/if}}
 
                 <form.Field
                   @description={{i18n
@@ -874,17 +892,35 @@ export default class CreateInviteWithRoles extends Component {
                   </form.Field>
                 {{/if}}
 
-                <form.Field
-                  @description={{i18n "user.invited.invite.description_help"}}
-                  @format="full"
-                  @name="description"
-                  @title={{i18n "user.invited.invite.description"}}
-                  @type="input"
-                  @validation={{this.descriptionValidation}}
-                  as |field|
-                >
-                  <field.Control />
-                </form.Field>
+                {{#if this.invite.allow_any_email}}
+                  <form.Field
+                    @description={{i18n
+                      "user.invited.invite_roles.recipient_email_help"
+                    }}
+                    @format="full"
+                    @name="description"
+                    @title={{i18n
+                      "user.invited.invite_roles.recipient_email_label"
+                    }}
+                    @type="input-email"
+                    @validate={{this.validateEmail}}
+                    as |field|
+                  >
+                    <field.Control />
+                  </form.Field>
+                {{else}}
+                  <form.Field
+                    @description={{i18n "user.invited.invite.description_help"}}
+                    @format="full"
+                    @name="description"
+                    @title={{i18n "user.invited.invite.description"}}
+                    @type="input"
+                    @validation={{this.descriptionValidation}}
+                    as |field|
+                  >
+                    <field.Control />
+                  </form.Field>
+                {{/if}}
 
                 <form.Field
                   @format="full"

@@ -23,7 +23,7 @@ class InviteMailer < ActionMailer::Base
     # destroy that formatting. A hand-typed custom_message still gets collapsed, since any
     # newlines there are more likely accidental (pasted multi-line text into a one-line
     # note) than intentional.
-    ai_active = SiteSetting.bulk_invite_ai_personalization_enabled && !invite.skip_personalization?
+    ai_active = SiteSetting.bulk_invite_ai_personalization_enabled && invite.ai_personalization?
 
     sanitized_message =
       (
