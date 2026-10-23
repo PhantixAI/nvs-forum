@@ -3599,7 +3599,7 @@ RSpec.describe InvitesController do
         expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
       end
 
-      it "only dispatches invites that belong to the current user" do
+      it "fails loudly (not a silent partial send) when a non-admin selects an invite they don't own" do
         other_draft =
           Invite.generate(
             admin,
@@ -3613,13 +3613,32 @@ RSpec.describe InvitesController do
                schedule_send: "true",
              }
 
-        expect(response.status).to eq(200)
-        expect(Jobs::GenerateInvitePersonalization.jobs.size).to eq(1)
-        expect(Jobs::GenerateInvitePersonalization.jobs.first["args"].first["invite_ids"]).to eq(
-          [draft.id],
-        )
+        expect(response.status).to eq(422)
+        expect(Jobs::GenerateInvitePersonalization.jobs).to be_empty
         expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
         expect(other_draft.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
+      end
+
+      it "lets an admin send another user's drafts -- the Invited page itself lists by profile, not by viewer" do
+        other_draft =
+          Invite.generate(
+            user,
+            email: "otherdraftee@example.com",
+            emailed_status: Invite.emailed_status_types[:review],
+          )
+
+        sign_in(admin)
+        post "/invites/send-drafts.json",
+             params: {
+               invite_ids: [draft.id, other_draft.id],
+               schedule_send: "true",
+             }
+
+        expect(response.status).to eq(200)
+        expect(Jobs::GenerateInvitePersonalization.jobs.size).to eq(1)
+        expect(
+          Jobs::GenerateInvitePersonalization.jobs.first["args"].first["invite_ids"],
+        ).to match_array([draft.id, other_draft.id])
       end
 
       it "persists allow_any_email/ai_personalization overrides inline before dispatch" do
@@ -3693,7 +3712,7 @@ RSpec.describe InvitesController do
         expect(Invite.with_deleted.exists?(id: draft.id)).to eq(false)
       end
 
-      it "only deletes invites that belong to the current user" do
+      it "fails loudly (not a silent partial delete) when a non-admin selects an invite they don't own" do
         other_draft =
           Invite.generate(
             admin,
@@ -3703,9 +3722,26 @@ RSpec.describe InvitesController do
 
         post "/invites/destroy-drafts.json", params: { invite_ids: [draft.id, other_draft.id] }
 
-        expect(response.status).to eq(200)
-        expect(response.parsed_body["destroyed_count"]).to eq(1)
+        expect(response.status).to eq(422)
+        expect(Invite.with_deleted.exists?(id: draft.id)).to eq(true)
         expect(Invite.with_deleted.exists?(id: other_draft.id)).to eq(true)
+      end
+
+      it "lets an admin delete another user's drafts -- the Invited page itself lists by profile, not by viewer" do
+        other_draft =
+          Invite.generate(
+            user,
+            email: "otherdraftee@example.com",
+            emailed_status: Invite.emailed_status_types[:review],
+          )
+
+        sign_in(admin)
+        post "/invites/destroy-drafts.json", params: { invite_ids: [draft.id, other_draft.id] }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["destroyed_count"]).to eq(2)
+        expect(Invite.with_deleted.exists?(id: draft.id)).to eq(false)
+        expect(Invite.with_deleted.exists?(id: other_draft.id)).to eq(false)
       end
 
       it "never deletes a non-draft invite, even if selected" do

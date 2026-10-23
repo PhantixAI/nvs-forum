@@ -915,6 +915,16 @@ class InvitesController < ApplicationController
   # once per request rather than per invite (unlike resend-invite-per-hour,
   # which is sized for an occasional single resend, not a deliberate bulk
   # action on dozens-to-hundreds of freshly created drafts).
+  #
+  # Scoping: an admin can send any invite, not only ones they personally
+  # created -- mirrors #can_destroy_invite?'s own admin-override (see
+  # InviteGuardian), since the Invited page itself lists invites by the
+  # profile being viewed, not by current_user (UsersController#invited uses
+  # Invite.pending(inviter)). A non-admin stays restricted to their own
+  # invited_by_id. Either way, every requested id must resolve to a
+  # manageable invite -- a partial match (e.g. because one of the two
+  # scopes excluded some of them) fails loudly instead of silently
+  # dispatching a smaller batch than the admin asked for.
   def send_drafts
     if !SiteSetting.allow_email_invites
       return render_json_error(I18n.t("invite.email_invites_disabled"))
@@ -929,7 +939,12 @@ class InvitesController < ApplicationController
     ).performed!
 
     invite_ids = Array(params[:invite_ids]).map(&:to_i)
-    invites = Invite.where(invited_by_id: current_user.id, id: invite_ids)
+    invites = Invite.where(id: invite_ids)
+    invites = invites.where(invited_by_id: current_user.id) unless guardian.is_admin?
+
+    if invites.count != invite_ids.uniq.size
+      return render_json_error(I18n.t("invite.drafts_not_found"))
+    end
 
     overrides = resend_overrides_from_params
     invites.update_all(overrides) if overrides.present?
@@ -950,6 +965,12 @@ class InvitesController < ApplicationController
   # redemption/audit history worth keeping, so there's nothing a soft
   # delete would preserve.
   # Rate-limited once per request, same reasoning as #send_drafts.
+  # Scoping: same admin-override as #send_drafts -- see its comment. The
+  # strict all-ids-must-match check only covers authorization (id +
+  # invited_by_id), not the emailed_status filter below -- an id that's
+  # authorized but no longer :review (e.g. a race with another resend) is
+  # meant to just be silently skipped, same as before this fix. Only a
+  # missing-or-unauthorized id is worth failing the whole request over.
   def destroy_drafts
     RateLimiter.new(
       current_user,
@@ -960,12 +981,15 @@ class InvitesController < ApplicationController
     ).performed!
 
     invite_ids = Array(params[:invite_ids]).map(&:to_i)
-    invites =
-      Invite.where(
-        invited_by_id: current_user.id,
-        id: invite_ids,
-        emailed_status: Invite.emailed_status_types[:review],
-      )
+    authorized_invites = Invite.where(id: invite_ids)
+    authorized_invites =
+      authorized_invites.where(invited_by_id: current_user.id) unless guardian.is_admin?
+
+    if authorized_invites.count != invite_ids.uniq.size
+      return render_json_error(I18n.t("invite.drafts_not_found"))
+    end
+
+    invites = authorized_invites.where(emailed_status: Invite.emailed_status_types[:review])
 
     destroyed_count = 0
     errors = []

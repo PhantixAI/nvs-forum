@@ -643,6 +643,7 @@ en:
     email_required_to_send: "This invite has no email address to send to"
     ai_personalization_failed: "Couldn't generate a personalized email for this invite right now. Nothing was sent -- try resending again shortly."
     send_now_not_scheduled: "This invite is no longer scheduled -- it may have already been sent."
+    drafts_not_found: "One or more selected invites could not be found, or you don't have permission to manage them."
 
   bulk_invite:
     file_should_be_csv: "The uploaded file should be of csv format."
