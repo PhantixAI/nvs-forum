@@ -2,7 +2,7 @@
 
 RSpec.describe Jobs::GenerateInvitePersonalization do
   describe "#execute" do
-    it "claims the given invites into :drafting, then flips each to :bulk_pending once personalized" do
+    it "flips each given invite to :bulk_pending once personalized -- the caller is expected to have already claimed them into :drafting" do
       invite_one = Fabricate(:invite, email: "a@nit.ac.in")
       invite_two = Fabricate(:invite, email: "b@nit.ac.in")
 
@@ -74,34 +74,6 @@ RSpec.describe Jobs::GenerateInvitePersonalization do
       described_class.new.execute(invite_ids: [invite.id], extra_keywords: "robotics club")
 
       expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
-    end
-
-    it "skips an invite already mid-flight (e.g. :sending) rather than re-claiming and re-personalizing it" do
-      invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:sending])
-
-      BulkInvitePersonalization::Generator.expects(:personalize).never
-
-      described_class.new.execute(invite_ids: [invite.id])
-
-      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:sending])
-    end
-
-    it "skips an invite already :bulk_pending rather than re-claiming it" do
-      invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
-
-      BulkInvitePersonalization::Generator.expects(:personalize).never
-
-      described_class.new.execute(invite_ids: [invite.id])
-
-      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
-    end
-
-    it "does nothing when every given id is already mid-flight, not even nudging the chain" do
-      invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
-
-      described_class.new.execute(invite_ids: [invite.id])
-
-      expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
     end
 
     it "nudges ensure_chain! once a slice produces a bulk_pending invite" do

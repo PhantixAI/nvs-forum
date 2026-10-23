@@ -31,6 +31,11 @@ export default class UserInvitedShow extends DiscourseRoute {
       searchTerm: "",
       selectedDomain: null,
       selectedStatus: null,
+      // A refresh (e.g. triggerRefresh after a bulk action) reuses this same
+      // controller instance -- reset these or a list already scrolled to its
+      // end on a prior visit would leave infinite scroll permanently dead.
+      canLoadMore: true,
+      invitesLoading: false,
     });
   }
 

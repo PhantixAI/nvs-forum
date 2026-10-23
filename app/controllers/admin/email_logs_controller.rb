@@ -74,6 +74,32 @@ class Admin::EmailLogsController < Admin::AdminController
     render_json_dump(EmailLogDetailsSerializer.new(email_log, root: false))
   end
 
+  # Renders InviteMailer's actual template against an invite's currently
+  # staged (not yet delivered) custom_subject/custom_message, without
+  # handing the result to Email::Sender -- nothing is sent. Only offered
+  # once that content is guaranteed finalized and not about to be
+  # overwritten by Jobs::GenerateInvitePersonalization (see
+  # Invite.claim_for_drafting): :bulk_pending (staged, paced, waiting to
+  # send) or :sending (claimed, about to send). A :review/:drafting
+  # invite's content may still be blank or mid-generation; a :sent one
+  # already has a real EmailLog -- #invite_sent above is for that case.
+  def invite_draft
+    params.require(:invite_id)
+    invite = Invite.find(params[:invite_id].to_i)
+
+    previewable_statuses = Invite.emailed_status_types.values_at(:bulk_pending, :sending)
+    raise Discourse::NotFound if !previewable_statuses.include?(invite.emailed_status)
+
+    # Mirrors Jobs::InviteEmail's own recipient resolution for an unbound
+    # (allow_any_email) invite, whose intended recipient lives in
+    # description rather than email -- see that job's comment.
+    to = invite.email.presence || invite.description.presence
+    raise Discourse::NotFound if to.blank? || !EmailAddressValidator.valid_value?(to)
+
+    message = InviteMailer.send_invite(invite, to: to)
+    render_json_dump(InviteDraftPreviewSerializer.new(message, root: false))
+  end
+
   def incoming_from_bounced
     params.require(:id)
 

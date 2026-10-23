@@ -2931,20 +2931,21 @@ RSpec.describe InvitesController do
     end
 
     context "with schedule_send explicitly true (paced)" do
-      it "enqueues Jobs::GenerateInvitePersonalization with the matching invites' ids, instead of requeuing or sending immediately" do
+      it "claims the matching invites into :drafting synchronously, then enqueues Jobs::GenerateInvitePersonalization with the claimed ids" do
         invite = Fabricate(:invite, invited_by: admin)
 
         sign_in(admin)
         post "/invites/reinvite-all", params: { schedule_send: "true" }
 
         expect(response.status).to eq(200)
-        # Dispatch itself doesn't touch emailed_status or the paced chain --
-        # Jobs::GenerateInvitePersonalization claims the invite into
-        # :drafting (and later, bulk_pending + ensure_chain!) once it
-        # actually runs; see spec/jobs/generate_invite_personalization_spec.rb
-        # for coverage of the in-flight-skip/chain-join behavior that used to
-        # live here, back when this cell did that work inline.
-        expect(invite.reload.emailed_status).not_to eq(Invite.emailed_status_types[:drafting])
+        # dispatch_bulk_resend claims (Invite.claim_for_drafting) before
+        # enqueueing -- the status change is visible immediately, not only
+        # once Jobs::GenerateInvitePersonalization actually runs on
+        # Sidekiq. See spec/jobs/generate_invite_personalization_spec.rb for
+        # the personalize/bulk_pending/chain-nudge behavior that happens
+        # once the job runs, and spec/models/invite_spec.rb for
+        # .claim_for_drafting's own in-flight-skip coverage.
+        expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
         expect(Jobs::InviteEmail.jobs).to be_empty
         expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
         expect(Jobs::GenerateInvitePersonalization.jobs.size).to eq(1)
@@ -3550,14 +3551,15 @@ RSpec.describe InvitesController do
         expect(Jobs::InviteEmail.jobs).to be_empty
       end
 
-      it "enqueues Jobs::GenerateInvitePersonalization when personalizing and scheduled (the UI default), leaving the draft's status alone until that job claims it" do
+      it "claims the draft into :drafting synchronously when personalizing and scheduled (the UI default), then enqueues Jobs::GenerateInvitePersonalization" do
         post "/invites/send-drafts.json", params: { invite_ids: [draft.id], schedule_send: "true" }
 
         expect(response.status).to eq(200)
-        # dispatch_bulk_resend only enqueues the job -- it doesn't flip
-        # emailed_status itself. That's Jobs::GenerateInvitePersonalization's
-        # own #claim_for_drafting, covered in its own spec file.
-        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
+        # dispatch_bulk_resend claims (Invite.claim_for_drafting) before
+        # enqueueing, so this is visible immediately -- not only once the
+        # job actually runs. See spec/models/invite_spec.rb for
+        # .claim_for_drafting's own coverage.
+        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
         expect(Jobs::GenerateInvitePersonalization.jobs.size).to eq(1)
         expect(Jobs::GenerateInvitePersonalization.jobs.first["args"].first["invite_ids"]).to eq(
           [draft.id],
@@ -3635,10 +3637,22 @@ RSpec.describe InvitesController do
              }
 
         expect(response.status).to eq(200)
+        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
+        expect(other_draft.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
         expect(Jobs::GenerateInvitePersonalization.jobs.size).to eq(1)
         expect(
           Jobs::GenerateInvitePersonalization.jobs.first["args"].first["invite_ids"],
         ).to match_array([draft.id, other_draft.id])
+      end
+
+      it "doesn't enqueue the job at all when every selected invite is already mid-flight elsewhere" do
+        draft.update_column(:emailed_status, Invite.emailed_status_types[:sending])
+
+        post "/invites/send-drafts.json", params: { invite_ids: [draft.id], schedule_send: "true" }
+
+        expect(response.status).to eq(200)
+        expect(Jobs::GenerateInvitePersonalization.jobs).to be_empty
+        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:sending])
       end
 
       it "persists allow_any_email/ai_personalization overrides inline before dispatch" do

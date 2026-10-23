@@ -1107,11 +1107,21 @@ class InvitesController < ApplicationController
       # there used to block that queue's own send pacing for every other
       # invite). reorder(nil): see the elsif personalize branch below for
       # why this is needed on resend_all_invites's relation specifically.
-      Jobs.enqueue(
-        :generate_invite_personalization,
-        invite_ids: invites.reorder(nil).pluck(:id),
-        extra_keywords: keywords,
-      )
+      #
+      # Claims (flips to :drafting) synchronously, here, before enqueueing
+      # -- not left to the job itself -- so the status change is visible
+      # the instant this request completes, not whenever Sidekiq gets
+      # around to it (see Invite.claim_for_drafting's own comment). Only
+      # the ids actually claimed get enqueued; an id that's already
+      # mid-flight elsewhere is a quiet skip, not an error.
+      claimed_ids = Invite.claim_for_drafting(invites.reorder(nil).pluck(:id))
+      if claimed_ids.present?
+        Jobs.enqueue(
+          :generate_invite_personalization,
+          invite_ids: claimed_ids,
+          extra_keywords: keywords,
+        )
+      end
     elsif personalize
       # A filtered batch can be hundreds to low thousands of invites, so
       # regenerating each one's AI text has to happen off-request -- unlike

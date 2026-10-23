@@ -266,6 +266,7 @@ Discourse::Application.routes.draw do
           get "incoming/:id" => "email_logs#incoming"
           get "incoming_from_bounced/:id" => "email_logs#incoming_from_bounced"
           get "invite_sent/:invite_id" => "email_logs#invite_sent"
+          get "invite_draft/:invite_id" => "email_logs#invite_draft"
         end
       end
 

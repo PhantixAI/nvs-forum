@@ -407,7 +407,9 @@ export default <template>
                       <div class="d-table__mobile-label">
                         {{i18n "user.invited.delivery_status"}}
                       </div>
-                      {{inviteDeliveryStatus invite.delivery_status}}
+                      {{inviteDeliveryStatus
+                        (if invite.drafting "drafting" invite.delivery_status)
+                      }}
                     </td>
 
                     {{#if invite.can_delete_invite}}
@@ -468,6 +470,19 @@ export default <template>
                                       @action={{fn @controller.sendNow invite}}
                                       @icon="paper-plane"
                                       @label="user.invited.invite.send_now"
+                                    />
+                                  </dropdown.item>
+                                {{/if}}
+                                {{#if invite.draft_preview_available}}
+                                  <dropdown.item>
+                                    <DButton
+                                      class="btn-transparent preview-draft-email"
+                                      @action={{fn
+                                        @controller.previewDraft
+                                        invite
+                                      }}
+                                      @icon="envelope"
+                                      @label="user.invited.invite.preview_draft"
                                     />
                                   </dropdown.item>
                                 {{/if}}

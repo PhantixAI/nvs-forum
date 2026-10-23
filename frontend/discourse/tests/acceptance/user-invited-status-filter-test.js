@@ -276,6 +276,26 @@ acceptance("User invited - delivery status filter", function (needs) {
     assert.dom(".invite-status-filter").doesNotExist();
     assert.dom(".invite-domain-filter").exists();
   });
+
+  test("resets canLoadMore when a filter change replaces the list", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    const controller = this.owner.lookup("controller:user-invited/show");
+
+    // Simulate having already scrolled to the end of a previous list --
+    // without a reset here, infinite scroll on the freshly filtered list
+    // would silently never fire again.
+    controller.canLoadMore = false;
+
+    const domainFilter = selectKit(".invite-domain-filter");
+    await domainFilter.expand();
+    await domainFilter.selectRowByValue("nit.ac.in");
+
+    assert.true(
+      controller.canLoadMore,
+      "a filter change resets canLoadMore so infinite scroll keeps working on the new list"
+    );
+  });
 });
 
 acceptance(

@@ -245,6 +245,21 @@ export default class UserInvitedShowController extends Controller {
     }
   }
 
+  // Same response shape (and modal) as #previewSentEmail -- the only
+  // difference is the invite's staged-but-undelivered content, rendered
+  // fresh server-side rather than read back from an EmailLog. isDraft
+  // just swaps the modal's title (see SentInviteEmail) so it doesn't
+  // claim to show a "sent" email that hasn't gone out yet.
+  @action
+  async previewDraft(invite) {
+    try {
+      const model = await Invite.findDraftPreview(invite.id);
+      this.modal.show(SentInviteEmail, { model: { ...model, isDraft: true } });
+    } catch (error) {
+      popupAjaxError(error);
+    }
+  }
+
   @action
   async sendNow(invite) {
     try {
@@ -499,6 +514,11 @@ export default class UserInvitedShowController extends Controller {
       this.selectedStatus
     ).then((invites) => {
       this.set("model", invites);
+      // A prior filter's list may have already been scrolled to its end
+      // (canLoadMore false) -- without resetting these, infinite scroll on
+      // this freshly filtered list would silently never fire again.
+      this.canLoadMore = true;
+      this.invitesLoading = false;
       // Unlike searchTerm, the domain and status filters also narrow the tab
       // counts (see UsersController#invited). The visible "Pending (n)" tab
       // labels are rendered by the parent user-invited controller's own

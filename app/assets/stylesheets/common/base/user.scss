@@ -1444,6 +1444,11 @@
         background-color: var(--highlight-medium);
         color: var(--primary);
       }
+
+      &.--drafting {
+        background-color: var(--tertiary-low);
+        color: var(--tertiary);
+      }
     }
   }
 }
