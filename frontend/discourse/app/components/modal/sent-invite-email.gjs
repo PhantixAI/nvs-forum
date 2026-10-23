@@ -7,7 +7,11 @@ const SentInviteEmail = <template>
     @bodyClass="sent-invite-email"
     @closeModal={{@closeModal}}
     @inline={{@inline}}
-    @title={{i18n "user.invited.sent_email.modal.title"}}
+    @title={{if
+      @model.isDraft
+      (i18n "user.invited.sent_email.modal.draft_title")
+      (i18n "user.invited.sent_email.modal.title")
+    }}
   >
     <:body>
       <div class="control-group">

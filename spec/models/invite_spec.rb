@@ -1021,6 +1021,82 @@ RSpec.describe Invite do
     end
   end
 
+  describe ".claim_for_drafting" do
+    fab!(:invite) { Fabricate(:invite, emailed_status: Invite.emailed_status_types[:review]) }
+
+    it "claims a review invite, flipping it to drafting and returning its id" do
+      claimed_ids = Invite.claim_for_drafting([invite.id])
+
+      expect(claimed_ids).to eq([invite.id])
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
+    end
+
+    it "claims an invite with no emailed_status set yet (NULL, not just an empty/zero value)" do
+      invite.update_column(:emailed_status, nil)
+
+      claimed_ids = Invite.claim_for_drafting([invite.id])
+
+      expect(claimed_ids).to eq([invite.id])
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
+    end
+
+    it "skips an invite already mid-flight (drafting/bulk_pending/sending), without re-claiming it" do
+      %i[drafting bulk_pending sending].each do |status|
+        invite.update_column(:emailed_status, Invite.emailed_status_types[status])
+
+        claimed_ids = Invite.claim_for_drafting([invite.id])
+
+        expect(claimed_ids).to eq([])
+        expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[status])
+      end
+    end
+
+    it "claims only the eligible ids out of a mixed batch, leaving the rest untouched" do
+      in_flight = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:sending])
+
+      claimed_ids = Invite.claim_for_drafting([invite.id, in_flight.id])
+
+      expect(claimed_ids).to eq([invite.id])
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
+      expect(in_flight.reload.emailed_status).to eq(Invite.emailed_status_types[:sending])
+    end
+
+    it "returns an empty array for a blank id list, without querying" do
+      expect(Invite.claim_for_drafting([])).to eq([])
+    end
+  end
+
+  describe ".requeue_stale_drafting" do
+    fab!(:invite) { Fabricate(:invite, emailed_status: Invite.emailed_status_types[:drafting]) }
+
+    it "rewinds a :drafting invite stuck well past the staleness threshold back to :review" do
+      invite.update_column(:updated_at, (Invite::STALE_DRAFTING_AFTER + 10.minutes).ago)
+
+      Invite.requeue_stale_drafting
+
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
+    end
+
+    it "leaves a recently-claimed :drafting invite alone -- it may still be legitimately queued" do
+      invite.update_column(:updated_at, (Invite::STALE_DRAFTING_AFTER - 10.minutes).ago)
+
+      Invite.requeue_stale_drafting
+
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
+    end
+
+    it "leaves a non-:drafting invite alone, no matter how old" do
+      invite.update_columns(
+        emailed_status: Invite.emailed_status_types[:review],
+        updated_at: (Invite::STALE_DRAFTING_AFTER + 1.day).ago,
+      )
+
+      Invite.requeue_stale_drafting
+
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
+    end
+  end
+
   describe "#latest_sent_email_log" do
     fab!(:invite)
 

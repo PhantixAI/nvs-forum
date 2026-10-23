@@ -12,31 +12,39 @@ module Jobs
   # with personalize+schedule both on) and Jobs::BulkInvite (a CSV upload row
   # with ai_personalization/schedule_send both on).
   #
-  # Claims every given invite id into :drafting up front (skipping any
-  # already mid-flight elsewhere -- see #claim_for_drafting), then works
-  # through them in small concurrent thread batches, mirroring
-  # BulkInviteUrlExtraction::Generator#extract's own thread-batching pattern
-  # (each thread re-establishes this job's multisite db connection, since a
-  # bare Thread.new would otherwise run against the wrong site's database).
-  # Each invite that resolves (personalized, or confirmed not applicable)
-  # flips straight to :bulk_pending, and ::Jobs::ProcessBulkInviteEmails
-  # .ensure_chain! is nudged once per batch slice -- not only once at the
-  # end -- so invites from an earlier slice can start sending while a later
-  # slice is still generating. A failure for one invite marks only that
-  # invite :skipped and never aborts the rest of its thread batch or the job.
+  # Every invite_id handed to this job is expected to already be :drafting --
+  # the caller claims it synchronously (Invite.claim_for_drafting, for
+  # dispatch_bulk_resend) or creates it that way to begin with
+  # (Jobs::BulkInvite's new rows), *before* enqueueing. That's deliberate:
+  # it's what makes the :review -> :drafting status change visible the
+  # moment an admin dispatches a batch, instead of only once Sidekiq gets
+  # around to running this job (which, behind a deploy restart or a backed
+  # up queue, could otherwise leave a just-sent batch looking identical to
+  # an unrelated newer :review batch for minutes or hours). This job itself
+  # never claims -- see Invite.claim_for_drafting's own comment for the
+  # claiming contract.
+  #
+  # Works through the given ids in small concurrent thread batches,
+  # mirroring BulkInviteUrlExtraction::Generator#extract's own
+  # thread-batching pattern (each thread re-establishes this job's
+  # multisite db connection, since a bare Thread.new would otherwise run
+  # against the wrong site's database). Each invite that resolves
+  # (personalized, or confirmed not applicable) flips straight to
+  # :bulk_pending, and ::Jobs::ProcessBulkInviteEmails.ensure_chain! is
+  # nudged once per batch slice -- not only once at the end -- so invites
+  # from an earlier slice can start sending while a later slice is still
+  # generating. A failure for one invite marks only that invite :skipped
+  # and never aborts the rest of its thread batch or the job.
   class GenerateInvitePersonalization < ::Jobs::Base
     def execute(args)
       invite_ids = Array(args[:invite_ids]).map(&:to_i)
       return if invite_ids.blank?
 
       extra_keywords = args[:extra_keywords]
-      claimed_ids = claim_for_drafting(invite_ids)
-      return if claimed_ids.empty?
-
       current_db = RailsMultisite::ConnectionManagement.current_db
       max_concurrent = SiteSetting.bulk_invite_personalization_max_concurrency
 
-      claimed_ids.each_slice(max_concurrent) do |batch_ids|
+      invite_ids.each_slice(max_concurrent) do |batch_ids|
         threads =
           batch_ids.map do |invite_id|
             Thread.new { generate_safely(invite_id, extra_keywords, current_db) }
@@ -47,33 +55,6 @@ module Jobs
     end
 
     private
-
-    # A single conditional UPDATE, not a find_each+save loop -- so two
-    # overlapping enqueues of this job (e.g. an admin double-clicking "Send
-    # Selected") can't both claim, and both regenerate content for, the same
-    # invite. Mirrors Invite.claim_for_immediate_send's same reasoning.
-    #
-    # "emailed_status IS NULL OR ..." -- not just a plain where.not, which
-    # would silently exclude every NULL row instead of claiming it: SQL's
-    # NOT IN against NULL evaluates to NULL (neither true nor false), so a
-    # row with no emailed_status set yet would never be claimable without
-    # this. Invite.pending/.expired already guard against this same gap.
-    def claim_for_drafting(invite_ids)
-      in_flight_statuses = Invite.emailed_status_types.values_at(:drafting, :bulk_pending, :sending)
-
-      claimable_ids =
-        Invite
-          .where(id: invite_ids)
-          .where("emailed_status IS NULL OR emailed_status NOT IN (?)", in_flight_statuses)
-          .pluck(:id)
-      return [] if claimable_ids.empty?
-
-      Invite.where(id: claimable_ids).update_all(
-        emailed_status: Invite.emailed_status_types[:drafting],
-        updated_at: Time.zone.now,
-      )
-      claimable_ids
-    end
 
     # Runs on its own thread (see #execute), re-establishing this job's
     # multisite db/connection there -- same reasoning as

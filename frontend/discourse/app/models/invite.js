@@ -97,6 +97,14 @@ export default class Invite extends EmberObject {
     return ajax(`/admin/email-logs/invite_sent/${inviteId}.json`);
   }
 
+  // Previews an invite's currently staged (not yet delivered) content --
+  // see Admin::EmailLogsController#invite_draft. Only meaningful while
+  // draft_preview_available is true (gated server-side to :bulk_pending/
+  // :sending, admin-only, same shape as #findLatestSentEmail's response).
+  static findDraftPreview(inviteId) {
+    return ajax(`/admin/email-logs/invite_draft/${inviteId}.json`);
+  }
+
   // Turns the admin-reviewed CSV text from the "Extract from URL" tab into
   // draft invites (see InvitesController#create_drafts) -- never sent
   // immediately.

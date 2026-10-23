@@ -10,6 +10,7 @@ const STATUSES = [
   "bounced",
   "complained",
   "review",
+  "drafting",
 ];
 
 /**

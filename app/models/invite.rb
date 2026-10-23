@@ -530,6 +530,82 @@ class Invite < ActiveRecord::Base
     claimed_count == 1 ? find_by(id: id) : nil
   end
 
+  # Atomically flips a batch of pre-existing invites into :drafting, for a
+  # caller about to enqueue Jobs::GenerateInvitePersonalization. Called by
+  # InvitesController#dispatch_bulk_resend *before* enqueueing (not by the
+  # job itself) -- this is what makes the :review -> :drafting transition
+  # happen synchronously, as part of the HTTP response, rather than only
+  # once Sidekiq gets around to running the job. That matters: the status
+  # change is the admin's only way to tell a batch they just dispatched
+  # apart from an unrelated newer batch still sitting at :review, and a
+  # Sidekiq lag (a deploy restarting workers, a backed-up queue) shouldn't
+  # leave that indistinguishable for minutes or hours.
+  #
+  # A single conditional UPDATE, not a find_each+save loop -- so two
+  # concurrent callers (e.g. an admin double-clicking "Send Selected")
+  # can't both claim, and both regenerate content for, the same invite.
+  # Mirrors #claim_for_immediate_send's same reasoning. Returns only the
+  # ids actually claimed; a caller enqueues the job with just those (if
+  # any) rather than the originally-requested set -- an invite that's
+  # already mid-flight elsewhere is a legitimate race to skip quietly, not
+  # a reason to fail the whole batch.
+  #
+  # Jobs::BulkInvite doesn't call this: it creates brand-new rows already
+  # at :drafting (see #generate), so there's nothing pre-existing to race
+  # against.
+  #
+  # "emailed_status IS NULL OR ..." -- not just a plain where.not, which
+  # would silently exclude every NULL row instead of claiming it: SQL's
+  # NOT IN against NULL evaluates to NULL (neither true nor false), so a
+  # row with no emailed_status set yet would never be claimable without
+  # this. #pending/#expired already guard against this same gap.
+  def self.claim_for_drafting(invite_ids)
+    return [] if invite_ids.blank?
+
+    in_flight_statuses = emailed_status_types.values_at(:drafting, :bulk_pending, :sending)
+    claimable_ids =
+      where(id: invite_ids).where(
+        "emailed_status IS NULL OR emailed_status NOT IN (?)",
+        in_flight_statuses,
+      ).pluck(:id)
+    return [] if claimable_ids.empty?
+
+    where(id: claimable_ids).update_all(
+      emailed_status: emailed_status_types[:drafting],
+      updated_at: Time.zone.now,
+    )
+    claimable_ids
+  end
+
+  # #claim_for_drafting's own exclusion of already-:drafting rows (so two
+  # concurrent dispatches can't double-claim) has a failure mode: if the
+  # Jobs::GenerateInvitePersonalization run that did the claiming dies
+  # before finishing -- a deploy restarting Sidekiq mid-batch, a crash,
+  # anything -- those invites are claimed forever, with nothing able to
+  # reclaim them (confirmed in production: a batch sat at :drafting for
+  # hours, untouched, after exactly this). Run periodically (see
+  # Jobs::Scheduled::RequeueStaleDraftingInvites) to rewind anything stuck
+  # past STALE_DRAFTING_AFTER back to :review, so an admin's next Send
+  # Selected -- or this same sweep's own next pass, for an unattended site
+  # -- claims and reprocesses it.
+  #
+  # The threshold has to clear legitimate processing time, not just a
+  # single call's worst case (confirmed up to ~367s): a large batch is
+  # worked through in small concurrent slices (see
+  # Jobs::GenerateInvitePersonalization#execute), so an invite near the
+  # end of a big batch can sit untouched, still genuinely queued behind
+  # earlier slices, for a while -- 1 hour stays well clear of that even
+  # for an unusually large batch, while still being far short of "stuck
+  # forever".
+  STALE_DRAFTING_AFTER = 1.hour
+
+  def self.requeue_stale_drafting
+    where(emailed_status: emailed_status_types[:drafting]).where(
+      "updated_at < ?",
+      STALE_DRAFTING_AFTER.ago,
+    ).update_all(emailed_status: emailed_status_types[:review], updated_at: Time.zone.now)
+  end
+
   def limit_invites_per_day
     RateLimiter.new(invited_by, "invites-per-day", SiteSetting.max_invites_per_day, 1.day.to_i)
   end

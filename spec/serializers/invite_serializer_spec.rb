@@ -208,4 +208,89 @@ RSpec.describe InviteSerializer do
       expect(serializer.as_json[:can_delete_invite]).to eq(false)
     end
   end
+
+  describe "#draft_preview_available" do
+    fab!(:user)
+    fab!(:admin)
+    fab!(:moderator)
+    fab!(:invite) do
+      Fabricate(
+        :invite,
+        invited_by: user,
+        emailed_status: Invite.emailed_status_types[:bulk_pending],
+      )
+    end
+
+    it "is true for an admin viewing a :bulk_pending invite" do
+      json = InviteSerializer.new(invite, scope: Guardian.new(admin), root: false).as_json
+
+      expect(json[:draft_preview_available]).to eq(true)
+    end
+
+    it "is true for an admin viewing a :sending invite" do
+      invite.update_column(:emailed_status, Invite.emailed_status_types[:sending])
+
+      json = InviteSerializer.new(invite, scope: Guardian.new(admin), root: false).as_json
+
+      expect(json[:draft_preview_available]).to eq(true)
+    end
+
+    it "is false for a :review invite (content not finalized yet)" do
+      invite.update_column(:emailed_status, Invite.emailed_status_types[:review])
+
+      json = InviteSerializer.new(invite, scope: Guardian.new(admin), root: false).as_json
+
+      expect(json[:draft_preview_available]).to eq(false)
+    end
+
+    it "is false for an already-:sent invite" do
+      invite.update_column(:emailed_status, Invite.emailed_status_types[:sent])
+
+      json = InviteSerializer.new(invite, scope: Guardian.new(admin), root: false).as_json
+
+      expect(json[:draft_preview_available]).to eq(false)
+    end
+
+    it "is omitted entirely for a moderator, even though moderators can send drafts elsewhere on this page" do
+      json = InviteSerializer.new(invite, scope: Guardian.new(moderator), root: false).as_json
+
+      expect(json).not_to include(:draft_preview_available)
+    end
+
+    it "is omitted entirely for a plain user" do
+      json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
+
+      expect(json).not_to include(:draft_preview_available)
+    end
+  end
+
+  describe "#drafting" do
+    fab!(:user)
+    fab!(:invite) do
+      Fabricate(:invite, invited_by: user, emailed_status: Invite.emailed_status_types[:drafting])
+    end
+
+    it "is true for a :drafting invite, even though #delivery_status itself still reads \"review\" for it" do
+      json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
+
+      expect(json[:drafting]).to eq(true)
+      expect(json[:delivery_status]).to eq("review")
+    end
+
+    it "is false for a plain :review invite" do
+      invite.update_column(:emailed_status, Invite.emailed_status_types[:review])
+
+      json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
+
+      expect(json[:drafting]).to eq(false)
+    end
+
+    it "is false once the invite moves past drafting (e.g. :bulk_pending)" do
+      invite.update_column(:emailed_status, Invite.emailed_status_types[:bulk_pending])
+
+      json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
+
+      expect(json[:drafting]).to eq(false)
+    end
+  end
 end

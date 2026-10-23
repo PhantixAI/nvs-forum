@@ -2666,6 +2666,7 @@ en:
         delivery_status_bounced: "Bounced"
         delivery_status_complained: "Marked as spam"
         delivery_status_review: "Review"
+        delivery_status_drafting: "Drafting"
         edit: "Edit"
         remove: "Remove"
         copy_link: "Get Link"
@@ -2747,6 +2748,7 @@ en:
         sent_email:
           modal:
             title: "Last Sent Email"
+            draft_title: "Draft Preview"
             subject: "Subject"
             body: "Body"
             headers: "Headers"
@@ -2761,7 +2763,8 @@ en:
           copy_link_and_share_it: "Copy the link below and share it to instantly grant access to this site."
           copy_link: "Copy link"
           link_copied: "Link copied!"
-          preview_sent_email: "Preview last sent email"
+          preview_draft: "Preview draft"
+          preview_sent_email: "Preview last email sent"
           send_now: "Send Now"
           send_now_success: "Invite sent."
           share_link: "Share link"

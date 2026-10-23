@@ -355,6 +355,95 @@ RSpec.describe Admin::EmailLogsController do
     end
   end
 
+  describe "#invite_draft" do
+    fab!(:invite) do
+      Fabricate(
+        :invite,
+        custom_subject: "You're invited!",
+        custom_message: "Come join us.",
+        emailed_status: Invite.emailed_status_types[:bulk_pending],
+      )
+    end
+
+    context "when logged in as an admin" do
+      before { sign_in(admin) }
+
+      it "renders the invite's currently staged content, without sending anything" do
+        get "/admin/email-logs/invite_draft/#{invite.id}.json"
+
+        expect(response.status).to eq(200)
+        json = response.parsed_body
+        expect(json["subject"]).to be_present
+        expect(json["body"]).to include("Come join us.")
+        expect(Jobs::InviteEmail.jobs).to be_empty
+        expect(ActionMailer::Base.deliveries).to be_empty
+      end
+
+      it "also renders while the invite is :sending (claimed, about to send)" do
+        invite.update_column(:emailed_status, Invite.emailed_status_types[:sending])
+
+        get "/admin/email-logs/invite_draft/#{invite.id}.json"
+
+        expect(response.status).to eq(200)
+      end
+
+      it "404s for a :review invite (content not finalized yet)" do
+        invite.update_column(:emailed_status, Invite.emailed_status_types[:review])
+
+        get "/admin/email-logs/invite_draft/#{invite.id}.json"
+
+        expect(response.status).to eq(404)
+      end
+
+      it "404s for a :drafting invite (content may still be mid-generation)" do
+        invite.update_column(:emailed_status, Invite.emailed_status_types[:drafting])
+
+        get "/admin/email-logs/invite_draft/#{invite.id}.json"
+
+        expect(response.status).to eq(404)
+      end
+
+      it "404s for an already-:sent invite (use #invite_sent instead)" do
+        invite.update_column(:emailed_status, Invite.emailed_status_types[:sent])
+
+        get "/admin/email-logs/invite_draft/#{invite.id}.json"
+
+        expect(response.status).to eq(404)
+      end
+
+      it "404s for an unbound invite with no valid recipient (email and description both blank)" do
+        invite.update_columns(email: nil, description: nil)
+
+        get "/admin/email-logs/invite_draft/#{invite.id}.json"
+
+        expect(response.status).to eq(404)
+      end
+
+      it "404s for a non-existent invite" do
+        get "/admin/email-logs/invite_draft/-1.json"
+        expect(response.status).to eq(404)
+      end
+    end
+
+    context "when logged in as a non-admin staff user (moderator)" do
+      before { sign_in(moderator) }
+
+      it "denies access with a 404 response, even though moderators can send drafts elsewhere on this page" do
+        get "/admin/email-logs/invite_draft/#{invite.id}.json"
+        expect(response.status).to eq(404)
+      end
+    end
+
+    context "when logged in as a non-staff user" do
+      before { sign_in(user) }
+
+      it "denies access with a 404 response" do
+        get "/admin/email-logs/invite_draft/#{invite.id}.json"
+        expect(response.status).to eq(404)
+      end
+    end
+  end
+
   describe "#incoming_from_bounced" do
     context "when logged in as an admin" do
       before { sign_in(admin) }
