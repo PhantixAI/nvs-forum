@@ -54,7 +54,11 @@ module Jobs
     # a slow/variable LLM call (confirmed in production: up to 367s) blocked
     # this method's own send pacing for every other queued invite.
     def deliver(invite)
-      ::Jobs.enqueue(:invite_email, invite_id: invite.id)
+      ::Jobs.enqueue(
+        :invite_email,
+        invite_id: invite.id,
+        invite_to_topic: TopicInvite.exists?(invite_id: invite.id),
+      )
     end
 
     def reschedule

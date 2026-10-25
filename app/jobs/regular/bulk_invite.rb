@@ -270,6 +270,7 @@ module Jobs
             email: allow_any_email ? nil : email,
             description: allow_any_email ? email : nil,
             topic: topic,
+            invite_to_topic: topic.present?,
             group_ids: groups.map(&:id),
             skip_email: @skip_email,
             recipient_name: recipient_name,

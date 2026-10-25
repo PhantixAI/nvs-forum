@@ -11,7 +11,6 @@ import lazyHash from "discourse/helpers/lazy-hash";
 import rawDate from "discourse/helpers/raw-date";
 import { showsBatchModeratorBadge } from "discourse/lib/batch-moderator-badge";
 import ComboBox from "discourse/select-kit/components/combo-box";
-import { not, or } from "discourse/truth-helpers";
 import DButton from "discourse/ui-kit/d-button";
 import DConditionalLoadingSpinner from "discourse/ui-kit/d-conditional-loading-spinner";
 import DDropdownMenu from "discourse/ui-kit/d-dropdown-menu";

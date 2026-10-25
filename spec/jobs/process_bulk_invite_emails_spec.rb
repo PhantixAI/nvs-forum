@@ -88,6 +88,29 @@ RSpec.describe Jobs::ProcessBulkInviteEmails do
       expect(Jobs::InviteEmail.jobs.size).to eq(1)
     end
 
+    it "marks the invite_email job as a topic invite when the invite has a topic" do
+      topic_invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
+      topic_invite.topics << Fabricate(:topic)
+
+      described_class.new.execute({})
+
+      expect(Jobs::InviteEmail.jobs.first["args"].first).to include(
+        "invite_id" => topic_invite.id,
+        "invite_to_topic" => true,
+      )
+    end
+
+    it "marks the invite_email job as not a topic invite for a plain forum invite" do
+      forum_invite = Fabricate(:invite, emailed_status: Invite.emailed_status_types[:bulk_pending])
+
+      described_class.new.execute({})
+
+      expect(Jobs::InviteEmail.jobs.first["args"].first).to include(
+        "invite_id" => forum_invite.id,
+        "invite_to_topic" => false,
+      )
+    end
+
     # Covers an unexpected error from #deliver's own Jobs.enqueue call, which
     # #execute's outer rescue still handles the same way it always has.
     it "moves an invite that fails to send to pending and keeps the chain going" do
@@ -99,10 +122,11 @@ RSpec.describe Jobs::ProcessBulkInviteEmails do
       # and_call_original as the general case, with the specific
       # :invite_email call overridden to raise.
       allow(::Jobs).to receive(:enqueue).and_call_original
-      allow(::Jobs).to receive(:enqueue).with(:invite_email, invite_id: invite.id).and_raise(
-        StandardError,
-        "boom",
-      )
+      allow(::Jobs).to receive(:enqueue).with(
+        :invite_email,
+        invite_id: invite.id,
+        invite_to_topic: false,
+      ).and_raise(StandardError, "boom")
 
       described_class.new.execute({})
 

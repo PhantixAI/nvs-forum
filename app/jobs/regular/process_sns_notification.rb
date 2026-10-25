@@ -37,7 +37,7 @@ module Jobs
     # can arrive out of order, and once one of these terminal outcomes is
     # recorded it's the more useful signal than a later, contradictory one.
     def process_bounce(message)
-      return unless message_id = message.dig("mail", "messageId").presence
+      return unless message_id = original_message_id(message["mail"])
       return unless bounce_type = message.dig("bounce", "bounceType").presence
 
       Array(message.dig("bounce", "bouncedRecipients")).each do |r|
@@ -58,8 +58,16 @@ module Jobs
       end
     end
 
+    def original_message_id(mail)
+      header =
+        Array(mail&.dig("headers")).find { |entry| entry["name"].to_s.casecmp?("Message-ID") }
+      message_id = header&.dig("value").presence || mail&.dig("commonHeaders", "messageId").presence
+      # Provider-assigned IDs do not identify the original message stored in EmailLog.
+      Email::MessageIdService.message_id_clean(message_id.strip) if message_id
+    end
+
     def process_delivery(message)
-      return unless message_id = message.dig("mail", "messageId").presence
+      return unless message_id = original_message_id(message["mail"])
 
       Array(message.dig("delivery", "recipients")).each do |email_address|
         email_log = find_email_log(message_id, email_address)
@@ -71,7 +79,7 @@ module Jobs
     end
 
     def process_complaint(message)
-      return unless message_id = message.dig("mail", "messageId").presence
+      return unless message_id = original_message_id(message["mail"])
 
       Array(message.dig("complaint", "complainedRecipients")).each do |r|
         email_log = find_email_log(message_id, r["emailAddress"])
