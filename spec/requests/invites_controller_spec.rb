@@ -3301,7 +3301,11 @@ RSpec.describe InvitesController do
 
   describe "#extract_from_url" do
     it "requires to be logged in" do
-      post "/invites/extract-from-url.json", params: { url: "https://example.com", rules: "rules" }
+      post "/invites/extract-from-url.json",
+           params: {
+             urls: ["https://example.com"],
+             rules: "rules",
+           }
       expect(response.status).to eq(403)
     end
 
@@ -3310,31 +3314,31 @@ RSpec.describe InvitesController do
         sign_in(user)
         post "/invites/extract-from-url.json",
              params: {
-               url: "https://example.com",
+               urls: ["https://example.com"],
                rules: "rules",
              }
         expect(response.status).to eq(403)
       end
 
-      it "rejects a blank url or rules" do
+      it "rejects blank/missing urls or rules" do
         sign_in(admin)
 
-        post "/invites/extract-from-url.json", params: { url: "", rules: "rules" }
+        post "/invites/extract-from-url.json", params: { urls: [], rules: "rules" }
         expect(response.status).to eq(422)
 
-        post "/invites/extract-from-url.json", params: { url: "https://example.com", rules: "" }
+        post "/invites/extract-from-url.json", params: { urls: [""], rules: "rules" }
+        expect(response.status).to eq(422)
+
+        post "/invites/extract-from-url.json", params: { urls: ["https://example.com"], rules: "" }
         expect(response.status).to eq(422)
       end
 
       it "persists the given rules for later prefill, even before the extraction itself runs" do
         sign_in(admin)
-        BulkInviteUrlExtraction::Generator.stubs(:extract).returns(
-          BulkInviteUrlExtraction::Generator::Result.new(rows: [], warnings: []),
-        )
 
         post "/invites/extract-from-url.json",
              params: {
-               url: "https://example.com",
+               urls: ["https://example.com"],
                rules: "Append RollNo to @example.edu",
              }
 
@@ -3343,66 +3347,113 @@ RSpec.describe InvitesController do
         )
       end
 
-      it "returns the extracted rows and any warnings on success" do
+      it "queues a UrlExtractionRequest and enqueues the job, responding immediately" do
         sign_in(admin)
-        rows = [{ email: "priya@iitb.ac.in", name: "Priya" }]
-        BulkInviteUrlExtraction::Generator.stubs(:extract).returns(
-          BulkInviteUrlExtraction::Generator::Result.new(
-            rows: rows,
-            warnings: ["Part 2 of 2 of the page could not be processed."],
-          ),
-        )
 
         post "/invites/extract-from-url.json",
              params: {
-               url: "https://example.com",
+               urls: ["https://example.com"],
                rules: "rules",
              }
 
-        expect(response.status).to eq(200)
-        expect(response.parsed_body["rows"]).to eq(
-          [{ "email" => "priya@iitb.ac.in", "name" => "Priya" }],
-        )
-        expect(response.parsed_body["warnings"]).to eq(
-          ["Part 2 of 2 of the page could not be processed."],
-        )
+        expect(response.status).to eq(201)
+        request = UrlExtractionRequest.last
+        expect(request.url).to eq("https://example.com")
+        expect(request.rules).to eq("rules")
+        expect(request.created_by_id).to eq(admin.id)
+        expect(request.status).to eq(UrlExtractionRequest.statuses[:queued])
+        expect(response.parsed_body["requests"].map { |r| r["id"] }).to eq([request.id])
+        expect(response.parsed_body["requests"].first["status"]).to eq("queued")
+        expect(
+          Jobs::ProcessUrlExtractionRequest.jobs.map { |job| job["args"].first["request_id"] },
+        ).to contain_exactly(request.id)
       end
 
-      it "returns a 422 with the failure message when extraction fails entirely" do
+      it "queues one request per url, all sharing the same rules, deduping repeats" do
         sign_in(admin)
-        BulkInviteUrlExtraction::Generator.stubs(:extract).raises(
-          BulkInviteUrlExtraction::Generator::ExtractionFailed.new(
-            "Could not fetch the page: timed out",
-          ),
-        )
 
         post "/invites/extract-from-url.json",
              params: {
-               url: "https://example.com",
-               rules: "rules",
+               urls: %w[
+                 https://example.edu/students
+                 https://example.edu/alumni
+                 https://example.edu/students
+               ],
+               rules: "Extract email and name",
              }
 
-        expect(response.status).to eq(422)
-        expect(response.parsed_body["errors"]).to include("Could not fetch the page: timed out")
+        expect(response.status).to eq(201)
+        requests = UrlExtractionRequest.where(created_by_id: admin.id)
+        expect(requests.pluck(:url)).to contain_exactly(
+          "https://example.edu/students",
+          "https://example.edu/alumni",
+        )
+        expect(requests.pluck(:rules).uniq).to eq(["Extract email and name"])
+        expect(response.parsed_body["requests"].map { |r| r["url"] }).to contain_exactly(
+          "https://example.edu/students",
+          "https://example.edu/alumni",
+        )
+        expect(
+          Jobs::ProcessUrlExtractionRequest.jobs.map { |job| job["args"].first["request_id"] },
+        ).to contain_exactly(*requests.map(&:id))
       end
 
       it "enforces a per-hour rate limit on extraction attempts" do
         sign_in(admin)
         RateLimiter.enable
-        BulkInviteUrlExtraction::Generator.stubs(:extract).returns(
-          BulkInviteUrlExtraction::Generator::Result.new(rows: [], warnings: []),
-        )
 
         11.times do
           post "/invites/extract-from-url.json",
                params: {
-                 url: "https://example.com",
+                 urls: ["https://example.com"],
                  rules: "rules",
                }
         end
 
         expect(response.status).to eq(429)
       end
+
+      it "creates none of the batch's requests when it would exceed the hourly limit" do
+        sign_in(admin)
+        RateLimiter.enable
+
+        post "/invites/extract-from-url.json",
+             params: {
+               urls: (1..11).map { |n| "https://example.com/#{n}" },
+               rules: "rules",
+             }
+
+        expect(response.status).to eq(429)
+        expect(UrlExtractionRequest.where(created_by_id: admin.id).count).to eq(0)
+      end
+    end
+  end
+
+  describe "#url_extraction_requests" do
+    it "requires to be logged in" do
+      get "/invites/url-extraction-requests.json"
+      expect(response.status).to eq(403)
+    end
+
+    it "fails if you cannot bulk invite to the forum" do
+      sign_in(user)
+      get "/invites/url-extraction-requests.json"
+      expect(response.status).to eq(403)
+    end
+
+    it "lists only the current admin's own requests, most recent first" do
+      sign_in(admin)
+      other_admin = Fabricate(:admin)
+      mine_older = Fabricate(:url_extraction_request, created_by: admin, created_at: 1.hour.ago)
+      mine_newer = Fabricate(:url_extraction_request, created_by: admin)
+      Fabricate(:url_extraction_request, created_by: other_admin)
+
+      get "/invites/url-extraction-requests.json"
+
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["requests"].map { |r| r["id"] }).to eq(
+        [mine_newer.id, mine_older.id],
+      )
     end
   end
 
@@ -3487,6 +3538,25 @@ RSpec.describe InvitesController do
                ai_personalization: "false",
              }
         expect(Invite.find_by(email: "b@example.com").ai_personalization).to eq(false)
+      end
+
+      it "persists source_url on created invites when given, leaving it nil when omitted" do
+        sign_in(admin)
+
+        post "/invites/create-drafts.json",
+             params: {
+               csv: "email,name,groups,topic_id,locale,keywords\npriya@iitb.ac.in,,,,,",
+               source_url: "https://example.edu/students",
+             }
+        expect(Invite.find_by(email: "priya@iitb.ac.in").source_url).to eq(
+          "https://example.edu/students",
+        )
+
+        post "/invites/create-drafts.json",
+             params: {
+               csv: "email,name,groups,topic_id,locale,keywords\njo@iitb.ac.in,,,,,",
+             }
+        expect(Invite.find_by(email: "jo@iitb.ac.in").source_url).to eq(nil)
       end
 
       it "rejects a CSV with more rows than max_bulk_invites" do

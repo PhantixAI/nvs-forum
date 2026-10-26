@@ -40,6 +40,7 @@ RSpec.describe InviteSerializer do
         :groups,
         :recipient_keywords,
         :allow_any_email,
+        :source_url,
       )
     end
 
@@ -172,6 +173,19 @@ RSpec.describe InviteSerializer do
       json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
 
       expect(json[:allow_any_email]).to eq(true)
+    end
+
+    it "serializes source_url when the viewer can see invite details" do
+      invite =
+        Invite.generate(
+          user,
+          email: "draftee4@example.com",
+          source_url: "https://example.edu/students",
+        )
+
+      json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
+
+      expect(json[:source_url]).to eq("https://example.edu/students")
     end
   end
 

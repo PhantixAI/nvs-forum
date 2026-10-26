@@ -24,7 +24,8 @@ module BulkInviteUrlExtraction
       csv_text:,
       allow_any_email:,
       schedule_send:,
-      ai_personalization:
+      ai_personalization:,
+      source_url: nil
     )
       guardian = Guardian.new(current_user)
       errors = []
@@ -85,6 +86,7 @@ module BulkInviteUrlExtraction
               recipient_keywords: row["keywords"].presence,
               allow_any_email: allow_any_email,
               schedule_send: schedule_send,
+              source_url: source_url,
               ai_personalization: ai_personalization,
               emailed_status: Invite.emailed_status_types[:review],
             )

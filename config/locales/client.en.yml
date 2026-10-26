@@ -2830,6 +2830,7 @@ en:
           email_placeholder: "name@example.com"
           recipient_email_label: "Recipient email"
           recipient_email_help: "Who this link was created for. The link can still be redeemed by any email allowed by the domain above."
+          source_url_label: "Source URL"
           invite_by: "Invite by"
           invite_by_link: "Shareable link"
           invite_by_email: "Email"
@@ -2888,7 +2889,9 @@ en:
           url_extraction:
             csv_tab: "Upload CSV file"
             url_tab: "Extract from URL"
-            url_label: "Page URL"
+            urls_label: "Page URLs"
+            urls_help: "One URL per line. The same rules apply to all of them."
+            urls_required: "Enter at least one URL."
             rules_label: "Extraction rules"
             extract_button: "Extract"
             extracting: "Extracting…"
@@ -2900,6 +2903,15 @@ en:
             drafts_created:
               one: "%{count} draft invite created. Review and send it from the Pending tab's Review filter."
               other: "%{count} draft invites created. Review and send them from the Pending tab's Review filter."
+            submitted:
+              one: "Submitted. This will show up below once it's ready."
+              other: "%{count} URLs submitted. They'll show up below as each one is ready."
+            open_request: "Open"
+            status:
+              queued: "Queued"
+              processing: "Extracting…"
+              ready: "Ready"
+              failed: "Failed"
 
       confirm_access:
         title: "Confirm access"

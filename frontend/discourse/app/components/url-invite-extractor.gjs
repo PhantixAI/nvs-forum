@@ -3,64 +3,46 @@ import { tracked } from "@glimmer/tracking";
 import { hash } from "@ember/helper";
 import { action } from "@ember/object";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
+import { service } from "@ember/service";
 import { ajax } from "discourse/lib/ajax";
 import { extractError, popupAjaxError } from "discourse/lib/ajax-error";
+import { bind } from "discourse/lib/decorators";
 import Invite from "discourse/models/invite";
+import { i18n } from "discourse-i18n";
 
-const CSV_HEADER = [
-  "email",
-  "name",
-  "groups",
-  "topic_id",
-  "locale",
-  "keywords",
-];
-
-// Not shown in the UI -- there's no per-row control for it today (see
-// UrlInviteExtractor's class comment), so it's a fixed default rather than
-// a field admins have to think about.
-const DEFAULT_LOCALE = "en";
-
-function csvField(value) {
-  const text = (value ?? "").toString();
-  return /["\n,]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
-// Each row's keywords come from the LLM's own per-row extraction (see
-// BulkInviteUrlExtraction::Generator#system_message) -- driven by the
-// admin's rules (e.g. "use Department, Program, Advisor as keywords"), but
-// a per-person value, not the rules text itself repeated on every row.
-function buildCsv(rows) {
-  const lines = [CSV_HEADER.join(",")];
-
-  rows.forEach((row) => {
-    lines.push(
-      [row.email, row.name, "", "", DEFAULT_LOCALE, row.keywords]
-        .map(csvField)
-        .join(",")
-    );
-  });
-
-  return lines.join("\n");
-}
+// Matches Jobs::ProcessUrlExtractionRequest::CHANNEL -- published once an
+// extraction request finishes (ready or failed), targeted at the admin who
+// submitted it.
+const PROGRESS_CHANNEL = "/url-extraction-progress";
 
 // Renders nothing itself -- owns the URL-extraction state/logic and yields
 // it, the same way CreateInviteUploader does, so the caller (the bulk
 // invite modal) can render the form fields in its body and the primary
 // action button in its footer from one shared, reactive source.
 //
-// The extracted result is handed to the admin as one editable CSV blob
-// (see #extract/#createInvites) rather than a row-by-row table -- the
+// Submitting one or more URLs (sharing the same rules/flags) only queues a
+// UrlExtractionRequest per URL (see InvitesController#extract_from_url) --
+// the actual extraction runs off-request, so an admin can submit several
+// URLs, or several batches back-to-back, without waiting on any of them.
+// #requests tracks them all; #onProgress keeps that list (and the
+// currently open request) live as each one finishes. Each request's
+// extracted result is handed to the admin as its own editable CSV blob
+// (see #openRequest/#createInvites) rather than a row-by-row table -- the
 // admin reviews/edits it directly, then it's submitted as draft invites
 // (InvitesController#create_drafts), not sent immediately.
 export default class UrlInviteExtractor extends Component {
+  @service messageBus;
+  @service toasts;
+
   @tracked csvText = "";
   @tracked draftErrors = [];
   @tracked draftsCreated = null;
   @tracked creatingDrafts = false;
   @tracked error = null;
   @tracked extracting = false;
+  @tracked requests = [];
   @tracked rules = "";
+  @tracked selectedRequest = null;
   @tracked warnings = [];
 
   // Stable default draft data for the settings toggles that don't vary
@@ -75,6 +57,16 @@ export default class UrlInviteExtractor extends Component {
   };
 
   #formApi = null;
+
+  constructor() {
+    super(...arguments);
+    this.messageBus.subscribe(PROGRESS_CHANNEL, this.onProgress);
+  }
+
+  willDestroy() {
+    super.willDestroy(...arguments);
+    this.messageBus.unsubscribe(PROGRESS_CHANNEL, this.onProgress);
+  }
 
   get canCreateInvites() {
     return this.csvHasRows && !this.creatingDrafts;
@@ -103,6 +95,7 @@ export default class UrlInviteExtractor extends Component {
         allowAnyEmail: this.#formApi.get("allowAnyEmail"),
         scheduleSend: this.#formApi.get("scheduleSend"),
         aiPersonalization: this.#formApi.get("aiPersonalization"),
+        sourceUrl: this.selectedRequest?.url,
       });
       this.draftsCreated = result.created_count;
       this.draftErrors = result.errors;
@@ -114,18 +107,33 @@ export default class UrlInviteExtractor extends Component {
   }
 
   @action
-  async extract({ url, rules }) {
+  async extract({ urls, rules }) {
     this.error = null;
+
+    const parsedUrls = urls
+      .split("\n")
+      .map((url) => url.trim())
+      .filter(Boolean);
+
+    if (!parsedUrls.length) {
+      this.error = i18n(
+        "user.invited.bulk_invite.url_extraction.urls_required"
+      );
+      return;
+    }
+
     this.extracting = true;
-    this.csvText = "";
 
     try {
-      const result = await ajax("/invites/extract-from-url.json", {
-        type: "POST",
-        data: { url, rules },
+      const result = await Invite.submitUrlExtraction(parsedUrls, rules);
+      this.requests = [...result.requests, ...this.requests];
+      this.toasts.success({
+        data: {
+          message: i18n("user.invited.bulk_invite.url_extraction.submitted", {
+            count: parsedUrls.length,
+          }),
+        },
       });
-      this.csvText = buildCsv(result.rows);
-      this.warnings = result.warnings;
     } catch (err) {
       this.error = extractError(err);
     } finally {
@@ -145,6 +153,36 @@ export default class UrlInviteExtractor extends Component {
   }
 
   @action
+  loadRequests() {
+    if (!this.args.enabled) {
+      return;
+    }
+
+    Invite.fetchUrlExtractionRequests()
+      .then((result) => (this.requests = result.requests))
+      .catch(popupAjaxError);
+  }
+
+  @bind
+  onProgress(data) {
+    const updated = data.request;
+    this.requests = this.requests.map((request) =>
+      request.id === updated.id ? updated : request
+    );
+
+    if (this.selectedRequest?.id === updated.id) {
+      this.openRequest(updated);
+    }
+  }
+
+  @action
+  openRequest(request) {
+    this.selectedRequest = request;
+    this.csvText = request.csv_text ?? "";
+    this.warnings = request.warnings ?? [];
+  }
+
+  @action
   registerFormApi(api) {
     this.#formApi = api;
   }
@@ -160,7 +198,7 @@ export default class UrlInviteExtractor extends Component {
   }
 
   <template>
-    <div {{didInsert this.loadLastRules}}>
+    <div {{didInsert this.loadLastRules}} {{didInsert this.loadRequests}}>
       {{yield
         (hash
           canCreateInvites=this.canCreateInvites
@@ -168,13 +206,15 @@ export default class UrlInviteExtractor extends Component {
           creatingDrafts=this.creatingDrafts
           csvText=this.csvText
           draftErrors=this.draftErrors
-          draftsCreated=this.draftsCreated
           error=this.error
           extract=this.extract
           extracting=this.extracting
           hasDraftResult=this.hasDraftResult
+          openRequest=this.openRequest
           registerFormApi=this.registerFormApi
+          requests=this.requests
           rules=this.rules
+          selectedRequest=this.selectedRequest
           settingsData=this.settingsData
           submit=this.submit
           updateCsvText=this.updateCsvText

@@ -45,6 +45,7 @@ class InvitesController < ApplicationController
                    upload_csv
                    extract_from_url
                    last_url_extraction_rules
+                   url_extraction_requests
                    create_drafts
                    send_drafts
                    destroy_drafts
@@ -798,25 +799,27 @@ class InvitesController < ApplicationController
     end
   end
 
-  # Feeds the "From URL" step of the bulk invite UI -- extracts a reviewable
-  # list of {email, name} rows from an admin-supplied page, following
-  # admin-supplied free-text rules. Never creates an Invite itself: the
-  # admin reviews/edits the result as CSV text client-side, which then gets
-  # submitted as draft invites through #create_drafts.
+  # Feeds the "From URL" step of the bulk invite UI -- queues one
+  # UrlExtractionRequest per URL, all sharing the same rules, and runs each
+  # extraction in Jobs::ProcessUrlExtractionRequest, off this
+  # request/response cycle (a dense/long page's cumulative extraction time
+  # -- even bounded by that job's own 4-way chunk concurrency -- can exceed
+  # a reverse-proxy gateway timeout before a synchronous response
+  # completes). Returns immediately once every request row exists so an
+  # admin can submit several URLs at once, or several batches back-to-back,
+  # without waiting on any of them; the frontend learns each result via
+  # MessageBus (see Jobs::ProcessUrlExtractionRequest::CHANNEL) or by
+  # polling #url_extraction_requests. Never creates an Invite itself: the
+  # admin reviews/edits each request's own extracted CSV client-side
+  # (one CSV per URL), which then gets submitted as draft invites through
+  # #create_drafts.
   def extract_from_url
     guardian.ensure_can_bulk_invite_to_forum!
-    RateLimiter.new(
-      current_user,
-      "bulk-invite-url-extraction-per-hour",
-      10,
-      1.hour,
-      apply_limit_to_staff: true,
-    ).performed!
 
-    url = params[:url].to_s.strip
+    urls = Array(params[:urls]).map { |url| url.to_s.strip }.reject(&:blank?).uniq
     rules = params[:rules].to_s.strip
 
-    if url.blank? || rules.blank?
+    if urls.blank? || rules.blank?
       return(
         render json:
                  failed_json.merge(errors: [I18n.t("bulk_invite.url_extraction.missing_fields")]),
@@ -824,14 +827,63 @@ class InvitesController < ApplicationController
       )
     end
 
+    # Consumed up front, one slot per URL, before creating anything -- a
+    # submission that would exceed the hourly limit creates none of its
+    # requests, rather than queuing part of the batch.
+    limiter =
+      RateLimiter.new(
+        current_user,
+        "bulk-invite-url-extraction-per-hour",
+        10,
+        1.hour,
+        apply_limit_to_staff: true,
+      )
+    urls.size.times { limiter.performed! }
+
     PluginStore.set("bulk_invite_url_extraction", "last_rules", rules)
 
-    hijack do
-      result = BulkInviteUrlExtraction::Generator.extract(url: url, rules: rules)
-      render json: success_json.merge(rows: result.rows, warnings: result.warnings)
-    rescue BulkInviteUrlExtraction::Generator::ExtractionFailed => e
-      render json: failed_json.merge(errors: [e.message]), status: :unprocessable_entity
-    end
+    requests =
+      urls.map do |url|
+        request =
+          UrlExtractionRequest.create!(
+            created_by: current_user,
+            url: url,
+            rules: rules,
+            status: UrlExtractionRequest.statuses[:queued],
+          )
+        Jobs.enqueue(:process_url_extraction_request, request_id: request.id)
+        request
+      end
+
+    render json:
+             success_json.merge(
+               requests:
+                 ActiveModel::ArraySerializer.new(
+                   requests,
+                   each_serializer: UrlExtractionRequestSerializer,
+                 ).as_json,
+             ),
+           status: :created
+  end
+
+  # Lists the current admin's own extraction requests, recent-first -- an
+  # admin can have several queued/processing at once by design (see
+  # #extract_from_url), unlike UserExport (which only ever exposes a single
+  # latest-per-user result).
+  def url_extraction_requests
+    guardian.ensure_can_bulk_invite_to_forum!
+
+    requests =
+      UrlExtractionRequest.where(created_by_id: current_user.id).order(created_at: :desc).limit(50)
+
+    render json:
+             success_json.merge(
+               requests:
+                 ActiveModel::ArraySerializer.new(
+                   requests,
+                   each_serializer: UrlExtractionRequestSerializer,
+                 ).as_json,
+             )
   end
 
   # Prefills the "Rules" field in the "From URL" step with whatever rules
@@ -890,6 +942,7 @@ class InvitesController < ApplicationController
           # param keeps today's personalize-by-default behavior.
           ai_personalization:
             params[:ai_personalization].blank? || Invite.truthy_param?(params[:ai_personalization]),
+          source_url: params[:source_url].presence,
         )
       render json: success_json.merge(created_count: result.created_count, errors: result.errors)
     end

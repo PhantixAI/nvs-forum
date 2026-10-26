@@ -110,7 +110,7 @@ export default class Invite extends EmberObject {
   // immediately.
   static createDraftsFromCsv(
     csv,
-    { allowAnyEmail, scheduleSend, aiPersonalization } = {}
+    { allowAnyEmail, scheduleSend, aiPersonalization, sourceUrl } = {}
   ) {
     return ajax("/invites/create-drafts", {
       type: "POST",
@@ -119,8 +119,27 @@ export default class Invite extends EmberObject {
         allow_any_email: allowAnyEmail,
         schedule_send: scheduleSend,
         ai_personalization: aiPersonalization,
+        source_url: sourceUrl,
       },
     });
+  }
+
+  // Queues an extraction of {email, name, keywords} rows from one or more
+  // pages, sharing the same rules -- one UrlExtractionRequest per URL,
+  // each with its own CSV. Runs off-request (see
+  // Jobs::ProcessUrlExtractionRequest); each result arrives later via
+  // MessageBus or #fetchUrlExtractionRequests, not in this response.
+  static submitUrlExtraction(urls, rules) {
+    return ajax("/invites/extract-from-url.json", {
+      type: "POST",
+      data: { urls, rules },
+    });
+  }
+
+  // The current admin's own extraction requests, recent-first -- see
+  // InvitesController#url_extraction_requests.
+  static fetchUrlExtractionRequests() {
+    return ajax("/invites/url-extraction-requests.json");
   }
 
   // Sends (or first-sends, for a draft) every invite in inviteIds, reusing

@@ -15,4 +15,52 @@
     font-family: monospace;
     font-size: var(--font-down-1);
   }
+
+  &__requests {
+    margin: 1em 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  &__request {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.5em 0;
+    border-bottom: 1px solid var(--primary-low);
+
+    &:last-child {
+      border-bottom: none;
+    }
+  }
+
+  &__request-url {
+    overflow: hidden;
+    flex: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__request-status {
+    padding: 0.15em 0.6em;
+    border-radius: 4px;
+    font-size: var(--font-down-1);
+    background-color: var(--primary-low);
+    color: var(--primary-medium);
+  }
+
+  &__request.--ready &__request-status {
+    background-color: var(--success-low);
+    color: var(--success);
+  }
+
+  &__request.--failed &__request-status {
+    background-color: var(--danger-low);
+    color: var(--danger);
+  }
+
+  &__request-error {
+    color: var(--danger);
+    font-size: var(--font-down-1);
+  }
 }

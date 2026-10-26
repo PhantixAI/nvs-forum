@@ -243,6 +243,19 @@ RSpec.describe Invite do
         expect(invite.recipient_keywords).to eq(nil)
       end
 
+      it "persists source_url when given, leaving it nil when not" do
+        invite =
+          Invite.generate(
+            user,
+            email: "test@example.com",
+            source_url: "https://example.edu/students",
+          )
+        expect(invite.source_url).to eq("https://example.edu/students")
+
+        invite2 = Invite.generate(user, email: "test2@example.com")
+        expect(invite2.source_url).to eq(nil)
+      end
+
       it "derives email_domain from email" do
         invite = Invite.generate(user, email: "test@example.com")
         expect(invite.email_domain).to eq("example.com")
@@ -927,6 +940,22 @@ RSpec.describe Invite do
       expect(
         Invite.search_filter(Invite.pending(inviter), "priya", show_emails: true),
       ).to contain_exactly(unbound)
+    end
+
+    it "matches on source_url when show_emails is true, not when false" do
+      extracted =
+        Invite.generate(
+          inviter,
+          email: "fromurl@example.edu",
+          source_url: "https://example.edu/students",
+        )
+
+      expect(
+        Invite.search_filter(Invite.pending(inviter), "example.edu/students", show_emails: true),
+      ).to contain_exactly(extracted)
+      expect(
+        Invite.search_filter(Invite.pending(inviter), "example.edu/students", show_emails: false),
+      ).to be_empty
     end
   end
 

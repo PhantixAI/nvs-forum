@@ -268,7 +268,13 @@ class Invite < ActiveRecord::Base
       # the per-row personalization context. Only keys actually passed are
       # touched, so callers that don't know about them leave them alone.
       context =
-        opts.slice(:recipient_name, :recipient_keywords, :ai_personalization, :schedule_send)
+        opts.slice(
+          :recipient_name,
+          :recipient_keywords,
+          :ai_personalization,
+          :schedule_send,
+          :source_url,
+        )
       invite.update!(context) if context.present?
       invite.update_columns(
         created_at: Time.zone.now,
@@ -296,6 +302,7 @@ class Invite < ActiveRecord::Base
           :ai_personalization,
           :schedule_send,
           :allow_any_email,
+          :source_url,
         )
       create_args[:invited_by] = invited_by
       create_args[:email] = email
@@ -474,7 +481,7 @@ class Invite < ActiveRecord::Base
 
     filter_sql = "(LOWER(users.username) LIKE :filter)"
     filter_sql =
-      "(LOWER(invites.email) LIKE :filter) or (LOWER(invites.description) LIKE :filter) or (LOWER(users.username) LIKE :filter)" if show_emails
+      "(LOWER(invites.email) LIKE :filter) or (LOWER(invites.description) LIKE :filter) or (LOWER(invites.source_url) LIKE :filter) or (LOWER(users.username) LIKE :filter)" if show_emails
 
     invites.where(filter_sql, filter: "%#{search.downcase}%")
   end
