@@ -1,6 +1,6 @@
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
-import { hash } from "@ember/helper";
+import { concat, fn, hash } from "@ember/helper";
 import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
@@ -9,7 +9,6 @@ import { trustHTML } from "@ember/template";
 import CreateInviteUploader from "discourse/components/create-invite-uploader";
 import Form from "discourse/components/form";
 import UrlInviteExtractor from "discourse/components/url-invite-extractor";
-import { eq, not, or } from "discourse/truth-helpers";
 import DButton from "discourse/ui-kit/d-button";
 import DModal from "discourse/ui-kit/d-modal";
 import { i18n } from "discourse-i18n";
@@ -92,7 +91,7 @@ export default class CreateInviteBulk extends Component {
                 <Form
                   class="url-invite-extractor__form"
                   @data={{hash
-                    url=""
+                    urls=""
                     rules=extractor.rules
                     allowAnyEmail=extractor.settingsData.allowAnyEmail
                     scheduleSend=extractor.settingsData.scheduleSend
@@ -104,15 +103,22 @@ export default class CreateInviteBulk extends Component {
                 >
                   <form.Field
                     @format="full"
-                    @name="url"
-                    @title={{i18n
-                      "user.invited.bulk_invite.url_extraction.url_label"
+                    @helpText={{i18n
+                      "user.invited.bulk_invite.url_extraction.urls_help"
                     }}
-                    @type="input-url"
-                    @validation="required|url"
+                    @name="urls"
+                    @title={{i18n
+                      "user.invited.bulk_invite.url_extraction.urls_label"
+                    }}
+                    @type="textarea"
+                    @validation="required"
                     as |field|
                   >
-                    <field.Control placeholder="https://example.edu/students" />
+                    <field.Control
+                      placeholder="https://example.edu/students
+https://example.edu/alumni"
+                      @height={{80}}
+                    />
                   </form.Field>
 
                   <form.Field
@@ -164,6 +170,39 @@ export default class CreateInviteBulk extends Component {
 
                 {{#if extractor.error}}
                   <div class="alert alert-error">{{extractor.error}}</div>
+                {{/if}}
+
+                {{#if extractor.requests.length}}
+                  <ul class="url-invite-extractor__requests">
+                    {{#each extractor.requests as |request|}}
+                      <li
+                        class="url-invite-extractor__request --{{request.status}}"
+                      >
+                        <span class="url-invite-extractor__request-url">
+                          {{request.url}}
+                        </span>
+                        <span class="url-invite-extractor__request-status">
+                          {{i18n
+                            (concat
+                              "user.invited.bulk_invite.url_extraction.status."
+                              request.status
+                            )
+                          }}
+                        </span>
+                        {{#if (eq request.status "ready")}}
+                          <DButton
+                            class="btn-default btn-small"
+                            @action={{fn extractor.openRequest request}}
+                            @label="user.invited.bulk_invite.url_extraction.open_request"
+                          />
+                        {{else if (eq request.status "failed")}}
+                          <span class="url-invite-extractor__request-error">
+                            {{request.error_message}}
+                          </span>
+                        {{/if}}
+                      </li>
+                    {{/each}}
+                  </ul>
                 {{/if}}
 
                 {{#if extractor.csvText}}

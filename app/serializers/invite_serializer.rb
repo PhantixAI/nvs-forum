@@ -22,7 +22,8 @@ class InviteSerializer < ApplicationSerializer
              :grants_admin,
              :grants_moderator,
              :recipient_keywords,
-             :allow_any_email
+             :allow_any_email,
+             :source_url
 
   has_many :topics, embed: :object, serializer: BasicTopicSerializer
   has_many :groups, embed: :object, serializer: BasicGroupSerializer
@@ -159,6 +160,10 @@ class InviteSerializer < ApplicationSerializer
   end
 
   def include_allow_any_email?
+    can_see_invite_details?
+  end
+
+  def include_source_url?
     can_see_invite_details?
   end
 

@@ -35,6 +35,29 @@ RSpec.describe BulkInviteUrlExtraction::DraftCreator do
       expect(Jobs::BulkInvite.jobs.size).to eq(0)
     end
 
+    it "persists source_url on created invites when given, leaving it nil when omitted" do
+      described_class.create_drafts(
+        current_user: admin,
+        csv_text: csv(["priya@iitb.ac.in,Priya,,,en,physics students"]),
+        allow_any_email: false,
+        schedule_send: true,
+        ai_personalization: true,
+        source_url: "https://example.edu/students",
+      )
+      expect(Invite.find_by(email: "priya@iitb.ac.in").source_url).to eq(
+        "https://example.edu/students",
+      )
+
+      described_class.create_drafts(
+        current_user: admin,
+        csv_text: csv(["jo@iitb.ac.in,Jo,,,en,chemistry students"]),
+        allow_any_email: false,
+        schedule_send: true,
+        ai_personalization: true,
+      )
+      expect(Invite.find_by(email: "jo@iitb.ac.in").source_url).to eq(nil)
+    end
+
     it "drops a row with a blank email without recording an error" do
       result =
         described_class.create_drafts(

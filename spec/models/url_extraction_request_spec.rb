@@ -1,0 +1,43 @@
+# frozen_string_literal: true
+
+RSpec.describe UrlExtractionRequest do
+  fab!(:admin)
+
+  describe "validations" do
+    it "requires url and rules" do
+      request = UrlExtractionRequest.new(created_by: admin)
+
+      expect(request).not_to be_valid
+      expect(request.errors[:url]).to be_present
+      expect(request.errors[:rules]).to be_present
+    end
+
+    it "is valid with a url, rules, and created_by" do
+      request =
+        UrlExtractionRequest.new(created_by: admin, url: "https://example.edu", rules: "rules")
+
+      expect(request).to be_valid
+    end
+  end
+
+  describe ".statuses" do
+    it "maps the expected symbols to their persisted integer values" do
+      expect(UrlExtractionRequest.statuses[:queued]).to eq(0)
+      expect(UrlExtractionRequest.statuses[:processing]).to eq(1)
+      expect(UrlExtractionRequest.statuses[:ready]).to eq(2)
+      expect(UrlExtractionRequest.statuses[:failed]).to eq(3)
+    end
+  end
+
+  describe ".remove_old" do
+    it "removes requests older than the retention window, leaving newer ones alone" do
+      old_request = Fabricate(:url_extraction_request, created_by: admin, created_at: 3.days.ago)
+      recent_request = Fabricate(:url_extraction_request, created_by: admin, created_at: 1.hour.ago)
+
+      expect { UrlExtractionRequest.remove_old }.to change { UrlExtractionRequest.count }.by(-1)
+
+      expect(UrlExtractionRequest.exists?(id: old_request.id)).to eq(false)
+      expect(UrlExtractionRequest.exists?(id: recent_request.id)).to eq(true)
+    end
+  end
+end

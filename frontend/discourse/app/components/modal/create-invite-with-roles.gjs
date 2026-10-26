@@ -230,6 +230,7 @@ export default class CreateInviteWithRoles extends Component {
       domain: this.invite.domain ?? "",
       description: this.invite.description ?? "",
       customMessage: this.invite.custom_message ?? "",
+      sourceUrl: this.invite.source_url ?? "",
       // seeded from the untracked copy: reading the tracked property here would
       // give `<Form>` a new @data identity on every change, tearing the form down
       staffRole: this.initialStaffRole,
@@ -256,6 +257,7 @@ export default class CreateInviteWithRoles extends Component {
       inviteToGroups: this.model.groupIds ?? this.invite.groupIds ?? [],
       customMessage: this.invite.custom_message ?? "",
       keywords: this.invite.recipient_keywords ?? "",
+      sourceUrl: this.invite.source_url ?? "",
     };
 
     if (this.inviteCreated) {
@@ -739,6 +741,18 @@ export default class CreateInviteWithRoles extends Component {
                   </form.Field>
                 {{/if}}
 
+                {{#if this.invite.source_url}}
+                  <form.Field
+                    @format="full"
+                    @name="sourceUrl"
+                    @title={{i18n "user.invited.invite_roles.source_url_label"}}
+                    @type="input"
+                    as |field|
+                  >
+                    <field.Control disabled={{true}} />
+                  </form.Field>
+                {{/if}}
+
                 <form.Field
                   @description={{i18n
                     "user.invited.invite.custom_message_help"
@@ -918,6 +932,18 @@ export default class CreateInviteWithRoles extends Component {
                     as |field|
                   >
                     <field.Control />
+                  </form.Field>
+                {{/if}}
+
+                {{#if this.invite.source_url}}
+                  <form.Field
+                    @format="full"
+                    @name="sourceUrl"
+                    @title={{i18n "user.invited.invite_roles.source_url_label"}}
+                    @type="input"
+                    as |field|
+                  >
+                    <field.Control disabled={{true}} />
                   </form.Field>
                 {{/if}}
 
