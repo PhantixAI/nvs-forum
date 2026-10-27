@@ -24,6 +24,17 @@ import { i18n } from "discourse-i18n";
 // not in the currently loaded model.invites is just a no-op.
 const EXTRACTION_PROGRESS_CHANNEL = "/url-extraction-progress";
 
+// Matches UrlExtractionRequest.statuses -- used to build the Extracted
+// tab's own status filter options, distinct from Invite::DELIVERY_STATUSES
+// (statusOptions' default source for every other tab).
+const EXTRACTED_STATUSES = [
+  "queued",
+  "processing",
+  "ready",
+  "failed",
+  "closed",
+];
+
 export default class UserInvitedShowController extends Controller {
   @service dialog;
   @service modal;
@@ -157,10 +168,12 @@ export default class UserInvitedShowController extends Controller {
 
   @computed("invitesCount", "filter", "selectedDomain", "selectedStatus")
   get showSearch() {
-    // No search UI on the Extracted tab -- it has no Invite.search_filter
-    // equivalent (see UsersController#invited).
+    // The Extracted tab searches by URL substring instead of
+    // Invite.search_filter's email/description/source_url match (see
+    // UsersController#invited) -- same visibility rule as the other tabs,
+    // just keyed off invitesCount.extracted instead of the current filter.
     if (this.inviteExtracted) {
-      return false;
+      return this.invitesCount?.extracted > 5 || Boolean(this.selectedStatus);
     }
 
     // Keep visible once a filter is selected even if it narrows the count to
@@ -197,6 +210,13 @@ export default class UserInvitedShowController extends Controller {
 
   @computed("model.available_statuses", "filter")
   get statusOptions() {
+    if (this.inviteExtracted) {
+      return EXTRACTED_STATUSES.map((status) => ({
+        id: status,
+        name: i18n(`user.invited.bulk_invite.url_extraction.status.${status}`),
+      }));
+    }
+
     // "review" is only a meaningful filter on the Pending tab -- Expired has
     // no real review state (see Invite.expired, which never returns one
     // regardless of status), so offering it there would just be a filter
@@ -211,13 +231,18 @@ export default class UserInvitedShowController extends Controller {
 
   @computed("statusOptions", "currentUser.staff", "filter")
   get showStatusFilter() {
-    // Redeemed invites don't show a delivery status, and extraction
-    // requests have their own (queued/processing/ready/failed) status that
-    // isn't filterable the same way -- nothing to filter by on either tab.
+    // Not staff-gated like the other tabs -- the Extracted tab is already
+    // self-view only (see UsersController#invited), a stricter visibility
+    // rule than "staff or self" that pending/expired/redeemed use.
+    if (this.inviteExtracted) {
+      return true;
+    }
+
+    // Redeemed invites don't show a delivery status -- nothing to filter by
+    // on that tab.
     return (
       this.currentUser?.staff &&
       this.filter !== "redeemed" &&
-      !this.inviteExtracted &&
       this.statusOptions.length > 0
     );
   }
@@ -329,6 +354,33 @@ export default class UserInvitedShowController extends Controller {
   @action
   openExtractedRequest(request) {
     this.modal.show(UrlExtractionReviewModal, { model: request });
+  }
+
+  // Re-submits a failed request's exact url/rules as a brand new
+  // UrlExtractionRequest (see InvitesController#extract_from_url) rather
+  // than retrying in place -- the failed row stays as a record, and the
+  // new one shows up at the top of the list through the usual
+  // queued/processing/ready progression.
+  @action
+  async retryExtraction(request) {
+    try {
+      const result = await Invite.submitUrlExtraction(
+        [request.url],
+        request.rules
+      );
+      this.model.invites.unshift(
+        ...result.requests.map((retried) => Invite.create(retried))
+      );
+      this.toasts.success({
+        data: {
+          message: i18n("user.invited.bulk_invite.url_extraction.submitted", {
+            count: 1,
+          }),
+        },
+      });
+    } catch (error) {
+      popupAjaxError(error);
+    }
   }
 
   @bind

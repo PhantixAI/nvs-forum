@@ -3531,6 +3531,57 @@ RSpec.describe InvitesController do
         expect(Invite.find_by(email: "jo@iitb.ac.in").source_url).to eq(nil)
       end
 
+      it "closes the source UrlExtractionRequest when given a request_id for the admin's own ready request" do
+        sign_in(admin)
+        request =
+          Fabricate(
+            :url_extraction_request,
+            created_by: admin,
+            status: UrlExtractionRequest.statuses[:ready],
+          )
+
+        messages =
+          MessageBus.track_publish(UrlExtractionRequest::PROGRESS_CHANNEL) do
+            post "/invites/create-drafts.json",
+                 params: {
+                   csv: "email,name,groups,topic_id,locale,keywords\npriya@iitb.ac.in,,,,,",
+                   request_id: request.id,
+                 }
+          end
+
+        expect(response.status).to eq(200)
+        expect(request.reload.status).to eq(UrlExtractionRequest.statuses[:closed])
+        expect(messages.map { |m| m.data[:request][:status] }).to eq([:closed])
+      end
+
+      it "ignores a request_id that isn't the admin's own, or isn't ready" do
+        sign_in(admin)
+        someone_elses_request =
+          Fabricate(:url_extraction_request, status: UrlExtractionRequest.statuses[:ready])
+        already_closed_request =
+          Fabricate(
+            :url_extraction_request,
+            created_by: admin,
+            status: UrlExtractionRequest.statuses[:closed],
+          )
+
+        post "/invites/create-drafts.json",
+             params: {
+               csv: "email,name,groups,topic_id,locale,keywords\na@example.com,,,,,",
+               request_id: someone_elses_request.id,
+             }
+        expect(response.status).to eq(200)
+        expect(someone_elses_request.reload.status).to eq(UrlExtractionRequest.statuses[:ready])
+
+        post "/invites/create-drafts.json",
+             params: {
+               csv: "email,name,groups,topic_id,locale,keywords\nb@example.com,,,,,",
+               request_id: already_closed_request.id,
+             }
+        expect(response.status).to eq(200)
+        expect(already_closed_request.reload.status).to eq(UrlExtractionRequest.statuses[:closed])
+      end
+
       it "rejects a CSV with more rows than max_bulk_invites" do
         sign_in(admin)
         SiteSetting.max_bulk_invites = 1

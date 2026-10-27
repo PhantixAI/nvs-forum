@@ -13,8 +13,26 @@ class UrlExtractionRequest < ActiveRecord::Base
   validates :url, presence: true
   validates :rules, presence: true
 
+  # Matches Jobs::ProcessUrlExtractionRequest::CHANNEL -- shared here so
+  # both that job and InvitesController#create_drafts (which flips a
+  # request to :closed) can push a live update from one place.
+  PROGRESS_CHANNEL = "/url-extraction-progress"
+
   def self.statuses
-    @statuses ||= Enum.new(queued: 0, processing: 1, ready: 2, failed: 3)
+    # :closed -- an admin has created drafts from this request's CSV (see
+    # InvitesController#create_drafts). Distinct from :ready so the
+    # Extracted tab can show at a glance which requests still need review
+    # vs. which have already been acted on, even if every row in that CSV
+    # ended up skipped as a duplicate.
+    @statuses ||= Enum.new(queued: 0, processing: 1, ready: 2, failed: 3, closed: 4)
+  end
+
+  def broadcast_progress!
+    MessageBus.publish(
+      PROGRESS_CHANNEL,
+      { request: UrlExtractionRequestSerializer.new(self, root: false).as_json },
+      user_ids: [created_by_id],
+    )
   end
 
   # A ready/failed request's csv_text can carry scraped roster PII

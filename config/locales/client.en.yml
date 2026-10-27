@@ -2910,14 +2910,17 @@ en:
               one: "%{count} draft invite created. Review and send it from the Pending tab's Review filter."
               other: "%{count} draft invites created. Review and send them from the Pending tab's Review filter."
             submitted:
-              one: "Submitted. This will show up below once it's ready."
-              other: "%{count} URLs submitted. They'll show up below as each one is ready."
+              one: "Submitted. Find it in the Extracted tab once it's ready."
+              other: "%{count} URLs submitted. Find them in the Extracted tab as each one is ready."
             open_request: "Open"
+            retry_button: "Retry"
+            retrying: "Retrying…"
             status:
               queued: "Queued"
               processing: "Extracting…"
               ready: "Ready"
               failed: "Failed"
+              closed: "Closed"
 
       confirm_access:
         title: "Confirm access"

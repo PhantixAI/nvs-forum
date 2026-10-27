@@ -15,7 +15,7 @@ module Jobs
   class ProcessUrlExtractionRequest < ::Jobs::Base
     sidekiq_options retry: false
 
-    CHANNEL = "/url-extraction-progress"
+    CHANNEL = UrlExtractionRequest::PROGRESS_CHANNEL
 
     def execute(args)
       request = UrlExtractionRequest.find_by(id: args[:request_id])
@@ -43,11 +43,7 @@ module Jobs
         )
       end
 
-      MessageBus.publish(
-        CHANNEL,
-        { request: UrlExtractionRequestSerializer.new(request, root: false).as_json },
-        user_ids: [request.created_by_id],
-      )
+      request.broadcast_progress!
     end
 
     private
