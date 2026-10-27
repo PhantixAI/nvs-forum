@@ -46,8 +46,7 @@ class InvitesController < ApplicationController
                    extract_from_url
                    last_url_extraction_rules
                    create_drafts
-                   send_drafts
-                   destroy_drafts
+                   destroy_url_extraction_request
                  ]
 
   skip_before_action :check_xhr, except: [:perform_accept_invitation]
@@ -882,9 +881,9 @@ class InvitesController < ApplicationController
 
   # Turns the (admin-reviewed) CSV text from the "Extract from URL" tab into
   # draft Invite rows (emailed_status: :review) -- held on the Pending tab's
-  # Review filter until an explicit #send_drafts, never auto-sent. See
-  # BulkInviteUrlExtraction::DraftCreator for why this doesn't reuse
-  # Jobs::BulkInvite/#upload_csv.
+  # Review filter (status: review) until an explicit #resend_all_invites,
+  # never auto-sent. See BulkInviteUrlExtraction::DraftCreator for why this
+  # doesn't reuse Jobs::BulkInvite/#upload_csv.
   def create_drafts
     guardian.ensure_can_bulk_invite_to_forum!
 
@@ -949,123 +948,29 @@ class InvitesController < ApplicationController
     end
   end
 
-  # Sends (or first-sends, for a review invite) a batch of invites the admin
-  # selected on the Invited page. A selected batch can be in the hundreds
-  # (an admin "Send Selected"-ing an entire bulk-drafted CSV at once), and
-  # personalizing even one invite is a live LLM call (see
-  # BulkInvitePersonalization::Generator) -- doing that inline, synchronously,
-  # for a few hundred invites in one HTTP request overran the request
-  # timeout and 500'd. Reuses #resend_all_invites's own dispatch
-  # (#dispatch_bulk_resend) instead of a bespoke job -- same params, same
-  # four cells. In practice this always lands on a paced cell: the frontend
-  # modal hides the Schedule Send toggle for this flow and always submits
-  # schedule_send: true (see ResendInviteModal), so sending a batch of
-  # drafts isn't a user choice between burst and paced the way
-  # #resend_all_invites still is -- it's just not enforced a second time
-  # here, trusting what the UI sends. Overrides (allow_any_email/
-  # schedule_send/ai_personalization) persist inline first via a single
-  # bulk update_all -- cheap, no LLM involved -- same as #resend_invite's
-  # single-invite path (see #resend_overrides_from_params). Rate-limited
-  # once per request rather than per invite (unlike resend-invite-per-hour,
-  # which is sized for an occasional single resend, not a deliberate bulk
-  # action on dozens-to-hundreds of freshly created drafts).
-  #
-  # Scoping: an admin can send any invite, not only ones they personally
-  # created -- mirrors #can_destroy_invite?'s own admin-override (see
-  # InviteGuardian), since the Invited page itself lists invites by the
-  # profile being viewed, not by current_user (UsersController#invited uses
-  # Invite.pending(inviter)). A non-admin stays restricted to their own
-  # invited_by_id. Either way, every requested id must resolve to a
-  # manageable invite -- a partial match (e.g. because one of the two
-  # scopes excluded some of them) fails loudly instead of silently
-  # dispatching a smaller batch than the admin asked for.
-  def send_drafts
-    if !SiteSetting.allow_email_invites
-      return render_json_error(I18n.t("invite.email_invites_disabled"))
-    end
+  # Hard-deletes a single UrlExtractionRequest the admin owns, regardless of
+  # status -- unlike an Invite (soft-trashed via #destroy), a request has no
+  # audit/redemption history worth keeping once the admin decides to
+  # discard it, matching the existing 2-day retention job's own hard
+  # delete_all (see UrlExtractionRequest.remove_old).
+  def destroy_url_extraction_request
+    guardian.ensure_can_bulk_invite_to_forum!
 
-    RateLimiter.new(
-      current_user,
-      "send-draft-invites-per-hour",
-      10,
-      1.hour,
-      apply_limit_to_staff: true,
-    ).performed!
+    request = UrlExtractionRequest.find_by(id: params[:id], created_by_id: current_user.id)
+    raise Discourse::InvalidParameters.new(:id) if request.blank?
 
-    invite_ids = Array(params[:invite_ids]).map(&:to_i)
-    invites = Invite.where(id: invite_ids)
-    invites = invites.where(invited_by_id: current_user.id) unless guardian.is_admin?
-
-    if invites.count != invite_ids.uniq.size
-      return render_json_error(I18n.t("invite.drafts_not_found"))
-    end
-
-    overrides = resend_overrides_from_params
-    invites.update_all(overrides) if overrides.present?
-
-    dispatch_bulk_resend(
-      invites,
-      keywords: params[:keywords].presence,
-      personalize: params[:ai_personalization] != "false",
-      schedule_send: params[:schedule_send] == "true",
-    )
+    request.destroy!
 
     render json: success_json
   end
 
-  # Permanently deletes a batch of draft invites the admin selected on the
-  # Invited page. Hard-deleted (not Trashable#trash!, unlike #destroy for a
-  # real invite) -- a review invite was never sent and has no
-  # redemption/audit history worth keeping, so there's nothing a soft
-  # delete would preserve.
-  # Rate-limited once per request, same reasoning as #send_drafts.
-  # Scoping: same admin-override as #send_drafts -- see its comment. The
-  # strict all-ids-must-match check only covers authorization (id +
-  # invited_by_id), not the emailed_status filter below -- an id that's
-  # authorized but no longer :review (e.g. a race with another resend) is
-  # meant to just be silently skipped, same as before this fix. Only a
-  # missing-or-unauthorized id is worth failing the whole request over.
-  def destroy_drafts
-    RateLimiter.new(
-      current_user,
-      "destroy-draft-invites-per-hour",
-      10,
-      1.hour,
-      apply_limit_to_staff: true,
-    ).performed!
-
-    invite_ids = Array(params[:invite_ids]).map(&:to_i)
-    authorized_invites = Invite.where(id: invite_ids)
-    authorized_invites =
-      authorized_invites.where(invited_by_id: current_user.id) unless guardian.is_admin?
-
-    if authorized_invites.count != invite_ids.uniq.size
-      return render_json_error(I18n.t("invite.drafts_not_found"))
-    end
-
-    invites = authorized_invites.where(emailed_status: Invite.emailed_status_types[:review])
-
-    destroyed_count = 0
-    errors = []
-
-    invites.find_each do |invite|
-      invite.destroy
-      destroyed_count += 1
-    rescue StandardError => e
-      errors << "#{invite.id}: #{e.message}"
-    end
-
-    render json: success_json.merge(destroyed_count: destroyed_count, errors: errors)
-  end
-
   private
 
-  # Shared by #resend_invite (single, rate-limited per-invite) and
-  # #send_drafts (bulk, rate-limited per-request): persists any explicitly
-  # provided override, then personalizes (unless ai_personalization is
-  # false, which BulkInvitePersonalization::Generator.personalize already
-  # honors once persisted) and dispatches paced-or-immediate. Works unmodified for
-  # an invite whose current emailed_status is :review -- neither
+  # #resend_invite's single-invite path: persists any explicitly provided
+  # override, then personalizes (unless ai_personalization is false, which
+  # BulkInvitePersonalization::Generator.personalize already honors once
+  # persisted) and dispatches paced-or-immediate. Works unmodified for an
+  # invite whose current emailed_status is :review -- neither
   # Invite#resend_invite nor #requeue_for_paced_resend branch on prior
   # status, so a review invite's first send and a normal invite's resend
   # share this one path.
@@ -1143,14 +1048,13 @@ class InvitesController < ApplicationController
     !SiteSetting.allow_email_invites || params[:skip_email]
   end
 
-  # Shared bulk personalize/schedule_send dispatch for a backgrounded batch
-  # of invites -- used by both #resend_all_invites (a filtered resend of
-  # invites already sent at least once) and #send_drafts (the first send of
-  # a batch of drafts). Same four cells, same jobs either way; only the
-  # source `invites` relation and whatever request-specific setup happens
-  # before this call (rate-limit key, override persistence) differ between
-  # the two callers. `invites` must be an un-plucked relation -- this method
-  # decides itself whether to pluck or find_each.
+  # Bulk personalize/schedule_send dispatch for a backgrounded batch of
+  # invites, used by #resend_all_invites -- which also covers the first
+  # send of a filtered batch of review drafts (the frontend's "Review"
+  # status filter on the Pending tab reuses the same Resend/Delete combo
+  # button, just relabeled "Send Invites"; see UserInvitedShowController).
+  # `invites` must be an un-plucked relation -- this method decides itself
+  # whether to pluck or find_each.
   def dispatch_bulk_resend(invites, keywords:, personalize:, schedule_send:)
     if personalize && schedule_send
       # Pre-generates each invite's AI content off-request, in bounded

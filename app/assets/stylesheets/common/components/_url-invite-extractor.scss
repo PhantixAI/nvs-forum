@@ -16,3 +16,22 @@
     font-size: var(--font-down-1);
   }
 }
+
+.url-extraction-retry-modal {
+  &__url {
+    overflow-wrap: anywhere;
+    margin-bottom: 1em;
+    color: var(--primary-high);
+    font-size: var(--font-down-1);
+  }
+
+  &__label {
+    display: block;
+    font-weight: bold;
+  }
+
+  &__textarea {
+    width: 100%;
+    margin-top: 0.5em;
+  }
+}
