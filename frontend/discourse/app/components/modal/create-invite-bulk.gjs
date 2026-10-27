@@ -1,7 +1,6 @@
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
-import { concat, fn, hash } from "@ember/helper";
-import { on } from "@ember/modifier";
+import { hash } from "@ember/helper";
 import { action } from "@ember/object";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
 import { service } from "@ember/service";
@@ -46,14 +45,6 @@ export default class CreateInviteBulk extends Component {
               {{else}}
                 {{i18n "user.invited.bulk_invite.success"}}
               {{/if}}
-            {{else if extractor.hasDraftResult}}
-              {{i18n
-                "user.invited.bulk_invite.url_extraction.drafts_created"
-                count=extractor.draftsCreated
-              }}
-              {{#each extractor.draftErrors as |draftError|}}
-                <div class="alert alert-warning">{{draftError}}</div>
-              {{/each}}
             {{else}}
               {{#if this.siteSettings.bulk_invite_url_extraction_enabled}}
                 <div class="create-invite-bulk-modal__tabs">
@@ -93,9 +84,9 @@ export default class CreateInviteBulk extends Component {
                   @data={{hash
                     urls=""
                     rules=extractor.rules
-                    allowAnyEmail=extractor.settingsData.allowAnyEmail
-                    scheduleSend=extractor.settingsData.scheduleSend
-                    aiPersonalization=extractor.settingsData.aiPersonalization
+                    allowAnyEmail=true
+                    scheduleSend=true
+                    aiPersonalization=true
                   }}
                   @onRegisterApi={{extractor.registerFormApi}}
                   @onSubmit={{extractor.extract}}
@@ -171,62 +162,11 @@ https://example.edu/alumni"
                 {{#if extractor.error}}
                   <div class="alert alert-error">{{extractor.error}}</div>
                 {{/if}}
-
-                {{#if extractor.requests.length}}
-                  <ul class="url-invite-extractor__requests">
-                    {{#each extractor.requests as |request|}}
-                      <li
-                        class="url-invite-extractor__request --{{request.status}}"
-                      >
-                        <span class="url-invite-extractor__request-url">
-                          {{request.url}}
-                        </span>
-                        <span class="url-invite-extractor__request-status">
-                          {{i18n
-                            (concat
-                              "user.invited.bulk_invite.url_extraction.status."
-                              request.status
-                            )
-                          }}
-                        </span>
-                        {{#if (eq request.status "ready")}}
-                          <DButton
-                            class="btn-default btn-small"
-                            @action={{fn extractor.openRequest request}}
-                            @label="user.invited.bulk_invite.url_extraction.open_request"
-                          />
-                        {{else if (eq request.status "failed")}}
-                          <span class="url-invite-extractor__request-error">
-                            {{request.error_message}}
-                          </span>
-                        {{/if}}
-                      </li>
-                    {{/each}}
-                  </ul>
-                {{/if}}
-
-                {{#if extractor.csvText}}
-                  {{#each extractor.warnings as |warning|}}
-                    <div class="alert alert-warning">{{warning}}</div>
-                  {{/each}}
-
-                  <label class="url-invite-extractor__review-label">
-                    {{i18n
-                      "user.invited.bulk_invite.url_extraction.csv_review_label"
-                    }}
-                  </label>
-                  <textarea
-                    class="url-invite-extractor__review-textarea"
-                    rows="12"
-                    value={{extractor.csvText}}
-                    {{on "input" extractor.updateCsvText}}
-                  ></textarea>
-                {{/if}}
               {{/if}}
             {{/if}}
           </:body>
           <:footer>
-            {{#unless (or uploader.uploaded extractor.hasDraftResult)}}
+            {{#unless uploader.uploaded}}
               {{#if (eq this.activeTab "csv")}}
                 <DButton
                   class="btn-primary"
@@ -240,21 +180,6 @@ https://example.edu/alumni"
                       progress=uploader.uploadProgress
                     )
                     (i18n "user.invited.bulk_invite.text")
-                  }}
-                />
-              {{else if extractor.csvText}}
-                <DButton
-                  class="btn-primary"
-                  @action={{extractor.createInvites}}
-                  @disabled={{not extractor.canCreateInvites}}
-                  @translatedLabel={{if
-                    extractor.creatingDrafts
-                    (i18n
-                      "user.invited.bulk_invite.url_extraction.creating_invites"
-                    )
-                    (i18n
-                      "user.invited.bulk_invite.url_extraction.create_invites_button"
-                    )
                   }}
                 />
               {{else}}

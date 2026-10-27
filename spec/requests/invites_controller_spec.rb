@@ -3429,34 +3429,6 @@ RSpec.describe InvitesController do
     end
   end
 
-  describe "#url_extraction_requests" do
-    it "requires to be logged in" do
-      get "/invites/url-extraction-requests.json"
-      expect(response.status).to eq(403)
-    end
-
-    it "fails if you cannot bulk invite to the forum" do
-      sign_in(user)
-      get "/invites/url-extraction-requests.json"
-      expect(response.status).to eq(403)
-    end
-
-    it "lists only the current admin's own requests, most recent first" do
-      sign_in(admin)
-      other_admin = Fabricate(:admin)
-      mine_older = Fabricate(:url_extraction_request, created_by: admin, created_at: 1.hour.ago)
-      mine_newer = Fabricate(:url_extraction_request, created_by: admin)
-      Fabricate(:url_extraction_request, created_by: other_admin)
-
-      get "/invites/url-extraction-requests.json"
-
-      expect(response.status).to eq(200)
-      expect(response.parsed_body["requests"].map { |r| r["id"] }).to eq(
-        [mine_newer.id, mine_older.id],
-      )
-    end
-  end
-
   describe "#last_url_extraction_rules" do
     it "requires to be logged in" do
       get "/invites/extract-from-url.json"

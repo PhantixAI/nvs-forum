@@ -45,7 +45,6 @@ class InvitesController < ApplicationController
                    upload_csv
                    extract_from_url
                    last_url_extraction_rules
-                   url_extraction_requests
                    create_drafts
                    send_drafts
                    destroy_drafts
@@ -809,10 +808,11 @@ class InvitesController < ApplicationController
   # admin can submit several URLs at once, or several batches back-to-back,
   # without waiting on any of them; the frontend learns each result via
   # MessageBus (see Jobs::ProcessUrlExtractionRequest::CHANNEL) or by
-  # polling #url_extraction_requests. Never creates an Invite itself: the
-  # admin reviews/edits each request's own extracted CSV client-side
-  # (one CSV per URL), which then gets submitted as draft invites through
-  # #create_drafts.
+  # loading the "Extracted" tab on the Invited page
+  # (UsersController#invited, filter: "extracted"). Never creates an Invite
+  # itself: the admin reviews/edits each request's own extracted CSV
+  # client-side (one CSV per URL), which then gets submitted as draft
+  # invites through #create_drafts.
   def extract_from_url
     guardian.ensure_can_bulk_invite_to_forum!
 
@@ -864,26 +864,6 @@ class InvitesController < ApplicationController
                  ).as_json,
              ),
            status: :created
-  end
-
-  # Lists the current admin's own extraction requests, recent-first -- an
-  # admin can have several queued/processing at once by design (see
-  # #extract_from_url), unlike UserExport (which only ever exposes a single
-  # latest-per-user result).
-  def url_extraction_requests
-    guardian.ensure_can_bulk_invite_to_forum!
-
-    requests =
-      UrlExtractionRequest.where(created_by_id: current_user.id).order(created_at: :desc).limit(50)
-
-    render json:
-             success_json.merge(
-               requests:
-                 ActiveModel::ArraySerializer.new(
-                   requests,
-                   each_serializer: UrlExtractionRequestSerializer,
-                 ).as_json,
-             )
   end
 
   # Prefills the "Rules" field in the "From URL" step with whatever rules
