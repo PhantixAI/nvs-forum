@@ -8,6 +8,7 @@ import { observes } from "@ember-decorators/object";
 import CreateInviteBulk from "discourse/components/modal/create-invite-bulk";
 import ResendInviteModal from "discourse/components/modal/resend-invite";
 import SentInviteEmail from "discourse/components/modal/sent-invite-email";
+import UrlExtractionRetryModal from "discourse/components/modal/url-extraction-retry";
 import UrlExtractionReviewModal from "discourse/components/modal/url-extraction-review";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import { removeValueFromArray } from "discourse/lib/array-tools";
@@ -52,8 +53,6 @@ export default class UserInvitedShowController extends Controller {
   @tracked filter = null;
   @tracked selectedDomain = null;
   @tracked selectedStatus = null;
-
-  @tracked selectedDraftIds = new Set();
 
   /** @type {import("discourse/models/user").default | null} */
   user = null;
@@ -247,15 +246,6 @@ export default class UserInvitedShowController extends Controller {
     );
   }
 
-  @dependentKeyCompat
-  get allDraftsSelected() {
-    const invites = this.model?.invites || [];
-    return (
-      invites.length > 0 &&
-      invites.every((invite) => this.selectedDraftIds.has(invite.id))
-    );
-  }
-
   @observes("searchTerm")
   searchTermChanged() {
     this._refetch();
@@ -356,31 +346,54 @@ export default class UserInvitedShowController extends Controller {
     this.modal.show(UrlExtractionReviewModal, { model: request });
   }
 
-  // Re-submits a failed request's exact url/rules as a brand new
-  // UrlExtractionRequest (see InvitesController#extract_from_url) rather
-  // than retrying in place -- the failed row stays as a record, and the
-  // new one shows up at the top of the list through the usual
-  // queued/processing/ready progression.
+  // Opens a popup to edit the rules before re-submitting the request's
+  // exact url as a brand new UrlExtractionRequest (see
+  // InvitesController#extract_from_url) -- never retried in place, so this
+  // can never affect the original row's own already-running or
+  // already-finished job, only the new one it queues.
   @action
-  async retryExtraction(request) {
-    try {
-      const result = await Invite.submitUrlExtraction(
-        [request.url],
-        request.rules
-      );
-      this.model.invites.unshift(
-        ...result.requests.map((retried) => Invite.create(retried))
-      );
-      this.toasts.success({
-        data: {
-          message: i18n("user.invited.bulk_invite.url_extraction.submitted", {
-            count: 1,
-          }),
+  openRetryExtraction(request) {
+    this.modal.show(UrlExtractionRetryModal, {
+      model: {
+        request,
+        onRetried: (retriedRequests) => {
+          this.model.invites.unshift(
+            ...retriedRequests.map((retried) => Invite.create(retried))
+          );
+          this.toasts.success({
+            data: {
+              message: i18n(
+                "user.invited.bulk_invite.url_extraction.submitted",
+                { count: 1 }
+              ),
+            },
+          });
         },
-      });
-    } catch (error) {
-      popupAjaxError(error);
-    }
+      },
+    });
+  }
+
+  @action
+  deleteExtractedRequest(request) {
+    this.dialog.deleteConfirm({
+      message: i18n("user.invited.bulk_invite.url_extraction.delete_confirm", {
+        url: request.url,
+      }),
+      didConfirm: () => {
+        return Invite.destroyUrlExtractionRequest(request.id)
+          .then(() => {
+            removeValueFromArray(this.model.invites, request);
+            this.toasts.success({
+              data: {
+                message: i18n(
+                  "user.invited.bulk_invite.url_extraction.deleted"
+                ),
+              },
+            });
+          })
+          .catch(popupAjaxError);
+      },
+    });
   }
 
   @bind
@@ -392,93 +405,6 @@ export default class UserInvitedShowController extends Controller {
     if (index !== undefined && index !== -1) {
       invites.splice(index, 1, Invite.create(updated));
     }
-  }
-
-  @action
-  isDraftSelected(invite) {
-    return this.selectedDraftIds.has(invite.id);
-  }
-
-  @action
-  toggleDraftSelected(invite) {
-    const selected = new Set(this.selectedDraftIds);
-    if (selected.has(invite.id)) {
-      selected.delete(invite.id);
-    } else {
-      selected.add(invite.id);
-    }
-    this.selectedDraftIds = selected;
-  }
-
-  @action
-  toggleSelectAllDrafts() {
-    this.selectedDraftIds = this.allDraftsSelected
-      ? new Set()
-      : new Set((this.model?.invites || []).map((invite) => invite.id));
-  }
-
-  @action
-  sendSelectedDrafts() {
-    const inviteIds = [...this.selectedDraftIds];
-    if (inviteIds.length === 0) {
-      return;
-    }
-
-    this.modal.show(ResendInviteModal, {
-      model: {
-        drafts: true,
-        confirmMessage: i18n("user.invited.send_selected_confirm", {
-          count: inviteIds.length,
-        }),
-        onResend: async ({
-          keywords,
-          aiPersonalization,
-          scheduleSend,
-          allowAnyEmail,
-        }) => {
-          // Sending is always paced, not a burst (InvitesController#send_drafts,
-          // ResendInviteModal) -- a selected batch can be in the hundreds, and
-          // personalizing even one invite is a live LLM call, so this resolves
-          // once the batch is queued/scheduled, not once it's actually sent.
-          await Invite.sendDrafts(inviteIds, {
-            keywords,
-            aiPersonalization,
-            scheduleSend,
-            allowAnyEmail,
-          });
-          this.selectedDraftIds = new Set();
-          this.toasts.success({
-            data: { message: i18n("user.invited.sent_selected") },
-          });
-          this.send("triggerRefresh");
-        },
-      },
-    });
-  }
-
-  @action
-  deleteSelectedDrafts() {
-    const inviteIds = [...this.selectedDraftIds];
-    if (inviteIds.length === 0) {
-      return;
-    }
-
-    this.dialog.deleteConfirm({
-      message: i18n("user.invited.delete_selected_confirm", {
-        count: inviteIds.length,
-      }),
-      didConfirm: () => {
-        return Invite.destroyDrafts(inviteIds)
-          .then(() => {
-            this.selectedDraftIds = new Set();
-            this.toasts.success({
-              data: { message: i18n("user.invited.deleted_selected") },
-            });
-            this.send("triggerRefresh");
-          })
-          .catch(popupAjaxError);
-      },
-    });
   }
 
   @action
@@ -536,10 +462,6 @@ export default class UserInvitedShowController extends Controller {
   statusChanged(status) {
     this.selectedStatus = status;
     this.set("reinvitedAll", false);
-    // Leaving the "review" status behind a stale checked selection would
-    // otherwise resurface (against a now-different row set) if the admin
-    // flips back to it later.
-    this.selectedDraftIds = new Set();
     this._refetch();
   }
 

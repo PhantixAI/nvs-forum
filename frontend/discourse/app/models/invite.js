@@ -147,33 +147,13 @@ export default class Invite extends EmberObject {
     });
   }
 
-  // Sends (or first-sends, for a draft) every invite in inviteIds, reusing
-  // the same resend logic as #reinvite -- see
-  // InvitesController#send_drafts.
-  static sendDrafts(
-    inviteIds,
-    { keywords, aiPersonalization, scheduleSend, allowAnyEmail } = {}
-  ) {
-    return ajax("/invites/send-drafts", {
-      type: "POST",
-      data: {
-        invite_ids: inviteIds,
-        keywords,
-        ai_personalization: aiPersonalization,
-        schedule_send: scheduleSend,
-        allow_any_email: allowAnyEmail,
-      },
-    });
-  }
-
-  // Permanently deletes a batch of draft invites -- see
-  // InvitesController#destroy_drafts. Unlike #destroy (which soft-trashes a
-  // real invite), this hard-deletes since a draft has no send/redemption
-  // history worth keeping.
-  static destroyDrafts(inviteIds) {
-    return ajax("/invites/destroy-drafts", {
-      type: "POST",
-      data: { invite_ids: inviteIds },
+  // Hard-deletes a single UrlExtractionRequest -- see
+  // InvitesController#destroy_url_extraction_request. Unlike #destroy
+  // (which soft-trashes a real invite), this hard-deletes: a request has no
+  // send/redemption history worth keeping.
+  static destroyUrlExtractionRequest(requestId) {
+    return ajax(`/invites/url-extraction-requests/${requestId}`, {
+      type: "DELETE",
     });
   }
 

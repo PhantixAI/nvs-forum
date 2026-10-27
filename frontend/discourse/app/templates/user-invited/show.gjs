@@ -1,5 +1,4 @@
 import { concat, fn, hash } from "@ember/helper";
-import { on } from "@ember/modifier";
 import { LinkTo } from "@ember/routing";
 import { trustHTML } from "@ember/template";
 import SvgEnvelopeZero from "discourse/components/svg/envelope-zero";
@@ -96,42 +95,7 @@ export default <template>
               />
             {{/if}}
 
-            {{#if @controller.inviteReview}}
-              <DComboButton
-                class="send-delete-selected-combo"
-                @btnTypeClass="btn-default"
-                @hasMenu={{true}}
-                as |combo|
-              >
-                <combo.Button
-                  class="send-selected-drafts"
-                  @action={{@controller.sendSelectedDrafts}}
-                  @disabled={{not @controller.selectedDraftIds.size}}
-                  @icon="paper-plane"
-                  @label="user.invited.send_selected"
-                />
-
-                <combo.Menu
-                  @disabled={{not @controller.selectedDraftIds.size}}
-                  @identifier="draft-bulk-actions-menu"
-                >
-                  <DDropdownMenu as |dropdown|>
-                    <dropdown.item>
-                      <DButton
-                        class="btn-danger delete-selected-drafts"
-                        @action={{@controller.deleteSelectedDrafts}}
-                        @icon="trash-can"
-                        @label="user.invited.delete_selected"
-                      />
-                    </dropdown.item>
-                  </DDropdownMenu>
-                </combo.Menu>
-              </DComboButton>
-            {{/if}}
-
-            {{#if
-              (and @controller.invitePending (not @controller.inviteReview))
-            }}
+            {{#if @controller.invitePending}}
               {{#if @controller.reinvitedAll}}
                 <span class="reinvited-all">
                   <DButton
@@ -150,8 +114,16 @@ export default <template>
                   <combo.Button
                     @action={{@controller.reinviteAll}}
                     @disabled={{not @controller.hasEmailInvites}}
-                    @icon="arrows-rotate"
-                    @label="user.invited.reinvite_all"
+                    @icon={{if
+                      @controller.inviteReview
+                      "paper-plane"
+                      "arrows-rotate"
+                    }}
+                    @label={{if
+                      @controller.inviteReview
+                      "user.invited.send_invites"
+                      "user.invited.reinvite_all"
+                    }}
                   />
 
                   <combo.Menu @identifier="invite-bulk-actions-menu">
@@ -325,31 +297,63 @@ export default <template>
                         }}
                       </div>
                     </td>
-                    <td class="d-table__cell --controls">
-                      {{#if
-                        (or
-                          (eq request.status "ready")
-                          (eq request.status "closed")
-                        )
-                      }}
-                        <DButton
+                    <td
+                      class="d-table__cell --controls extracted-request-actions"
+                    >
+                      <div class="d-table__cell-actions">
+                        {{#if
+                          (or
+                            (eq request.status "ready")
+                            (eq request.status "closed")
+                          )
+                        }}
+                          <DButton
+                            class="btn-default btn-small"
+                            @action={{fn
+                              @controller.openExtractedRequest
+                              request
+                            }}
+                            @label="user.invited.bulk_invite.url_extraction.open_request"
+                          />
+                        {{else if (eq request.status "failed")}}
+                          <span class="extracted-request-error">
+                            {{request.error_message}}
+                          </span>
+                        {{/if}}
+                        <DMenu
                           class="btn-default btn-small"
-                          @action={{fn
-                            @controller.openExtractedRequest
-                            request
-                          }}
-                          @label="user.invited.bulk_invite.url_extraction.open_request"
-                        />
-                      {{else if (eq request.status "failed")}}
-                        <span class="extracted-request-error">
-                          {{request.error_message}}
-                        </span>
-                        <DButton
-                          class="btn-default btn-small"
-                          @action={{fn @controller.retryExtraction request}}
-                          @label="user.invited.bulk_invite.url_extraction.retry_button"
-                        />
-                      {{/if}}
+                          @icon="ellipsis-vertical"
+                          @identifier="extracted-request-menu"
+                          @title={{i18n "more_options"}}
+                        >
+                          <:content>
+                            <DDropdownMenu as |dropdown|>
+                              <dropdown.item>
+                                <DButton
+                                  class="btn-transparent"
+                                  @action={{fn
+                                    @controller.openRetryExtraction
+                                    request
+                                  }}
+                                  @icon="arrows-rotate"
+                                  @label="user.invited.bulk_invite.url_extraction.retry_button"
+                                />
+                              </dropdown.item>
+                              <dropdown.item>
+                                <DButton
+                                  class="btn-transparent --danger"
+                                  @action={{fn
+                                    @controller.deleteExtractedRequest
+                                    request
+                                  }}
+                                  @icon="trash-can"
+                                  @label="user.invited.bulk_invite.url_extraction.delete_button"
+                                />
+                              </dropdown.item>
+                            </DDropdownMenu>
+                          </:content>
+                        </DMenu>
+                      </div>
                     </td>
                   </tr>
                 {{/each}}
@@ -359,16 +363,6 @@ export default <template>
             <table class="d-table user-invite-list">
               <thead class="d-table__header">
                 <tr class="d-table__row">
-                  {{#if @controller.inviteReview}}
-                    <th class="d-table__header-cell">
-                      <input
-                        checked={{@controller.allDraftsSelected}}
-                        title={{i18n "user.invited.select_all"}}
-                        type="checkbox"
-                        {{on "click" @controller.toggleSelectAllDrafts}}
-                      />
-                    </th>
-                  {{/if}}
                   <th class="d-table__header-cell">{{i18n
                       "user.invited.invited_via"
                     }}</th>
@@ -387,18 +381,6 @@ export default <template>
               <tbody class="d-table__body">
                 {{#each @controller.model.invites as |invite|}}
                   <tr class="d-table__row">
-                    {{#if @controller.inviteReview}}
-                      <td class="d-table__cell --overview">
-                        <input
-                          checked={{@controller.isDraftSelected invite}}
-                          type="checkbox"
-                          {{on
-                            "click"
-                            (fn @controller.toggleDraftSelected invite)
-                          }}
-                        />
-                      </td>
-                    {{/if}}
                     <td class="d-table__cell --overview invite-type">
                       <div class="invite-shortkey">
                         {{#if invite.link}}

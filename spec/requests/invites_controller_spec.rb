@@ -2735,6 +2735,28 @@ RSpec.describe InvitesController do
       expect(sent.reload.expires_at).to eq_time(5.days.from_now)
     end
 
+    it "sends review (draft) invites for the first time when filtered to status: review -- the Pending tab's \"Review\" filter reuses this same action, relabeled \"Send Invites\"" do
+      draft =
+        Invite.generate(
+          admin,
+          email: "draftee@example.com",
+          emailed_status: Invite.emailed_status_types[:review],
+        )
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { status: "review", schedule_send: "true" }
+
+      expect(response.status).to eq(200)
+      # dispatch_bulk_resend claims (Invite.claim_for_drafting) before
+      # enqueueing, so this is visible immediately -- not only once the job
+      # actually runs.
+      expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
+      expect(Jobs::GenerateInvitePersonalization.jobs.size).to eq(1)
+      expect(Jobs::GenerateInvitePersonalization.jobs.first["args"].first["invite_ids"]).to eq(
+        [draft.id],
+      )
+    end
+
     it "rate limits a status-filtered resend separately from a plain resend of the same domain" do
       freeze_time
       Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
@@ -3001,6 +3023,21 @@ RSpec.describe InvitesController do
       expect(response.status).to eq(200)
       expect(skipped_invite.reload.deleted_at).to be_present
       expect(pending_invite.reload.deleted_at).to eq(nil)
+    end
+
+    it "soft-deletes review (draft) invites when filtered to status: review -- the Pending tab's \"Review\" filter reuses this same action" do
+      draft =
+        Invite.generate(
+          admin,
+          email: "draftee@example.com",
+          emailed_status: Invite.emailed_status_types[:review],
+        )
+
+      sign_in(admin)
+      post "/invites/destroy-all", params: { status: "review" }
+
+      expect(response.status).to eq(200)
+      expect(draft.reload.deleted_at).to be_present
     end
 
     it "only deletes invites matching the given search term" do
@@ -3615,258 +3652,44 @@ RSpec.describe InvitesController do
     end
   end
 
-  describe "#send_drafts" do
+  describe "#destroy_url_extraction_request" do
     it "requires to be logged in" do
-      post "/invites/send-drafts.json", params: { invite_ids: [1] }
+      delete "/invites/url-extraction-requests/1.json"
       expect(response.status).to eq(403)
     end
 
     context "while logged in" do
-      fab!(:user)
-      fab!(:draft) do
-        Invite.generate(
-          user,
-          email: "draftee@example.com",
-          emailed_status: Invite.emailed_status_types[:review],
-        )
+      it "fails if you cannot bulk invite to the forum" do
+        sign_in(user)
+        request = Fabricate(:url_extraction_request, created_by: admin)
+        delete "/invites/url-extraction-requests/#{request.id}.json"
+        expect(response.status).to eq(403)
       end
 
-      before { sign_in(user) }
-
-      it "enqueues the keyword-regeneration job when personalizing without scheduling" do
-        post "/invites/send-drafts.json", params: { invite_ids: [draft.id], schedule_send: "false" }
-
-        expect(response.status).to eq(200)
-        expect(Jobs::ResendInvitesWithKeywords.jobs.size).to eq(1)
-        job_args = Jobs::ResendInvitesWithKeywords.jobs.first["args"].first
-        expect(job_args["invite_ids"]).to eq([draft.id])
-        # The actual send only happens once the job runs -- not inline.
-        expect(Jobs::InviteEmail.jobs).to be_empty
-      end
-
-      it "claims the draft into :drafting synchronously when personalizing and scheduled (the UI default), then enqueues Jobs::GenerateInvitePersonalization" do
-        post "/invites/send-drafts.json", params: { invite_ids: [draft.id], schedule_send: "true" }
-
-        expect(response.status).to eq(200)
-        # dispatch_bulk_resend claims (Invite.claim_for_drafting) before
-        # enqueueing, so this is visible immediately -- not only once the
-        # job actually runs. See spec/models/invite_spec.rb for
-        # .claim_for_drafting's own coverage.
-        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
-        expect(Jobs::GenerateInvitePersonalization.jobs.size).to eq(1)
-        expect(Jobs::GenerateInvitePersonalization.jobs.first["args"].first["invite_ids"]).to eq(
-          [draft.id],
-        )
-        expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
-        expect(Jobs::InviteEmail.jobs).to be_empty
-      end
-
-      it "paces the send one invite at a time, with no personalization, when scheduled but ai_personalization is false" do
-        post "/invites/send-drafts.json",
-             params: {
-               invite_ids: [draft.id],
-               ai_personalization: "false",
-               schedule_send: "true",
-             }
-
-        expect(response.status).to eq(200)
-        expect(Jobs::ResendInvitesPaced.jobs.map { |job| job["args"].first["invite_id"] }).to eq(
-          [draft.id],
-        )
-        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
-        expect(Jobs::InviteEmail.jobs).to be_empty
-      end
-
-      it "sends immediately inline when neither personalizing nor scheduling" do
-        post "/invites/send-drafts.json",
-             params: {
-               invite_ids: [draft.id],
-               ai_personalization: "false",
-               schedule_send: "false",
-             }
-
-        expect(response.status).to eq(200)
-        expect(Jobs::InviteEmail.jobs.map { |job| job["args"].first["invite_id"] }).to include(
-          draft.id,
-        )
-        expect(Jobs::ResendInvitesWithKeywords.jobs).to be_empty
-        expect(Jobs::ResendInvitesPaced.jobs).to be_empty
-        expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
-      end
-
-      it "fails loudly (not a silent partial send) when a non-admin selects an invite they don't own" do
-        other_draft =
-          Invite.generate(
-            admin,
-            email: "otherdraftee@example.com",
-            emailed_status: Invite.emailed_status_types[:review],
-          )
-
-        post "/invites/send-drafts.json",
-             params: {
-               invite_ids: [draft.id, other_draft.id],
-               schedule_send: "true",
-             }
-
-        expect(response.status).to eq(422)
-        expect(Jobs::GenerateInvitePersonalization.jobs).to be_empty
-        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
-        expect(other_draft.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
-      end
-
-      it "lets an admin send another user's drafts -- the Invited page itself lists by profile, not by viewer" do
-        other_draft =
-          Invite.generate(
-            user,
-            email: "otherdraftee@example.com",
-            emailed_status: Invite.emailed_status_types[:review],
-          )
-
+      it "hard-deletes the admin's own request, regardless of status" do
         sign_in(admin)
-        post "/invites/send-drafts.json",
-             params: {
-               invite_ids: [draft.id, other_draft.id],
-               schedule_send: "true",
-             }
-
-        expect(response.status).to eq(200)
-        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
-        expect(other_draft.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
-        expect(Jobs::GenerateInvitePersonalization.jobs.size).to eq(1)
-        expect(
-          Jobs::GenerateInvitePersonalization.jobs.first["args"].first["invite_ids"],
-        ).to match_array([draft.id, other_draft.id])
-      end
-
-      it "doesn't enqueue the job at all when every selected invite is already mid-flight elsewhere" do
-        draft.update_column(:emailed_status, Invite.emailed_status_types[:sending])
-
-        post "/invites/send-drafts.json", params: { invite_ids: [draft.id], schedule_send: "true" }
-
-        expect(response.status).to eq(200)
-        expect(Jobs::GenerateInvitePersonalization.jobs).to be_empty
-        expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:sending])
-      end
-
-      it "persists allow_any_email/ai_personalization overrides inline before dispatch" do
-        post "/invites/send-drafts.json",
-             params: {
-               invite_ids: [draft.id],
-               allow_any_email: "true",
-               ai_personalization: "false",
-               schedule_send: "true",
-             }
-
-        expect(response.status).to eq(200)
-        expect(draft.reload.allow_any_email).to eq(true)
-        expect(draft.ai_personalization).to eq(false)
-        # ai_personalization: false routes dispatch to the "schedule_send
-        # only" cell (staggered Jobs::ResendInvitesPaced, one enqueue per
-        # invite) -- there's nothing to generate, so Jobs::GenerateInvitePersonalization
-        # is never involved for this combination.
-        expect(Jobs::ResendInvitesPaced.jobs.map { |job| job["args"].first["invite_id"] }).to eq(
-          [draft.id],
-        )
-        expect(Jobs::GenerateInvitePersonalization.jobs).to be_empty
-      end
-
-      it "forwards ad hoc keywords to the personalize-only job" do
-        post "/invites/send-drafts.json",
-             params: {
-               invite_ids: [draft.id],
-               schedule_send: "false",
-               keywords: "robotics club",
-             }
-
-        expect(response.status).to eq(200)
-        job_args = Jobs::ResendInvitesWithKeywords.jobs.first["args"].first
-        expect(job_args["extra_keywords"]).to eq("robotics club")
-      end
-
-      it "is rate-limited per request, not per invite" do
-        RateLimiter.enable
-
-        11.times { post "/invites/send-drafts.json", params: { invite_ids: [draft.id] } }
-
-        expect(response.status).to eq(429)
-      end
-    end
-  end
-
-  describe "#destroy_drafts" do
-    it "requires to be logged in" do
-      post "/invites/destroy-drafts.json", params: { invite_ids: [1] }
-      expect(response.status).to eq(403)
-    end
-
-    context "while logged in" do
-      fab!(:user)
-      fab!(:draft) do
-        Invite.generate(
-          user,
-          email: "draftee@example.com",
-          emailed_status: Invite.emailed_status_types[:review],
-        )
-      end
-
-      before { sign_in(user) }
-
-      it "permanently deletes the selected drafts" do
-        post "/invites/destroy-drafts.json", params: { invite_ids: [draft.id] }
-
-        expect(response.status).to eq(200)
-        expect(response.parsed_body["destroyed_count"]).to eq(1)
-        expect(Invite.with_deleted.exists?(id: draft.id)).to eq(false)
-      end
-
-      it "fails loudly (not a silent partial delete) when a non-admin selects an invite they don't own" do
-        other_draft =
-          Invite.generate(
-            admin,
-            email: "otherdraftee@example.com",
-            emailed_status: Invite.emailed_status_types[:review],
+        request =
+          Fabricate(
+            :url_extraction_request,
+            created_by: admin,
+            status: UrlExtractionRequest.statuses[:closed],
           )
 
-        post "/invites/destroy-drafts.json", params: { invite_ids: [draft.id, other_draft.id] }
+        delete "/invites/url-extraction-requests/#{request.id}.json"
 
-        expect(response.status).to eq(422)
-        expect(Invite.with_deleted.exists?(id: draft.id)).to eq(true)
-        expect(Invite.with_deleted.exists?(id: other_draft.id)).to eq(true)
+        expect(response.status).to eq(200)
+        expect(UrlExtractionRequest.exists?(id: request.id)).to eq(false)
       end
 
-      it "lets an admin delete another user's drafts -- the Invited page itself lists by profile, not by viewer" do
-        other_draft =
-          Invite.generate(
-            user,
-            email: "otherdraftee@example.com",
-            emailed_status: Invite.emailed_status_types[:review],
-          )
-
+      it "404s instead of deleting a request that doesn't belong to the admin" do
         sign_in(admin)
-        post "/invites/destroy-drafts.json", params: { invite_ids: [draft.id, other_draft.id] }
+        other_admin = Fabricate(:admin)
+        request = Fabricate(:url_extraction_request, created_by: other_admin)
 
-        expect(response.status).to eq(200)
-        expect(response.parsed_body["destroyed_count"]).to eq(2)
-        expect(Invite.with_deleted.exists?(id: draft.id)).to eq(false)
-        expect(Invite.with_deleted.exists?(id: other_draft.id)).to eq(false)
-      end
+        delete "/invites/url-extraction-requests/#{request.id}.json"
 
-      it "never deletes a non-draft invite, even if selected" do
-        sent_invite = Fabricate(:invite, invited_by: user)
-
-        post "/invites/destroy-drafts.json", params: { invite_ids: [sent_invite.id] }
-
-        expect(response.status).to eq(200)
-        expect(response.parsed_body["destroyed_count"]).to eq(0)
-        expect(Invite.exists?(id: sent_invite.id)).to eq(true)
-      end
-
-      it "is rate-limited per request, not per invite" do
-        RateLimiter.enable
-
-        11.times { post "/invites/destroy-drafts.json", params: { invite_ids: [draft.id] } }
-
-        expect(response.status).to eq(429)
+        expect(response.status).to eq(400)
+        expect(UrlExtractionRequest.exists?(id: request.id)).to eq(true)
       end
     end
   end
