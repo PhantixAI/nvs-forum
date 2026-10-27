@@ -30,10 +30,7 @@ module AclTarget
               id:
                 AccessControlList
                   .matching_user(guardian.user)
-                  .where(
-                    target_type: polymorphic_name,
-                    permission: [permission, Acl::Permissions::OWNER].uniq,
-                  )
+                  .where(target_type: polymorphic_name, permission: permission)
                   .select(:target_id),
             )
           end
@@ -44,10 +41,7 @@ module AclTarget
               id:
                 AccessControlList
                   .matching_user(guardian.user)
-                  .where(
-                    target_type: polymorphic_name,
-                    permission: (Array.wrap(permissions) + [Acl::Permissions::OWNER]).uniq,
-                  )
+                  .where(target_type: polymorphic_name, permission: Array.wrap(permissions))
                   .select(:target_id),
             )
           end

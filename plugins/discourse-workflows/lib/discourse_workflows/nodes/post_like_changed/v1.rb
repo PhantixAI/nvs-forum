@@ -11,7 +11,6 @@ module DiscourseWorkflows
             Schema::POST_SCHEMA,
             Schema::TOPIC_LIST_ITEM_SCHEMA,
             Schema::USER_SCHEMA,
-            Schema::ACTOR_SCHEMA,
             Schema.document("change" => { "type" => "string", "enum" => CHANGES.values }),
           ).freeze
 
@@ -34,15 +33,6 @@ module DiscourseWorkflows
             },
             **TOPIC_SCOPE_FILTER_PROPERTIES,
           },
-        )
-
-        deprecated(
-          superseded_by: "2.0",
-          changes: {
-            "user" => "actor",
-          },
-          notice_key: "discourse_workflows.node_deprecated.user_is_post_author",
-          description_key: "discourse_workflows.node_descriptions.trigger:post_like_changed_v1",
         )
 
         def self.from_event(event_name, post_action, *)
@@ -68,20 +58,13 @@ module DiscourseWorkflows
           {
             change: @change,
             post: serialize_post(@post),
-            topic: serialize_topic_list_item(@post.topic),
-            user: serialize_user(subject_user),
-            actor: serialize_user(@user),
+            topic: topic_data(@post.topic),
+            user: serialize_user(@user),
           }
         end
 
         def matches?(trigger_ctx)
           matches_changes?(trigger_ctx, @change) && matches_topic_filters?(@post.topic, trigger_ctx)
-        end
-
-        private
-
-        def subject_user
-          @user
         end
       end
     end

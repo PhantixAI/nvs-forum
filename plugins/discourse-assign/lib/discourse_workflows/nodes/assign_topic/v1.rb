@@ -114,10 +114,7 @@ if defined?(DiscourseWorkflows)
             when "unassign"
               assigner.unassign
 
-              {
-                previously_assigned:
-                  serialize_assignee(previously_assigned, guardian: actor.guardian),
-              }
+              { previously_assigned: assignee_data(previously_assigned, actor.guardian) }
             else
               assignee = find_assignee(config["assignee"])
               if config["replace_existing"] != false && target.assignment
@@ -137,9 +134,8 @@ if defined?(DiscourseWorkflows)
               end
 
               {
-                assignee: serialize_assignee(assignee, guardian: actor.guardian),
-                previously_assigned:
-                  serialize_assignee(previously_assigned, guardian: actor.guardian),
+                assignee: assignee_data(assignee, actor.guardian),
+                previously_assigned: assignee_data(previously_assigned, actor.guardian),
               }
             end
           end
@@ -150,6 +146,27 @@ if defined?(DiscourseWorkflows)
 
           def find_assignee(identifier)
             ::User.find_by(username: identifier) || ::Group.find_by!(name: identifier)
+          end
+
+          def assignee_data(assignee, guardian)
+            case assignee
+            when ::User
+              {
+                type: "user",
+                user: serialize_record(assignee, BasicUserSerializer, scope: guardian),
+                group: {
+                },
+              }
+            when ::Group
+              {
+                type: "group",
+                user: {
+                },
+                group: serialize_record(assignee, BasicGroupSerializer, scope: guardian),
+              }
+            else
+              { type: nil, user: {}, group: {} }
+            end
           end
         end
       end

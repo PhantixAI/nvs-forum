@@ -89,6 +89,7 @@ export default class OutputContext extends Component {
     return {
       nodes: this.args.nodes || [],
       connections: this.args.connections || [],
+      nodeTypes: this.args.nodeTypes || [],
     };
   }
 
@@ -101,7 +102,8 @@ export default class OutputContext extends Component {
       {
         pinnedItems: this.pinnedItems,
         node: currentNode,
-        declaredOutputSchemas: this.args.session?.outputSchemas,
+        graph: this.graph,
+        configuration: this.args.configuration,
       }
     );
 

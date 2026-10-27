@@ -7,6 +7,7 @@ export default class EmbedableChatChannelConnector extends Component {
   @service embeddableChat;
   @service siteSettings;
   @service capabilities;
+  @service router;
 
   get shouldRender() {
     const mobileViewport =
@@ -17,11 +18,15 @@ export default class EmbedableChatChannelConnector extends Component {
       return false;
     }
 
-    if (this.embeddableChat.isZoomRoute) {
+    if (this.isZoomRoute) {
       return false;
     }
 
     return this.embeddableChat.canRenderChatChannel(mobileViewport);
+  }
+
+  get isZoomRoute() {
+    return this.router.currentRouteName === "topic-zoom";
   }
 
   <template>

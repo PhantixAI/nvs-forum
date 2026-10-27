@@ -305,9 +305,11 @@ export default class UppyComposerUpload {
 
     this.uppyWrapper.uppyInstance.on("upload", (uploadId, files) => {
       run(() => {
+        this.uppyWrapper.addNeedProcessing(files.length);
+
         this.composer.setProperties({
           isProcessingUpload: true,
-          isCancellable: true,
+          isCancellable: false,
         });
 
         files.forEach((file) => {

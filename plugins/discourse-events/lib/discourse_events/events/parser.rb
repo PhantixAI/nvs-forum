@@ -24,7 +24,6 @@ module DiscourseEvents
         :"all-day",
         :image,
         :hosts,
-        :recording,
         :"event-scope",
       ]
 
@@ -61,13 +60,11 @@ module DiscourseEvents
                 event ||= {}
                 value = CGI.unescapeHTML(value) if LEGACY_ESCAPED_ATTRS.include?(name)
                 event[name.sub("data-", "").to_sym] = case name
-                when "data-name", "data-url", "data-image", "data-location", "data-recording"
+                when "data-name", "data-url", "data-image", "data-location"
                   value
                 else
                   CGI.escapeHTML(value)
                 end
-                # A custom field sharing the name would overwrite the parsed value.
-                next
               end
 
               valid_custom_fields.each do |valid_custom_field|
@@ -160,15 +157,6 @@ module DiscourseEvents
         uri.scheme == "mailto" ? uri.opaque.present? : uri.host.present?
       rescue URI::Error, Addressable::URI::InvalidURIError
         false
-      end
-
-      # Stricter than `valid_url?`: a recording is only ever opened in a
-      # browser tab, so mailto and custom schemes have no business here.
-      def self.valid_web_url?(value)
-        value = value.to_s.strip
-        return true if value.blank?
-        return false if !valid_url?(value)
-        !value.match?(SCHEME_PREFIX) || value.match?(%r{\Ahttps?://}i)
       end
 
       def self.normalize_link(value)

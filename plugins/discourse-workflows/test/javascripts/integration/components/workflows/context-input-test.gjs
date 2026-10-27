@@ -88,6 +88,7 @@ module(
             @connections={{(Array)}}
             @node={{node}}
             @nodes={{nodes}}
+            @nodeTypes={{(Array)}}
             @session={{this.session}}
           />
         </template>
@@ -127,6 +128,7 @@ module(
             @connections={{(Array)}}
             @node={{actionNode}}
             @nodes={{nodes}}
+            @nodeTypes={{(Array)}}
             @session={{this.session}}
           />
         </template>
@@ -165,6 +167,7 @@ module(
             @connections={{(Array)}}
             @node={{node}}
             @nodes={{nodes}}
+            @nodeTypes={{(Array)}}
             @session={{this.session}}
           />
         </template>
@@ -209,6 +212,7 @@ module(
             @connections={{(Array)}}
             @node={{actionNode}}
             @nodes={{nodes}}
+            @nodeTypes={{(Array)}}
             @session={{this.session}}
           />
         </template>
@@ -341,6 +345,7 @@ module(
             @connections={{connections}}
             @node={{currentNode}}
             @nodes={{nodes}}
+            @nodeTypes={{(Array)}}
             @session={{this.session}}
           />
         </template>
@@ -386,20 +391,45 @@ module(
         { sourceClientId: "trigger", targetClientId: "step" },
         { sourceClientId: "step", targetClientId: "current" },
       ];
-      const trigger = {
-        type: "object",
-        description: "Trigger payload",
-        properties: { id: { type: "integer" } },
-      };
-      this.session.outputSchemas = {
-        trigger: [{ type: "object", properties: { trigger } }],
-        step: [
-          {
-            type: "object",
-            properties: { trigger, result: { type: "string" } },
+      const nodeTypes = [
+        {
+          name: "trigger:sample",
+          versions: {
+            "1.0": {
+              output_contracts: [
+                {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      trigger: {
+                        type: "object",
+                        description: "Trigger payload",
+                        properties: { id: { type: "integer" } },
+                      },
+                    },
+                  },
+                },
+              ],
+            },
           },
-        ],
-      };
+        },
+        {
+          name: "action:step",
+          versions: {
+            "1.0": {
+              output_contracts: [
+                {
+                  mode: "merge",
+                  schema: {
+                    type: "object",
+                    properties: { result: { type: "string" } },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      ];
 
       await render(
         <template>
@@ -407,6 +437,7 @@ module(
             @connections={{connections}}
             @node={{currentNode}}
             @nodes={{nodes}}
+            @nodeTypes={{nodeTypes}}
             @session={{this.session}}
           />
         </template>
@@ -472,6 +503,80 @@ module(
       );
     });
 
+    test("reuses one declared schema resolution across ancestor sections", async function (assert) {
+      let declarationReads = 0;
+      const triggerNode = {
+        clientId: "trigger",
+        type: "trigger:sample",
+        typeVersion: "1.0",
+        name: "Trigger",
+      };
+      const stepNodes = Array.from({ length: 8 }, (_, index) => ({
+        clientId: `step-${index}`,
+        type: "action:passthrough",
+        typeVersion: "1.0",
+        name: `Step ${index}`,
+      }));
+      const currentNode = {
+        clientId: "current",
+        type: "action:current",
+        name: "Current",
+      };
+      const nodes = [triggerNode, ...stepNodes, currentNode];
+      const connections = nodes.slice(1).map((node, index) => ({
+        sourceClientId: nodes[index].clientId,
+        targetClientId: node.clientId,
+      }));
+      const passthroughVersion = {
+        get output_contracts() {
+          declarationReads++;
+          return [{ mode: "passthrough" }];
+        },
+      };
+      const nodeTypes = [
+        {
+          name: "trigger:sample",
+          versions: {
+            "1.0": {
+              output_contracts: [
+                {
+                  schema: {
+                    type: "object",
+                    properties: { id: { type: "integer" } },
+                  },
+                },
+              ],
+            },
+          },
+        },
+        {
+          name: "action:passthrough",
+          versions: { "1.0": passthroughVersion },
+        },
+      ];
+
+      await render(
+        <template>
+          <InputContext
+            @connections={{connections}}
+            @node={{currentNode}}
+            @nodes={{nodes}}
+            @nodeTypes={{nodeTypes}}
+            @session={{this.session}}
+          />
+        </template>
+      );
+
+      assert.strictEqual(
+        declarationReads,
+        stepNodes.length,
+        "all direct and ancestor sections share one graph-level resolution"
+      );
+      assert
+        .dom(".workflows-schema-field__key-title")
+        .includesText("id", "the propagated declaration remains visible");
+    });
+
     test("shows an empty input state when the input has no JSON fields", async function (assert) {
       const previousNode = {
         clientId: "previous-1",
@@ -509,6 +614,7 @@ module(
             @connections={{connections}}
             @node={{currentNode}}
             @nodes={{nodes}}
+            @nodeTypes={{(Array)}}
             @session={{this.session}}
           />
         </template>
@@ -541,6 +647,7 @@ module(
             @connections={{connections}}
             @node={{currentNode}}
             @nodes={{nodes}}
+            @nodeTypes={{(Array)}}
             @session={{this.session}}
           />
         </template>
@@ -624,6 +731,7 @@ module(
             @connections={{connections}}
             @node={{currentNode}}
             @nodes={{nodes}}
+            @nodeTypes={{(Array)}}
             @session={{this.session}}
           />
         </template>
@@ -717,6 +825,7 @@ module(
             @connections={{connections}}
             @node={{currentNode}}
             @nodes={{nodes}}
+            @nodeTypes={{(Array)}}
             @session={{this.session}}
           />
         </template>
@@ -790,6 +899,7 @@ module(
             @connections={{connections}}
             @node={{logNode}}
             @nodes={{nodes}}
+            @nodeTypes={{(Array)}}
             @session={{this.session}}
           />
         </template>
@@ -827,6 +937,7 @@ module(
             @connections={{(Array)}}
             @node={{node}}
             @nodes={{nodes}}
+            @nodeTypes={{(Array)}}
             @session={{this.session}}
           />
         </template>
@@ -960,6 +1071,7 @@ module(
             @connections={{(Array)}}
             @node={{node}}
             @nodes={{Array node}}
+            @nodeTypes={{(Array)}}
             @session={{this.session}}
           />
         </template>

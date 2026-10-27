@@ -1,21 +1,23 @@
 import Component from "@glimmer/component";
+import { action } from "@ember/object";
 import { service } from "@ember/service";
+import { trustHTML } from "@ember/template";
 import { isEmpty } from "@ember/utils";
+import { withPluginApi } from "discourse/lib/plugin-api";
+import { optionalRequire } from "discourse/lib/utilities";
 import { eventHasLivestream } from "../../lib/livestream-utils.js";
 import LivestreamZoomEntry from "../livestream/zoom-entry.gjs";
-import OneboxEmbed from "./onebox-embed.gjs";
 
-// Renders the event's livestream at the bottom of the event card, from the
-// cooked onebox served on the event (EventSerializer#livestream_onebox).
+// Renders the event's livestream as a playable video at the bottom of the event
+// card, from the cooked onebox served on the event (EventSerializer#livestream_
+// onebox). For supported providers we hand the resolved attributes to lazy-
+// videos' LazyVideo component (the post-stream decorator that normally does this
+// doesn't reach our card); otherwise we render the onebox as-is.
 export default class Livestream extends Component {
   @service siteSettings;
 
-  // Once over, a recording supersedes the stream, which has nothing left to show.
   get show() {
-    const { event } = this.args;
-    return (
-      eventHasLivestream(event) && !(event.isExpired && event.recordingUrl)
-    );
+    return eventHasLivestream(this.args.event);
   }
 
   get isZoomLivestream() {
@@ -25,8 +27,55 @@ export default class Livestream extends Component {
     );
   }
 
+  // Resolved at runtime: lazy-videos may not be installed, and resolving at
+  // module load can return false before the plugin's modules are registered.
+  get lazyVideo() {
+    return optionalRequire(
+      "discourse/plugins/discourse-lazy-videos/discourse/components/lazy-video"
+    );
+  }
+
+  get videoAttributes() {
+    const html = this.args.event?.livestreamOnebox;
+    const getVideoAttributes = optionalRequire(
+      "discourse/plugins/discourse-lazy-videos/lib/lazy-video-attributes"
+    );
+    if (!html || !getVideoAttributes || !this.lazyVideo) {
+      return null;
+    }
+
+    const container = new DOMParser()
+      .parseFromString(html, "text/html")
+      .querySelector(".lazy-video-container");
+    if (!container) {
+      return null;
+    }
+
+    const attributes = getVideoAttributes(container);
+    return this.siteSettings[`lazy_${attributes.providerName}_enabled`]
+      ? attributes
+      : null;
+  }
+
   get hasLivestreamOnebox() {
     return !isEmpty(this.args.event?.livestreamOnebox);
+  }
+
+  get oneboxHtml() {
+    return this.videoAttributes
+      ? null
+      : trustHTML(this.args.event?.livestreamOnebox ?? "");
+  }
+
+  // Once playback starts the post has to stay rendered: cloaking it tears down
+  // the component holding the stream, taking any joined Zoom session with it.
+  @action
+  preventCloak() {
+    const postId = this.args.post?.id;
+
+    if (postId) {
+      withPluginApi((api) => api.preventCloak(postId));
+    }
   }
 
   <template>
@@ -35,7 +84,14 @@ export default class Livestream extends Component {
         {{#if this.isZoomLivestream}}
           <LivestreamZoomEntry @event={{@event}} />
         {{else if this.hasLivestreamOnebox}}
-          <OneboxEmbed @html={{@event.livestreamOnebox}} @post={{@post}} />
+          {{#if this.videoAttributes}}
+            <this.lazyVideo
+              @onLoadedVideo={{this.preventCloak}}
+              @videoAttributes={{this.videoAttributes}}
+            />
+          {{else}}
+            {{this.oneboxHtml}}
+          {{/if}}
         {{/if}}
       </section>
     {{/if}}

@@ -25,10 +25,9 @@ if defined?(DiscourseWorkflows)
             i18n_scope: PostEventScoping::I18N_SCOPE,
           )
 
-          def initialize(invitee, payload = {})
+          def initialize(invitee, *)
             super(parameters: {})
             @invitee = invitee
-            @actor = payload[:acting_user]
           end
 
           # Re-submitting an unchanged RSVP still publishes, so without the
@@ -42,9 +41,9 @@ if defined?(DiscourseWorkflows)
 
           def output
             {
-              event: serialize_event(starts_at: event.starts_at, ends_at: event.ends_at),
-              post: serialize_event_post,
-              topic: serialize_topic_list_item(topic),
+              event: event_data(starts_at: event.starts_at, ends_at: event.ends_at),
+              post: post_data,
+              topic: topic_data(topic),
               user: serialize_user(user),
               participation: {
                 status: removed? ? nil : status_name(@invitee.status),
@@ -52,8 +51,7 @@ if defined?(DiscourseWorkflows)
                 removed: removed?,
                 recurring: !removed? && !!@invitee.recurring,
               },
-              stats: serialize_event_stats,
-              actor: serialize_user(@actor),
+              stats: stats_data,
             }
           end
 

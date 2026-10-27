@@ -20,13 +20,7 @@ TopicStatusUpdater =
         end
 
         if changed
-          DiscourseEvent.trigger(
-            :topic_status_updated,
-            topic,
-            event_status,
-            status.enabled?,
-            acting_user: user,
-          )
+          DiscourseEvent.trigger(:topic_status_updated, topic, event_status, status.enabled?)
         end
 
         updated

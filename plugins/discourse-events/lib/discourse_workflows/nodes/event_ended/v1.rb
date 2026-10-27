@@ -39,11 +39,10 @@ if defined?(DiscourseWorkflows)
 
           def output
             {
-              event:
-                serialize_event(starts_at: @event_date.starts_at, ends_at: @event_date.ends_at),
-              post: serialize_event_post,
-              topic: serialize_topic_list_item(topic),
-              stats: serialize_event_stats,
+              event: event_data(starts_at: @event_date.starts_at, ends_at: @event_date.ends_at),
+              post: post_data,
+              topic: topic_data(topic),
+              stats: stats_data,
             }
           end
 

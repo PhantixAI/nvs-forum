@@ -5,9 +5,7 @@ import { module, test } from "qunit";
 import { setupRenderingTest } from "discourse/tests/helpers/component-test";
 import pretender, { response } from "discourse/tests/helpers/create-pretender";
 import { usageRoute } from "discourse/plugins/discourse-ai/discourse/components/ai-llm-usages";
-import AiModelsList, {
-  modelTypes,
-} from "discourse/plugins/discourse-ai/discourse/components/ai-models-list";
+import AiModelsList from "discourse/plugins/discourse-ai/discourse/components/ai-models-list";
 
 class FilterState {
   @tracked type = null;
@@ -197,7 +195,7 @@ module("Integration | Component | AiModelsList", function (hooks) {
     assert.dom(".ai-models-list__row[data-model-type='embedding']").exists();
   });
 
-  test("offers decision models when none are passed", async function (assert) {
+  test("hides decision models when none are passed", async function (assert) {
     this.llms = { content: [], resultSetMeta: { presets: [] } };
     this.embeddings = {
       content: [{ id: 2, display_name: "Test embedding", provider: "open_ai" }],
@@ -212,7 +210,7 @@ module("Integration | Component | AiModelsList", function (hooks) {
 
     assert
       .dom(".ai-models-list__type-filter option[value='decision']")
-      .exists("offers the decision type even without models");
+      .doesNotExist();
   });
 
   test("shows the default LLM setting only when filtered to LLMs", async function (assert) {
@@ -262,32 +260,5 @@ module("Integration | Component | AiModelsList", function (hooks) {
     await settled();
 
     assert.dom(".ai-configure-default-llm").exists();
-  });
-  test("model types are unconditional", function (assert) {
-    assert.deepEqual(
-      modelTypes(),
-      ["llm", "embedding", "decision"],
-      "all types are discoverable without workflow availability"
-    );
-  });
-
-  test("offers model creation when every list is empty and workflows are disabled", async function (assert) {
-    this.siteSettings.enable_discourse_workflows = false;
-    const empty = { content: [], resultSetMeta: { presets: [] } };
-    await render(
-      <template>
-        <AiModelsList
-          @decisionModels={{empty}}
-          @embeddings={{empty}}
-          @llms={{empty}}
-        />
-      </template>
-    );
-    assert
-      .dom(".ai-models-list__new-button")
-      .exists("keeps the header creation action");
-    assert
-      .dom(".ai-models-list__empty-new-button")
-      .exists("offers creation from the empty state");
   });
 });

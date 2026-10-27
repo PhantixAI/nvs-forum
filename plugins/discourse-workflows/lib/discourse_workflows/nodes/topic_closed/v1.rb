@@ -10,14 +10,12 @@ module DiscourseWorkflows
               icon: "lock",
               color: "grey",
             },
-            output_contracts: [
-              { schema: Schema.merge(Schema::TOPIC_LIST_ITEM_SCHEMA, Schema::ACTOR_SCHEMA) },
-            ],
+            output_contracts: [{ schema: Schema::TOPIC_LIST_ITEM_SCHEMA }],
           ),
         )
 
         def output
-          { topic: serialize_topic_list_item(@topic), actor: serialize_user(@actor) }
+          { topic: topic_data(@topic) }
         end
       end
     end

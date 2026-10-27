@@ -49,9 +49,7 @@ module DiscourseWorkflows
           capabilities: {
             run_scope: "per_item",
           },
-          output_contracts: [
-            { schema: Schema.merge(OUTPUT_SCHEMA, Schema::TOPIC_LIST_ITEM_SCHEMA) },
-          ],
+          output_contracts: [{ schema: OUTPUT_SCHEMA }],
           properties: {
             operation: {
               type: :options,
@@ -193,7 +191,6 @@ module DiscourseWorkflows
             pinned_until: topic.pinned_until&.utc&.iso8601,
             banner: topic.archetype == ::Archetype.banner,
             bannered_until: topic.bannered_until&.utc&.iso8601,
-            topic: serialize_topic(topic.reload, guardian: actor.guardian),
           }
         end
 

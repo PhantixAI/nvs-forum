@@ -26,6 +26,7 @@ import {
   ancestorOutputNodes,
   inputConnectionsForNode,
   previousNodeForConnection,
+  resolveDeclaredOutputSchemas,
 } from "../../../lib/workflows/schema-graph.js";
 import DragDropHint from "./drag-drop-hint.gjs";
 import SchemaField from "./schema-field.gjs";
@@ -141,7 +142,13 @@ export default class InputContext extends Component {
     return {
       nodes: this.args.nodes || [],
       connections: this.args.connections || [],
+      nodeTypes: this.args.nodeTypes || [],
     };
+  }
+
+  @cached
+  get declaredOutputSchemas() {
+    return resolveDeclaredOutputSchemas(this.graph);
   }
 
   @cached
@@ -193,8 +200,9 @@ export default class InputContext extends Component {
             prefix: inputFieldPrefixForConnection(connection, previousNode, {
               primaryConnection: this.primaryInputConnection,
             }),
+            graph: this.graph,
             pinnedItems,
-            declaredOutputSchemas: this.args.session?.outputSchemas,
+            declaredOutputSchemas: this.declaredOutputSchemas,
           }
         );
 
@@ -242,7 +250,8 @@ export default class InputContext extends Component {
               outputIndex: ancestor.outputIndex,
               node: ancestor.node,
               prefix,
-              declaredOutputSchemas: this.args.session?.outputSchemas,
+              graph: this.graph,
+              declaredOutputSchemas: this.declaredOutputSchemas,
             });
         const summary = pinnedItems
           ? { itemCount: pinnedItems.length, truncated: false }

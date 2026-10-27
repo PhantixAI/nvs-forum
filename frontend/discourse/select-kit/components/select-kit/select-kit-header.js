@@ -100,7 +100,7 @@ export default class SelectKitHeader extends Component {
     if (
       this.selectKit.isDisabled ||
       this.selectKit.options.disabled ||
-      (this.selectKit.options.useHeaderFilter && event.target !== this.element)
+      this.selectKit.options.useHeaderFilter
     ) {
       return;
     }

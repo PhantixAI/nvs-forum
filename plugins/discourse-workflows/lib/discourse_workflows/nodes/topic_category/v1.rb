@@ -17,21 +17,21 @@ module DiscourseWorkflows
           },
           output_contracts: [
             {
-              schema:
-                Schema.merge(
-                  Schema.document(
-                    "topic_id" => {
-                      "type" => "integer",
-                    },
-                    "category_id" => {
-                      "type" => "integer",
-                    },
-                    "old_category_id" => {
-                      "type" => "integer",
-                    },
-                  ),
-                  Schema::TOPIC_LIST_ITEM_SCHEMA,
-                ),
+              schema: {
+                "$schema" => Schema::DRAFT_URI,
+                "type" => "object",
+                "properties" => {
+                  "topic_id" => {
+                    "type" => "integer",
+                  },
+                  "category_id" => {
+                    "type" => "integer",
+                  },
+                  "old_category_id" => {
+                    "type" => "integer",
+                  },
+                },
+              },
             },
           ],
           properties: {
@@ -96,12 +96,7 @@ module DiscourseWorkflows
             )
           end
 
-          {
-            topic_id: topic.id,
-            category_id: topic.category_id,
-            old_category_id: old_category_id,
-            topic: serialize_topic(topic.reload, guardian:),
-          }
+          { topic_id: topic.id, category_id: topic.category_id, old_category_id: old_category_id }
         end
 
         def target_category_id(raw_value)

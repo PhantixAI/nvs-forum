@@ -3,7 +3,6 @@
 module DiscourseWorkflows
   module WorkflowDocument
     DEFAULT_CONNECTION_TYPE = "main"
-    MAX_INPUT_INDEX = 99
 
     module_function
 
@@ -138,14 +137,10 @@ module DiscourseWorkflows
             target_name = target_connection["node"].to_s
             next if target_name.blank? || !node_names.include?(target_name)
 
-            index = target_connection["index"]
-            index = index.to_i if index.respond_to?(:to_i)
-            next unless index.is_a?(Integer) && index.between?(0, MAX_INPUT_INDEX)
-
             {
               "node" => target_name,
               "type" => target_connection["type"].presence || DEFAULT_CONNECTION_TYPE,
-              "index" => index,
+              "index" => target_connection["index"].to_i,
             }
           end
 

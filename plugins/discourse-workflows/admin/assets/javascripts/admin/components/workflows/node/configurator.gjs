@@ -45,7 +45,6 @@ import PropertyEngineConfigurator from "../configurators/property-engine.gjs";
 import InputContext from "../context/input.gjs";
 import OutputContext from "../context/output.gjs";
 import { takenNodeNames } from "../editor/node-factory.js";
-import DeprecationNotice from "./deprecation-notice.gjs";
 import LivePreview from "./live-preview.gjs";
 
 function credentialSlotLabel(slot) {
@@ -390,7 +389,6 @@ export default class NodeConfigurator extends Component {
       this.isSaveStatusFading = false;
     }
 
-    this.args.model.session?.scheduleOutputSchemas(...this.#draftGraph());
     cancel(this.autosaveTimer);
     this.autosaveTimer = later(() => {
       this.#saveConfiguration({ throwOnError: true }).catch(() => {
@@ -420,12 +418,6 @@ export default class NodeConfigurator extends Component {
   }
 
   @action
-  upgradeNode() {
-    this.handleClose();
-    this.args.model.onUpgrade();
-  }
-
-  @action
   async executeStep() {
     try {
       await this.saveCurrentConfiguration();
@@ -444,21 +436,6 @@ export default class NodeConfigurator extends Component {
     this.nodeTypes = await this.workflowsNodeTypes.load();
     applySchemaDefaults(this.propertySchema, this.initialConfiguration);
     this.#setSavedBaseline(this.configuration, this.initialNodeName);
-    this.args.model.session?.loadOutputSchemas(...this.#draftGraph());
-  }
-
-  #draftGraph() {
-    const { node, nodes, connections } = this.args.model;
-    const configuration = this.persistedConfiguration;
-
-    return [
-      nodes.map((candidate) =>
-        candidate.clientId === node.clientId
-          ? { ...candidate, configuration }
-          : candidate
-      ),
-      connections,
-    ];
   }
 
   #cancelTimers() {
@@ -628,10 +605,6 @@ export default class NodeConfigurator extends Component {
                 }}</span>
             </div>
           {{/if}}
-          <DeprecationNotice
-            @deprecation={{this.resolvedNodeType.deprecation}}
-            @onUpgrade={{this.upgradeNode}}
-          />
           <div
             class={{dConcatClass
               "workflows-configurator-modal__columns"
@@ -644,6 +617,7 @@ export default class NodeConfigurator extends Component {
                 @hasConfiguration={{this.hasConfiguration}}
                 @node={{@model.node}}
                 @nodes={{@model.nodes}}
+                @nodeTypes={{this.nodeTypes}}
                 @session={{@model.session}}
                 @triggerType={{@model.triggerType}}
               />
@@ -819,6 +793,7 @@ export default class NodeConfigurator extends Component {
                   @connections={{@model.connections}}
                   @node={{@model.node}}
                   @nodes={{@model.nodes}}
+                  @nodeTypes={{this.nodeTypes}}
                   @session={{@model.session}}
                   @triggerType={{@model.triggerType}}
                 />

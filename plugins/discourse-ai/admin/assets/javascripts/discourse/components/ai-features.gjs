@@ -95,20 +95,7 @@ export default class AiFeatures extends Component {
             )
           );
 
-          const decisionMatches = feature.decision_model?.display_name
-            ?.toLowerCase()
-            .includes(term);
-          const classificationMatches = feature.classification_model?.model_name
-            ?.toLowerCase()
-            .includes(term);
-
-          return (
-            agentMatches ||
-            llmMatches ||
-            groupMatches ||
-            decisionMatches ||
-            classificationMatches
-          );
+          return agentMatches || llmMatches || groupMatches;
         } catch (error) {
           // eslint-disable-next-line no-console
           console.error(`Error filtering features`, error);

@@ -1,6 +1,5 @@
 import Component from "@glimmer/component";
 import { trustHTML } from "@ember/template";
-import dConcatClass from "discourse/ui-kit/helpers/d-concat-class";
 import dIcon from "discourse/ui-kit/helpers/d-icon";
 import openLinksInNewTab from "discourse/plugins/discourse-events/discourse/modifiers/open-links-in-new-tab";
 
@@ -27,12 +26,7 @@ export default class DiscoursePostEventLocation extends Component {
 
   <template>
     {{#if this.locationHtml}}
-      <section
-        class={{dConcatClass
-          "event__section event-location"
-          (if @superseded "--superseded")
-        }}
-      >
+      <section class="event__section event-location">
         {{dIcon this.icon}}
 
         <span

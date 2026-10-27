@@ -8,10 +8,12 @@ module DiscourseWorkflows
         OUTPUT_SCHEMA =
           Schema.merge(
             Schema::TOPIC_LIST_ITEM_SCHEMA,
-            Schema::ACTOR_SCHEMA,
-            Schema.document(
-              %w[old_tags new_tags added_tags removed_tags].index_with { TAG_LIST_SCHEMA },
-            ),
+            {
+              "$schema" => Schema::DRAFT_URI,
+              "type" => "object",
+              "properties" =>
+                %w[old_tags new_tags added_tags removed_tags].index_with { TAG_LIST_SCHEMA },
+            },
           ).freeze
 
         description(
@@ -43,12 +45,11 @@ module DiscourseWorkflows
 
         def output
           {
-            topic: serialize_topic_list_item(@topic),
+            topic: topic_data(@topic),
             old_tags: @old_tag_names,
             new_tags: @new_tag_names,
             added_tags: added_tags,
             removed_tags: removed_tags,
-            actor: serialize_user(@user),
           }
         end
 

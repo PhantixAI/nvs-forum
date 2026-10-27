@@ -37,7 +37,6 @@ export const EVENT_ATTRIBUTES = {
   eventScope: { default: null },
   image: { default: null },
   hosts: { default: null },
-  recording: { default: null },
 };
 
 /** @returns {RichEditorExtension} */

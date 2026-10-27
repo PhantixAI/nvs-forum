@@ -58,16 +58,9 @@ export default class EmbeddableChat extends Service {
   get showLivestreamHeaderChatIcon() {
     return (
       this.isMobileViewport &&
-      this.livestreamChatActive &&
       !!this.chatChannelId &&
-      !this.isZoomRoute &&
       !this.hasActiveZoomLivestream
     );
-  }
-
-  // The zoom page always renders the chat inline beside the meeting.
-  get isZoomRoute() {
-    return this.router.currentRouteName === "topic-zoom";
   }
 
   get hasActiveZoomLivestream() {
@@ -97,14 +90,14 @@ export default class EmbeddableChat extends Service {
     return this.topic?.chat_channel_id;
   }
 
-  get livestreamChatActive() {
-    return !!this.topic?.livestream_chat_active;
+  get topicHasLivestream() {
+    return this.topic?.has_livestream;
   }
 
   get useLivestreamLayout() {
     return (
       this.router.currentRouteName?.startsWith("topic.") &&
-      this.livestreamChatActive &&
+      this.topicHasLivestream &&
       !!this.chatChannelId &&
       !this.isChannelOpenInDrawer
     );
@@ -124,11 +117,7 @@ export default class EmbeddableChat extends Service {
       this.currentUser &&
       this.userCanChat
     ) {
-      if (
-        this.isPathAllowed &&
-        this.chatChannelId &&
-        this.livestreamChatActive
-      ) {
+      if (this.isPathAllowed && this.chatChannelId) {
         return !this.isChannelOpenInDrawer;
       }
     }

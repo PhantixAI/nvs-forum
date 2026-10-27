@@ -1,8 +1,4 @@
-<aside class="onebox {{subname}}{{#layout_class}} {{layout_class}}{{/layout_class}}" data-onebox-src="{{link}}">
-  {{#header}}
-    {{{header}}}
-  {{/header}}
-  {{^header}}
+<aside class="onebox {{subname}}" data-onebox-src="{{link}}">
   <header class="source">
     {{#favicon}}
       <img src="{{favicon}}" class="site-icon" alt=""/>
@@ -15,7 +11,6 @@
       <a href="{{link}}" target="_blank" rel="noopener">{{domain}}</a>
     {{/article_published_time}}
   </header>
-  {{/header}}
 
   <article class="onebox-body">
     {{{view}}}

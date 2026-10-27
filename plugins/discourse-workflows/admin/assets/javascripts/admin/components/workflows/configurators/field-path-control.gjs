@@ -26,6 +26,7 @@ export default class FieldPathControl extends Component {
     return inputFieldPathsForNode(this.args.node, {
       nodes: this.args.nodes,
       connections: this.args.connections,
+      nodeTypes: this.args.nodeTypes,
       session: this.args.session,
     });
   }

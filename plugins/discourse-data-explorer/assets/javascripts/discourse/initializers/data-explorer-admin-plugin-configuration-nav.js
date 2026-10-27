@@ -15,7 +15,7 @@ export default {
       api.setAdminPluginIcon(PLUGIN_ID, "chart-line");
       api.addAdminPluginConfigurationNav(PLUGIN_ID, [
         {
-          label: "explorer.queries",
+          label: "explorer.title",
           route: "adminPlugins.show.explorer",
         },
       ]);

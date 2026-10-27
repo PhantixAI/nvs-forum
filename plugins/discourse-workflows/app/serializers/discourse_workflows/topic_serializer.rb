@@ -26,7 +26,6 @@ module DiscourseWorkflows
                :like_count,
                :category_id,
                :user_id,
-               :username,
                :last_post_user_id,
                :last_poster_username,
                :first_post_id,
@@ -68,10 +67,6 @@ module DiscourseWorkflows
     def last_poster_username
       topic_posters.find { |poster| poster.user&.id == object.last_post_user_id }&.user&.username ||
         object.last_poster&.username
-    end
-
-    def username
-      object.user&.username
     end
 
     def first_post_id

@@ -4,10 +4,7 @@ import { i18n } from "discourse-i18n";
 
 export default class AISentimentDashboard extends Component {
   static shouldRender(args, context) {
-    return (
-      context.siteSettings.ai_sentiment_enabled ||
-      context.siteSettings.ai_sentiment_emotion_enabled
-    );
+    return context.siteSettings.ai_sentiment_enabled;
   }
 
   <template>

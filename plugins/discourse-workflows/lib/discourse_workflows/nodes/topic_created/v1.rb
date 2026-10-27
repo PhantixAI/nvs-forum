@@ -14,14 +14,7 @@ module DiscourseWorkflows
           group: "discourse_triggers",
           event: :topic_created,
           output_contracts: [
-            {
-              schema:
-                Schema.merge(
-                  Schema::TOPIC_LIST_ITEM_SCHEMA,
-                  Schema::POST_SCHEMA,
-                  Schema::USER_SCHEMA,
-                ),
-            },
+            { schema: Schema.merge(Schema::TOPIC_LIST_ITEM_SCHEMA, Schema::POST_SCHEMA) },
           ],
           properties: {
             **TOPIC_TYPE_FILTER_PROPERTIES,
@@ -73,11 +66,7 @@ module DiscourseWorkflows
         end
 
         def output
-          {
-            post: serialize_post(@topic.first_post),
-            topic: serialize_topic_list_item(@topic),
-            user: serialize_user(@topic.user),
-          }
+          { post: post_data(@topic.first_post), topic: topic_data(@topic) }
         end
 
         def matches?(trigger_ctx)
@@ -85,6 +74,12 @@ module DiscourseWorkflows
           return false if !matches_topic_filters?(@topic, trigger_ctx)
 
           matches_group_inbox?(@topic, trigger_ctx.get_node_parameter("group_inbox_id"))
+        end
+
+        private
+
+        def post_data(post)
+          serialize_post(post)
         end
       end
     end

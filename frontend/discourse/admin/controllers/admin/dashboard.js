@@ -169,7 +169,7 @@ export default class AdminDashboardController extends Controller {
 
     this._sectionsLoadingCount += 1;
     if (this._sectionsLoadingCount === 1) {
-      this.loadingSlider.transitionStarted({ showFallbackSpinner: false });
+      this.loadingSlider.transitionStarted();
     }
 
     try {

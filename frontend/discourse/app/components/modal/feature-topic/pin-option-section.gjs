@@ -1,4 +1,5 @@
 import Component from "@glimmer/component";
+import { cached } from "@glimmer/tracking";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 import { trustHTML } from "@ember/template";
@@ -14,7 +15,10 @@ export const MAX_GLOBALLY_PINNED_TOPICS = 4;
 export default class PinOptionSection extends Component {
   @service dialog;
 
-  formData = { pinUntil: this.args.dateValue };
+  @cached
+  get formData() {
+    return { pinUntil: this.args.dateValue };
+  }
 
   @action
   validatePinUntil(name, value, { addError }) {
@@ -28,7 +32,8 @@ export default class PinOptionSection extends Component {
   }
 
   @action
-  handleDateSet(name, value) {
+  handleDateSet(value, { set }) {
+    set("pinUntil", value);
     this.args.onDateChange?.(value);
   }
 
@@ -48,7 +53,6 @@ export default class PinOptionSection extends Component {
     <Form
       class="feature-section"
       @data={{this.formData}}
-      @onSet={{this.handleDateSet}}
       @onSubmit={{this.handleSubmit}}
       as |form|
     >
@@ -67,6 +71,7 @@ export default class PinOptionSection extends Component {
 
         <form.Field
           @name="pinUntil"
+          @onSet={{this.handleDateSet}}
           @showTitle={{false}}
           @title={{i18n "topic.feature_topic.pin_until"}}
           @type="custom"

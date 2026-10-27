@@ -73,7 +73,6 @@ module Boards
         :card_style,
         :show_topic_thumbnail,
         acl: %i[id type permission],
-        owner_user_ids: [],
         category_ids: [],
         tag_names: [],
         columns: %i[

@@ -24,7 +24,7 @@ module Boards
 
         boards =
           Boards::Board
-            .includes(:columns)
+            .includes(:columns, :created_by)
             .with_any_acl_permissions(guardian, allowed_permissions)
             .order(:name)
             .to_a
@@ -34,7 +34,16 @@ module Boards
             .pluck(:slug)
             .to_set
         tag_name_map = build_tag_name_map(*boards)
-        render json: { boards: serialize_boards(boards, tag_name_map:, used_slugs:) }
+        render json: {
+                 boards:
+                   serialize_data(
+                     boards,
+                     Boards::BoardSerializer,
+                     root: false,
+                     tag_name_map:,
+                     used_slugs:,
+                   ),
+               }
       end
 
       def available
@@ -131,9 +140,7 @@ module Boards
       def create
         raw = board_mutation_params.to_h
 
-        Boards::CreateBoard.call(
-          service_params.deep_merge(params: raw, raw_board_params: raw),
-        ) do |result|
+        Boards::CreateBoard.call(guardian:, params: raw, raw_board_params: raw) do |result|
           on_success { |board:| render json: { board: serialize_board(board) }, status: :created }
           on_failed_policy(:can_manage) { raise Discourse::InvalidAccess }
           on_failed_contract do |contract|
@@ -148,10 +155,9 @@ module Boards
         raw = board_mutation_params.to_h.except("columns")
 
         Boards::UpdateBoard.call(
-          service_params.deep_merge(
-            params: raw.merge("id" => params[:id], "client_id" => params[:client_id]),
-            raw_board_params: raw,
-          ),
+          guardian:,
+          params: raw.merge("id" => params[:id], "client_id" => params[:client_id]),
+          raw_board_params: raw,
         ) do
           on_success do |board:, cards_removed_count:|
             response = {
@@ -358,21 +364,7 @@ module Boards
         )
       end
 
-      def serialize_boards(boards, tag_name_map:, used_slugs:)
-        owners_by_board_id =
-          AccessControlList
-            .with_permission(boards, Acl::Permissions::OWNER)
-            .flattened_list
-            .group_by { |entry| entry[:target_id] }
-
-        serialize_data(
-          boards,
-          Boards::BoardSerializer,
-          root: false,
-          tag_name_map:,
-          used_slugs:,
-          owners_by_board_id:,
-        )
+      def serialize_boards(boards, tag_name_map:)
       end
 
       def preload_all_assignments(cards, visible_topic_ids)

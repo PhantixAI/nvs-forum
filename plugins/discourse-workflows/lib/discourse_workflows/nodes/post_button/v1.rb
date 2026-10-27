@@ -179,7 +179,13 @@ module DiscourseWorkflows
         end
 
         def output
-          { post: serialize_post(@post), topic: serialize_topic_list_item(@post.topic) }
+          { post: post_data(@post), topic: topic_data(@post.topic) }
+        end
+
+        private
+
+        def post_data(post)
+          serialize_post(post)
         end
       end
     end

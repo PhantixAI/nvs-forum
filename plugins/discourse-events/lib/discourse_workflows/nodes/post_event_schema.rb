@@ -14,13 +14,11 @@ if defined?(DiscourseWorkflows)
           "timezone": { "type": ["string", "null"] },
           "all_day": { "type": "boolean" },
           "closed": { "type": "boolean" },
-          "chat_channel_id": { "type": ["integer", "null"] },
           "recurring": { "type": "boolean" },
           "recurrence": { "type": ["string", "null"] },
           "starts_at": { "type": ["string", "null"], "format": "date-time" },
           "ends_at": { "type": ["string", "null"], "format": "date-time" },
-          "custom_fields": { "type": "object" },
-          "going_usernames": { "type": "array", "items": { "type": "string" } }
+          "custom_fields": { "type": "object" }
         }
       JSON
 
@@ -28,8 +26,7 @@ if defined?(DiscourseWorkflows)
         {
           "id": { "type": "integer" },
           "post_number": { "type": "integer" },
-          "url": { "type": ["string", "null"] },
-          "username": { "type": ["string", "null"] }
+          "url": { "type": ["string", "null"] }
         }
       JSON
 
@@ -108,7 +105,6 @@ if defined?(DiscourseWorkflows)
             DiscourseWorkflows::Schema::USER_SCHEMA,
             PARTICIPATION_SCHEMA,
             STATS_SCHEMA,
-            DiscourseWorkflows::Schema::ACTOR_SCHEMA,
           ).freeze
       end
     end

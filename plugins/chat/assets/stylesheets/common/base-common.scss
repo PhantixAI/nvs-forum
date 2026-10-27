@@ -209,7 +209,6 @@ body.has-full-page-chat {
 }
 
 .full-page-chat {
-  --chat-content-offset: var(--admin-onboarding-banner-height, 0px);
   display: grid;
   grid-template-columns: var(--full-page-sidebar-width) 1fr;
   background: var(--d-content-background);

@@ -5,7 +5,7 @@ module Jobs
     sidekiq_options queue: "low"
 
     def execute(args)
-      return unless DiscourseAi::Sentiment::PostClassification.any_enabled?
+      return unless SiteSetting.ai_sentiment_enabled
       return if (post_id = args[:post_id]).blank?
 
       post = Post.find_by(id: post_id, post_type: Post.types[:regular])

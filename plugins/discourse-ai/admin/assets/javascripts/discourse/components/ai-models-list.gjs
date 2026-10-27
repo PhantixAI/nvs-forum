@@ -17,8 +17,11 @@ import AiLlmUsages from "./ai-llm-usages.gjs";
 
 const ALL = "all";
 
-export function modelTypes() {
-  return ["llm", "embedding", "decision"];
+// Decision models only exist where workflows are enabled, so the route passes none otherwise.
+export function modelTypes(decisionModels) {
+  return decisionModels
+    ? ["llm", "embedding", "decision"]
+    : ["llm", "embedding"];
 }
 
 function llmDescription(llm) {
@@ -46,7 +49,7 @@ export default class AiModelsList extends Component {
   @tracked filterValue = "";
 
   get types() {
-    return modelTypes();
+    return modelTypes(this.args.decisionModels);
   }
 
   get selectedType() {

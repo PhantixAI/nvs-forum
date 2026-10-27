@@ -67,11 +67,11 @@ module PageObjects
         end
 
         def has_selected_status?(status)
-          has_css?(status_button_selector(status, selected_status_class(status)))
+          has_css?(status_button_selector(status, ".btn-primary"))
         end
 
         def has_no_selected_status?(status)
-          has_no_css?(status_button_selector(status, selected_status_class(status)))
+          has_no_css?(status_button_selector(status, ".btn-primary"))
         end
 
         def has_pressed_status?(status, pressed: true)
@@ -221,10 +221,6 @@ module PageObjects
         end
 
         private
-
-        def selected_status_class(status)
-          status.to_sym == :going ? ".btn-success" : ".btn-primary"
-        end
 
         def status_button_selector(status, state)
           button = ".event-status #{STATUS_BUTTONS.fetch(status)}"

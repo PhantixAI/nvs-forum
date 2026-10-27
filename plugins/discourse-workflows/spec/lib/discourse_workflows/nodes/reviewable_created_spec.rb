@@ -39,11 +39,18 @@ RSpec.describe DiscourseWorkflows::Nodes::ReviewableCreated::V1 do
     it "returns reviewable data", :aggregate_failures do
       output = described_class.new(reviewable).output
 
-      expect(output[:reviewable]).to include(
-        id: reviewable.id,
-        status: "pending",
-        url: "#{Discourse.base_url}/review/#{reviewable.id}",
-        chat_channel_id: nil,
+      expect(output).to eq(
+        reviewable: {
+          id: reviewable.id,
+          type: "ReviewableFlaggedPost",
+          status: "pending",
+          target_type: "Post",
+          target_id: reviewable.target_id,
+          topic_id: reviewable.topic_id,
+          category_id: reviewable.category_id,
+          score: reviewable.score,
+          created_at: reviewable.created_at.iso8601,
+        },
       )
       expect(output).to match_node_output_schema(described_class)
     end

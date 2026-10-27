@@ -5,21 +5,6 @@ module DiscourseAi
     class PostClassification
       include Constants
 
-      def self.enabled_for?(classification_type)
-        case classification_type.to_s
-        when "sentiment"
-          SiteSetting.ai_sentiment_enabled
-        when "emotion"
-          SiteSetting.ai_sentiment_emotion_enabled
-        else
-          false
-        end
-      end
-
-      def self.any_enabled?
-        enabled_for?(:sentiment) || enabled_for?(:emotion)
-      end
-
       def self.backfill_query(from_post_id: nil, max_age_days: nil)
         available_classifier_names = active_classifier_names
         return Post.none if available_classifier_names.blank?
@@ -60,7 +45,7 @@ module DiscourseAi
 
         unioned_queries = queries.map(&:to_sql).join(" UNION ")
 
-        Post.from(Arel.sql("(#{unioned_queries}) as posts")).includes(:sentiment_classifications)
+        Post.from(Arel.sql("(#{unioned_queries}) as posts"))
       end
 
       def self.active_classifier_names
@@ -70,12 +55,13 @@ module DiscourseAi
       def self.active_model_name_for(classification_type)
         classification_type = classification_type.to_s
 
-        case strategy_for(classification_type)
-        when Constants::AGENT_STRATEGY
-          return classification_type == "sentiment" ? SENTIMENT_AGENT_MODEL : EMOTION_AGENT_MODEL
-        when Constants::DECISION_MODEL_STRATEGY
+        if strategy_for(classification_type) == Constants::AGENT_STRATEGY
           return(
-            classification_type == "sentiment" ? SENTIMENT_DECISION_MODEL : EMOTION_DECISION_MODEL
+            if classification_type == "sentiment"
+              Constants::SENTIMENT_AGENT_MODEL
+            else
+              Constants::EMOTION_AGENT_MODEL
+            end
           )
         end
 
@@ -139,54 +125,6 @@ module DiscourseAi
         end
       end
 
-      def self.agent_configuration_for(classification_type)
-        agent_id = SiteSetting.public_send("ai_sentiment_#{classification_type}_agent")
-        ai_agent = AiAgent.find_by_id_from_cache(agent_id)
-        return { agent: nil, model: nil } if ai_agent.blank?
-
-        model_id = ai_agent.default_llm_id || SiteSetting.ai_default_llm_model
-        model = model_id.present? ? LlmModel.find_by(id: model_id) : LlmModel.last
-        { agent: ai_agent, model: model }
-      end
-
-      def self.decision_model_for(classification_type)
-        model_id = SiteSetting.public_send("ai_sentiment_#{classification_type}_decision_model")
-        DecisionModel.find_by(id: model_id) if model_id.present?
-      end
-
-      def self.classifier_summary_for(classification_type)
-        backend = strategy_for(classification_type)
-        case backend
-        when Constants::AGENT_STRATEGY
-          configuration = agent_configuration_for(classification_type)
-          {
-            backend: backend,
-            ready: configuration.values.all?(&:present?),
-            agent_ids: [configuration[:agent]&.id].compact,
-            llm_models: [configuration[:model]].compact,
-          }
-        when Constants::DECISION_MODEL_STRATEGY
-          model = decision_model_for(classification_type)
-          {
-            backend: backend,
-            ready: model.present?,
-            decision_model: model && { id: model.id, display_name: model.display_name },
-          }
-        else
-          model_name = active_model_name_for(classification_type)
-          config =
-            SentimentSiteSettingJsonSchema.values.find { |value| value.model_name == model_name }
-          {
-            backend: backend,
-            ready: config.present? && config.endpoint.present?,
-            classification_model: {
-              model_name: model_name,
-            },
-          }
-        end
-      end
-
-      MAX_INPUT_WORDS = 3000
       CONCURRENT_CLASSFICATIONS = 40
       CONCURRENT_AGENT_CLASSIFICATIONS = 5
 
@@ -196,7 +134,7 @@ module DiscourseAi
 
         max_threads =
           (
-            if available_classifiers.any? { |c| c[:provider] != :classification_model }
+            if available_classifiers.any? { |c| c[:provider] == :agent }
               CONCURRENT_AGENT_CLASSIFICATIONS
             else
               CONCURRENT_CLASSFICATIONS
@@ -212,7 +150,7 @@ module DiscourseAi
           text = prepare_text(record)
           next if text.blank?
 
-          already_classified = record.sentiment_classifications.map(&:model_used)
+          already_classified = record.sentiment_classifications.pluck(&:model_used)
           missing_classifiers =
             available_classifiers.reject { |ac| already_classified.include?(ac[:model_name]) }
 
@@ -282,7 +220,7 @@ module DiscourseAi
       end
 
       def classifiers
-        hugging_face_classifiers + agent_classifiers + decision_classifiers
+        hugging_face_classifiers + agent_classifiers
       end
 
       def has_classifiers?
@@ -292,22 +230,17 @@ module DiscourseAi
       private
 
       def hugging_face_classifiers
-        if %i[sentiment emotion].none? { |type|
-             self.class.enabled_for?(type) && dedicated_strategy_for?(type)
-           }
-          return []
-        end
+        return [] if agent_strategy_for?(:sentiment) && agent_strategy_for?(:emotion)
 
         configs = DiscourseAi::Sentiment::SentimentSiteSettingJsonSchema.values
-        untyped_sentiment_model = self.class.untyped_custom_model_name(configs, "sentiment")
+        legacy_sentiment_model = self.class.untyped_custom_model_name(configs, "sentiment")
 
         configs.filter_map do |config|
           classification_type = classification_type_for(config)
           effective_type =
             classification_type.presence ||
-              ("sentiment" if config.model_name == untyped_sentiment_model)
-          next unless self.class.enabled_for?(effective_type.presence || :sentiment)
-          next if effective_type.present? && !dedicated_strategy_for?(effective_type)
+              ("sentiment" if config.model_name == legacy_sentiment_model)
+          next if effective_type.present? && agent_strategy_for?(effective_type)
 
           api_endpoint = config.endpoint
 
@@ -327,64 +260,56 @@ module DiscourseAi
       end
 
       def agent_classifiers
-        %i[sentiment emotion].filter_map { |type| agent_classifier(type) }
+        [
+          agent_classifier(
+            :sentiment,
+            SiteSetting.ai_sentiment_sentiment_agent,
+            Constants::SENTIMENT_AGENT_MODEL,
+          ),
+          agent_classifier(
+            :emotion,
+            SiteSetting.ai_sentiment_emotion_agent,
+            Constants::EMOTION_AGENT_MODEL,
+          ),
+        ].compact
       end
 
-      def agent_classifier(classification_type)
-        return unless self.class.enabled_for?(classification_type)
-        return if self.class.strategy_for(classification_type) != Constants::AGENT_STRATEGY
+      def agent_classifier(classification_type, agent_id, model_name)
+        return if !agent_strategy_for?(classification_type)
 
-        configuration = self.class.agent_configuration_for(classification_type)
-        ai_agent, model = configuration.values_at(:agent, :model)
-        return if ai_agent.blank? || model.blank?
+        ai_agent = AiAgent.find_by_id_from_cache(agent_id)
+        return if ai_agent.blank?
+
+        agent_klass = ai_agent.class_instance
+        model_id = agent_klass.default_llm_id || SiteSetting.ai_default_llm_model
+        model = model_id.present? ? LlmModel.find_by(id: model_id) : LlmModel.last
+        return if model.blank?
 
         {
           classification_type: classification_type.to_s,
-          model_name: self.class.active_model_name_for(classification_type),
-          agent: ai_agent.class_instance.new,
+          model_name: model_name,
+          agent: agent_klass.new,
           user: ai_agent.user || Discourse.system_user,
           model: model,
           provider: :agent,
         }
       end
 
-      def decision_classifiers
-        %i[sentiment emotion].filter_map do |type|
-          next unless self.class.enabled_for?(type)
-          next if self.class.strategy_for(type) != Constants::DECISION_MODEL_STRATEGY
-
-          model = self.class.decision_model_for(type)
-          next if model.blank?
-
-          {
-            classification_type: type.to_s,
-            model_name: self.class.active_model_name_for(type),
-            model: model,
-            provider: :decision_model,
-          }
-        end
-      end
-
       def classification_type_for(config)
         self.class.classification_type_for(config)
       end
 
-      def dedicated_strategy_for?(classification_type)
-        self.class.strategy_for(classification_type) == Constants::CLASSIFICATION_MODEL_STRATEGY
+      def agent_strategy_for?(classification_type)
+        self.class.strategy_for(classification_type) == Constants::AGENT_STRATEGY
       end
 
       def prepare_text(target)
-        if target.post_number == 1
-          "#{target.topic.title}\n#{target.raw}"
-        else
-          target.raw
-        end
-      end
-
-      def prepare_classifier_input(classifier, content)
-        if classifier[:provider] != :classification_model
-          return content.truncate_words(MAX_INPUT_WORDS, omission: "")
-        end
+        content =
+          if target.post_number == 1
+            "#{target.topic.title}\n#{target.raw}"
+          else
+            target.raw
+          end
 
         DiscourseAi::Tokenizer::BertTokenizer.truncate(
           content,
@@ -394,12 +319,7 @@ module DiscourseAi
       end
 
       def request_with(classifier, target, content)
-        content = prepare_classifier_input(classifier, content)
         return request_with_agent(classifier, target, content) if classifier[:provider] == :agent
-
-        if classifier[:provider] == :decision_model
-          return request_with_decision_model(classifier, content)
-        end
 
         result = classifier[:client].classify_by_sentiment!(content)
 
@@ -444,19 +364,6 @@ module DiscourseAi
           raw_result,
           labels_for(classifier[:classification_type]),
         )
-      end
-
-      def request_with_decision_model(classifier, content)
-        type = classifier[:classification_type]
-        result =
-          classifier[:model].decide(
-            content,
-            questions: [ClassificationQuestion.for(type)],
-            user: Discourse.system_user,
-            feature_name: type,
-          )
-        answer = result[type]
-        answer.probabilities unless answer.refusal?
       end
 
       def transform_agent_result(structured_output, raw_result, labels)

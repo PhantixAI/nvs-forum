@@ -12,38 +12,15 @@ module DiscourseWorkflows
       OUTPUT_CONTRACTS = [
         {
           schema:
-            Schema.merge(
-              Schema::POST_SCHEMA,
-              Schema::TOPIC_LIST_ITEM_SCHEMA,
-              Schema::USER_SCHEMA,
-              Schema::ACTOR_SCHEMA,
-            ),
+            Schema.merge(Schema::POST_SCHEMA, Schema::TOPIC_LIST_ITEM_SCHEMA, Schema::USER_SCHEMA),
         },
       ].freeze
 
-      module V2
-        OUTPUT_CONTRACTS = [
-          {
-            schema:
-              Schema.merge(
-                PostLifecycle::OUTPUT_CONTRACTS.first[:schema],
-                Schema::POST_AUTHOR_SCHEMA,
-              ),
-          },
-        ].freeze
-
-        private
-
-        def subject_user
-          @post.user
-        end
-      end
-
-      def initialize(post, opts = nil, actor = nil, *)
+      def initialize(post, opts = nil, user = nil, *)
         super(parameters: {})
         @post = post
         @opts = opts
-        @actor = actor
+        @user = user
       end
 
       def valid?
@@ -52,12 +29,7 @@ module DiscourseWorkflows
       end
 
       def output
-        {
-          post: serialize_post(@post),
-          topic: serialize_topic_list_item(topic),
-          user: serialize_user(subject_user),
-          actor: serialize_user(@actor),
-        }
+        { post: serialize_post(@post), topic: topic_data(topic), user: serialize_user(@user) }
       end
 
       def matches?(trigger_ctx)
@@ -66,10 +38,6 @@ module DiscourseWorkflows
       end
 
       private
-
-      def subject_user
-        @actor
-      end
 
       def topic
         return @topic if defined?(@topic)

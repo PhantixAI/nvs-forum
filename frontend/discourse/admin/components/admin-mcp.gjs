@@ -131,7 +131,6 @@ export default class AdminMcp extends Component {
     primitiveRisk: "all",
     primitiveState: "all",
   };
-  primitiveFormData;
   clientFilterFormData = { clientFilter: "" };
   authorizationFilterFormData = { authorizationFilter: "" };
   activityFilterFormData = {
@@ -158,10 +157,6 @@ export default class AdminMcp extends Component {
       };
     }
     this.primitiveRecords = model.primitives;
-    this.primitiveFormData = this.primitives.reduce((data, primitive) => {
-      data[this.primitiveFieldName(primitive)] = Boolean(primitive.enabled);
-      return data;
-    }, {});
     this.primitiveEnabledStates = new Map(
       (model.primitives || []).map((primitive) => [
         primitive.id,
@@ -389,6 +384,13 @@ export default class AdminMcp extends Component {
 
   get newClientFormData() {
     return { ...CLIENT_PRESETS[this.selectedClientPresetId] };
+  }
+
+  get primitiveFormData() {
+    return this.primitives.reduce((data, primitive) => {
+      data[this.primitiveFieldName(primitive)] = Boolean(primitive.enabled);
+      return data;
+    }, {});
   }
 
   get hasPrimitiveChanges() {

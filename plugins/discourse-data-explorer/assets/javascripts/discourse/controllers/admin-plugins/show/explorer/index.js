@@ -3,6 +3,7 @@ import Controller from "@ember/controller";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
 import { Promise } from "rsvp";
+import { ajax } from "discourse/lib/ajax";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import discourseDebounce from "discourse/lib/debounce";
 import { bind } from "discourse/lib/decorators";
@@ -10,43 +11,47 @@ import { INPUT_DELAY } from "discourse/lib/environment";
 import getURL from "discourse/lib/get-url";
 import { applyQueryParams } from "discourse/lib/url";
 import { i18n } from "discourse-i18n";
-import { findQueries } from "discourse/plugins/discourse-data-explorer/discourse/data/builders/queries";
 
 export default class PluginsExplorerController extends Controller {
   @service dialog;
   @service router;
   @service store;
-  @service warpStore;
 
   @tracked sortByProperty = "last_run_at";
   @tracked sortDescending = true;
+  @tracked params;
   @tracked loading = false;
   @tracked searchLoading = false;
   @tracked queryTags = [];
   @tracked tags = "";
-  @tracked pages = [];
-  @tracked loadingMore = false;
 
   queryParams = ["id", "tags"];
+  explain = false;
   acceptedImportFileTypes = ["application/json"];
+  order = null;
+  form = null;
   #latestQueryRequest;
   _currentFilter = "";
 
+  get parsedParams() {
+    return this.params ? JSON.parse(this.params) : null;
+  }
+
   get fetchParams() {
-    return {
-      search: this._currentFilter,
-      tags: this.currentTags,
-      sort: this.sortByProperty,
-      descending: this.sortDescending,
-    };
-  }
-
-  get queries() {
-    return this.pages.flatMap((page) => page.data);
-  }
-
-  get canLoadMore() {
-    return !!this.pages.at(-1)?.links?.next;
+    const params = {};
+    if (this._currentFilter) {
+      params.filter = this._currentFilter;
+    }
+    if (this.currentTags.length) {
+      params.tags = this.currentTags.join(",");
+    }
+    if (this.sortByProperty !== "last_run_at") {
+      params.order = this.sortByProperty;
+    }
+    if (!this.sortDescending) {
+      params.ascending = "true";
+    }
+    return params;
   }
 
   get hasTagFilter() {
@@ -65,11 +70,9 @@ export default class PluginsExplorerController extends Controller {
     return this.currentTags.map((tag) => ({ id: tag, name: tag }));
   }
 
-  reset(document, queryTags) {
-    this.#latestQueryRequest = null;
-    this.searchLoading = false;
-    this.pages = [document];
-    this.queryTags = queryTags;
+  addCreatedRecord(record) {
+    this.model.content.push(record);
+    this.router.transitionTo("adminPlugins.show.explorer.edit", record.id);
   }
 
   @bind
@@ -83,7 +86,7 @@ export default class PluginsExplorerController extends Controller {
       this.loading = true;
       const file = files[0];
       const record = await this._importQuery(file);
-      this.router.transitionTo("adminPlugins.show.explorer.edit", record.id);
+      this.addCreatedRecord(record);
     } catch (e) {
       if (e.jqXHR) {
         popupAjaxError(e);
@@ -168,22 +171,9 @@ export default class PluginsExplorerController extends Controller {
 
   @action
   async loadMore() {
-    if (this.loadingMore || !this.canLoadMore) {
-      return;
-    }
-
-    const last = this.pages.at(-1);
-    this.loadingMore = true;
-    try {
-      const page = await last.next();
-      // Drop the page if the list was replaced meanwhile.
-      if (this.pages.at(-1) === last) {
-        this.pages = [...this.pages, page];
-      }
-    } catch (e) {
-      popupAjaxError(e);
-    } finally {
-      this.loadingMore = false;
+    const loadedMore = await this.model?.loadMore();
+    if (loadedMore) {
+      this._setGroupNames(this.model.content);
     }
   }
 
@@ -218,18 +208,31 @@ export default class PluginsExplorerController extends Controller {
   }
 
   async _fetchQueries() {
+    const model = this.model;
     const request = (this.#latestQueryRequest = {});
 
     try {
-      const { content } = await this.warpStore.request(
-        findQueries(this.fetchParams)
+      const result = await ajax(
+        "/admin/plugins/discourse-data-explorer/queries.json",
+        { data: this.fetchParams }
       );
 
-      if (request === this.#latestQueryRequest) {
-        this.pages = [content];
+      if (request !== this.#latestQueryRequest || model !== this.model) {
+        return;
       }
+
+      const queries = result.queries.map((q) =>
+        this.store.createRecord("query", q)
+      );
+
+      model.content.splice(0, model.content.length, ...queries);
+      model.totalRows = result.total_rows_queries || queries.length;
+      model.loadMoreUrl = result.load_more_queries || null;
+      this.queryTags = result.extras?.tags ?? this.queryTags;
+
+      this._setGroupNames(queries);
     } catch (e) {
-      if (request === this.#latestQueryRequest) {
+      if (request === this.#latestQueryRequest && model === this.model) {
         popupAjaxError(e);
       }
     } finally {
@@ -237,5 +240,21 @@ export default class PluginsExplorerController extends Controller {
         this.searchLoading = false;
       }
     }
+  }
+
+  _setGroupNames(queries) {
+    if (!this.groups) {
+      return;
+    }
+    const groupNames = {};
+    this.groups.forEach((g) => {
+      groupNames[g.id] = g.name;
+    });
+    queries.forEach((query) => {
+      query.set(
+        "group_names",
+        (query.group_ids || []).map((id) => groupNames[id])
+      );
+    });
   }
 }

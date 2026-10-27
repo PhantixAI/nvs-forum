@@ -5,12 +5,6 @@ module DiscourseWorkflows
     module Group
       class V1 < NodeType
         OPERATIONS = %w[add remove get check_membership].freeze
-        GROUP_ACTION_SCHEMA =
-          Schema.merge(
-            Schema::GROUP_SCHEMA,
-            Schema::USER_SCHEMA,
-            Schema.document("changed" => { "type" => "boolean" }),
-          )
 
         description(
           name: "action:group",
@@ -27,7 +21,7 @@ module DiscourseWorkflows
             {
               variants: [
                 {
-                  schema: GROUP_ACTION_SCHEMA,
+                  schema: Schema.merge(Schema::GROUP_SCHEMA, Schema::BASIC_USER_SCHEMA),
                   display_options: {
                     show: {
                       operation: %w[add remove],
@@ -141,8 +135,9 @@ module DiscourseWorkflows
           actor = exec_ctx.actor_from_parameter("actor_username", item_index)
           guardian = actor.guardian
           guardian.ensure_can_see_group!(group)
+          serialized_group = group_data(group, guardian)
 
-          return { group: serialize_group(group, guardian) } if config["operation"] == "get"
+          return { group: serialized_group } if config["operation"] == "get"
 
           guardian.ensure_can_edit_group!(group)
 
@@ -152,27 +147,19 @@ module DiscourseWorkflows
 
           case config["operation"]
           when "remove"
-            changed = group.remove(user)
+            group.remove(user)
             logger.log_remove_user_from_group(user)
           else
-            changed = GroupManager.new(group).add([user.id]).present?
+            group.add(user)
             logger.log_add_user_to_group(user)
-            changed = set_primary_group(user, group, guardian) || changed if config[
-              "set_primary_group"
-            ]
+            set_primary_group(user, group, guardian) if config["set_primary_group"]
           end
 
-          {
-            group: serialize_group(group.reload, guardian),
-            user: serialize_user(user.reload, guardian:),
-            changed:,
-          }
+          { group: serialized_group, user: user_data(user, guardian) }
         end
 
         def set_primary_group(user, group, guardian)
           guardian.ensure_can_change_primary_group!(user, group)
-          return false if user.primary_group_id == group.id
-
           user.update!(primary_group_id: group.id)
         end
 
@@ -197,8 +184,12 @@ module DiscourseWorkflows
           )
         end
 
-        def serialize_group(group, guardian)
+        def group_data(group, guardian)
           serialize_record(group, WebHookGroupSerializer, scope: guardian)
+        end
+
+        def user_data(user, guardian)
+          serialize_record(user, BasicUserSerializer, scope: guardian)
         end
       end
     end

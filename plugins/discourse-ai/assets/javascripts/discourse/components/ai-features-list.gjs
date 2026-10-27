@@ -21,11 +21,6 @@ export default class AiFeaturesList extends Component {
   }
 
   @action
-  showGroups(aModule) {
-    return !["spam", "sentiment"].includes(aModule.module_name);
-  }
-
-  @action
   isAutomationModule(aModule) {
     return (
       aModule.module_name === "automation_reports" ||
@@ -100,7 +95,7 @@ export default class AiFeaturesList extends Component {
                 <AiFeatureCard
                   @feature={{feature}}
                   @localizedFeatureName={{this.featureName feature module}}
-                  @showGroups={{this.showGroups module}}
+                  @showGroups={{not (this.isSpamModule module)}}
                 />
               {{/each}}
             {{/if}}

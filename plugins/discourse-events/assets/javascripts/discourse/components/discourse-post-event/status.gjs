@@ -19,9 +19,6 @@ import CalendarPrompt from "./calendar-prompt.gjs";
 const statusButtonClass = (selected) =>
   selected ? "btn-primary" : "btn-default";
 
-const goingButtonClass = (selected) =>
-  selected ? "btn-success" : "btn-default";
-
 const GoingDropdown = <template>
   <DDropdownMenu as |dropdown|>
     <dropdown.item
@@ -288,7 +285,7 @@ export default class DiscoursePostEventStatus extends Component {
                   <DMenu
                     class={{dConcatClass
                       "going-button"
-                      (goingButtonClass this.isGoing)
+                      (statusButtonClass this.isGoing)
                     }}
                     @disabled={{this.goingButtonDisabled}}
                     @icon={{this.goingTriggerIcon}}
@@ -304,7 +301,7 @@ export default class DiscoursePostEventStatus extends Component {
                 {{else}}
                   <DComboButton
                     class="going-button"
-                    @btnTypeClass={{goingButtonClass this.isGoing}}
+                    @btnTypeClass={{statusButtonClass this.isGoing}}
                     @hasMenu={{true}}
                     as |combo|
                   >
@@ -332,7 +329,7 @@ export default class DiscoursePostEventStatus extends Component {
                 <DButton
                   class={{dConcatClass
                     "going-button"
-                    (goingButtonClass this.isGoing)
+                    (statusButtonClass this.isGoing)
                   }}
                   @action={{fn this.changeWatchingInviteeStatus "going"}}
                   @ariaPressed={{this.isGoing}}

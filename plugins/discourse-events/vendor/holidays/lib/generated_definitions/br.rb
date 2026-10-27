@@ -26,7 +26,7 @@ module Holidays
       10 => [{:mday => 12, :name => "Dia de Nossa Senhora Aparecida", :regions => [:br]}],
       11 => [{:mday => 2, :name => "Dia de Finados", :regions => [:br]},
             {:mday => 15, :name => "Proclamação da República", :regions => [:br]},
-            {:mday => 20, :name => "Dia da Consciência Negra", :regions => [:br]}],
+            {:mday => 20, :name => "Dia da Consciência Negra", :regions => [:br_spcapital]}],
       12 => [{:mday => 25, :name => "Natal", :regions => [:br]}]
       }
     end

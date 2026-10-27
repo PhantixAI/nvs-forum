@@ -58,7 +58,7 @@ module DiscourseWorkflows
         end
 
         def output
-          { user: serialize_user(@user), badge: serialize_badge }
+          { user: serialize_user(@user), badge: badge_data }
         end
 
         def matches?(trigger_ctx)
@@ -68,7 +68,7 @@ module DiscourseWorkflows
 
         private
 
-        def serialize_badge
+        def badge_data
           {
             id: @badge.id,
             name: @badge.name,

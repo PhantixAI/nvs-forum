@@ -65,14 +65,17 @@ class DiscourseSolved::BuildSchemaMarkup
       ).serializable_hash
 
     json =
-      MultiJson.dump(
-        "@context" => "http://schema.org",
-        "@type" => "QAPage",
-        "name" => topic.title,
-        "datePublished" => topic.created_at,
-        "mainEntity" => question_json,
-      )
+      MultiJson
+        .dump(
+          "@context" => "http://schema.org",
+          "@type" => "QAPage",
+          "name" => topic.title,
+          "datePublished" => topic.created_at,
+          "mainEntity" => question_json,
+        )
+        .gsub("</", "<\\/")
+        .html_safe
 
-    "<script type=\"application/ld+json\">#{ERB::Util.json_escape(json)}</script>"
+    "<script type=\"application/ld+json\">#{json}</script>"
   end
 end

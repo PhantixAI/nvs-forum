@@ -9,10 +9,7 @@ module DiscourseWorkflows
                :post_number,
                :post_type,
                :reply_to_post_number,
-               :reply_to_post_id,
-               :reply_to_username,
                :post_url,
-               :url,
                :username,
                :user_id,
                :created_at,
@@ -23,7 +20,6 @@ module DiscourseWorkflows
                :score,
                :category_id,
                :category_name,
-               :category_slug,
                :tags,
                :upload_ids,
                :raw,
@@ -47,22 +43,6 @@ module DiscourseWorkflows
       return "/404" if topic.blank?
 
       ::Post.url(topic.slug, topic.id, object.post_number)
-    end
-
-    def url
-      "#{Discourse.base_url}#{post_url}"
-    end
-
-    def reply_to_post_id
-      if object.has_attribute?(:reply_to_post_id)
-        object[:reply_to_post_id]
-      else
-        object.reply_to_post&.id
-      end
-    end
-
-    def reply_to_username
-      object.reply_to_user&.username
     end
 
     def username
@@ -89,14 +69,10 @@ module DiscourseWorkflows
       topic&.category&.name
     end
 
-    def category_slug
-      topic&.category&.slug_for_url
-    end
-
     def tags
       return [] if topic.blank? || !SiteSetting.tagging_enabled
 
-      topic.visible_tags(scope).map(&:name)
+      topic.tags.visible(scope).pluck(:name)
     end
 
     def upload_ids

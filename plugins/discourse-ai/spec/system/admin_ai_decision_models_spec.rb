@@ -7,7 +7,7 @@ RSpec.describe "Managing decision models" do
 
   before do
     enable_current_plugin
-    SiteSetting.enable_discourse_workflows = false
+    SiteSetting.enable_discourse_workflows = true
     sign_in(admin)
   end
 

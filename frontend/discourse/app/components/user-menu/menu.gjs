@@ -258,7 +258,7 @@ export default class UserMenu extends Component {
 
     CORE_TOP_TABS.forEach((tabClass) => {
       const tab = new tabClass(this.currentUser, this.siteSettings, this.site);
-      if (tab.shouldDisplay || tab.id === this.currentTabId) {
+      if (tab.shouldDisplay) {
         tabs.push(tab);
       }
     });
@@ -391,7 +391,7 @@ export default class UserMenu extends Component {
             role="tablist"
           >
             <div class="top-tabs tabs-list" {{didInsert this.focusFirstTab}}>
-              {{#each this.topTabs key="id" as |tab|}}
+              {{#each this.topTabs as |tab|}}
                 <MenuTab
                   @currentTabId={{this.currentTabId}}
                   @onTabClick={{fn this.handleTabClick tab}}
@@ -400,7 +400,7 @@ export default class UserMenu extends Component {
               {{/each}}
             </div>
             <div class="bottom-tabs tabs-list">
-              {{#each this.bottomTabs key="id" as |tab|}}
+              {{#each this.bottomTabs as |tab|}}
                 <MenuTab
                   @currentTabId={{this.currentTabId}}
                   @onTabClick={{fn this.handleTabClick tab}}

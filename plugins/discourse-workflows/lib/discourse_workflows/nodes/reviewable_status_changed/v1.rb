@@ -14,9 +14,7 @@ module DiscourseWorkflows
           group: "discourse_triggers",
           palette_visible: false,
           event: :reviewable_transitioned_to,
-          output_contracts: [
-            { schema: Schema.merge(Schema::REVIEWABLE_EVENT_SCHEMA, Schema::ACTOR_SCHEMA) },
-          ],
+          output_contracts: [{ schema: Schema::REVIEWABLE_EVENT_SCHEMA }],
           properties: -> do
             {
               statuses: {
@@ -45,11 +43,10 @@ module DiscourseWorkflows
           )
         end
 
-        def initialize(status, reviewable, payload = {})
+        def initialize(status, reviewable)
           super(parameters: {})
           @status = status.to_s
           @reviewable = reviewable
-          @actor = payload[:acting_user]
         end
 
         def valid?
@@ -59,10 +56,7 @@ module DiscourseWorkflows
         end
 
         def output
-          {
-            reviewable: serialize_reviewable(@reviewable).merge(status: @status),
-            actor: serialize_user(@actor),
-          }
+          { reviewable: reviewable_data(@reviewable).merge(status: @status) }
         end
 
         def matches?(trigger_ctx)

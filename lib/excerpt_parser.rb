@@ -122,8 +122,7 @@ class ExcerptParser < Nokogiri::XML::SAX::Document
     when "article"
       @in_quote = !@keep_onebox_body if attributes.include?(%w[class onebox-body])
     when "header"
-      classes = attributes.to_h["class"].to_s.split
-      @in_quote = !@keep_onebox_source if classes.include?("source")
+      @in_quote = !@keep_onebox_source if attributes.include?(%w[class source])
     when "div", "span"
       attributes = Hash[*attributes.flatten]
 

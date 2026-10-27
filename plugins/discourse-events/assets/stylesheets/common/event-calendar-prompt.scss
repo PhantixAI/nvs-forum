@@ -2,7 +2,7 @@
 
 .event-calendar-prompt {
   border-top: 1px solid var(--primary-low);
-  padding: var(--space-2) var(--space-4) var(--space-4);
+  padding: 1em;
   background: var(--success-very-low);
 
   &__heading {
@@ -36,10 +36,6 @@
   &__settings {
     text-decoration: underline;
     text-underline-offset: 0.15em;
-  }
-
-  + .event__section.event-livestream {
-    padding-top: var(--space-3);
   }
 }
 

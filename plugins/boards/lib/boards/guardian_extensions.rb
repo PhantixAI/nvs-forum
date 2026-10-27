@@ -11,13 +11,11 @@ module Boards
     end
 
     def can_destroy_board?(board)
-      !board.archived? &&
-        (is_acl_owner?(board) || (can_manage_boards? && has_acl_permission?(board, "manage")))
+      !board.archived? && can_manage_boards? && has_acl_permission?(board, "manage")
     end
 
     def can_manage_board?(board)
-      !board.archived? &&
-        (is_acl_owner?(board) || (can_manage_boards? && has_acl_permission?(board, "manage")))
+      !board.archived? && can_manage_boards? && has_acl_permission?(board, "manage")
     end
 
     def can_read_board?(board)

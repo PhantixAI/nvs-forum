@@ -17,17 +17,14 @@ module DiscourseWorkflows
             **%w[
               readable_date
               readable_time
-              date
               day_of_week
               year
               month
-              month_number
               day_of_month
               hour
               minute
               second
               timezone
-              time
             ].index_with { { "type" => "string" } },
           },
         }.freeze

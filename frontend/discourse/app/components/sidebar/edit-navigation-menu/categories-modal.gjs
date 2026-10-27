@@ -5,7 +5,6 @@ import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { trackedSet } from "@ember/reactive/collections";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
-import didUpdate from "@ember/render-modifiers/modifiers/did-update";
 import { service } from "@ember/service";
 import EditNavigationMenuModal from "discourse/components/sidebar/edit-navigation-menu/modal";
 import borderColor from "discourse/helpers/border-color";
@@ -274,7 +273,7 @@ export default class SidebarEditNavigationMenuCategoriesModal extends Component 
             (if this.filtered "--filtered")
           }}
         >
-          {{#each this.fetchedCategoriesGroupings key="0.id" as |categories|}}
+          {{#each this.fetchedCategoriesGroupings as |categories|}}
             <div
               class="sidebar-categories-form__row"
               style={{borderColor (get categories "0.color") "left"}}
@@ -285,7 +284,6 @@ export default class SidebarEditNavigationMenuCategoriesModal extends Component 
                   data-category-id={{category.id}}
                   data-category-level={{category.level}}
                   {{didInsert this.didInsert}}
-                  {{didUpdate this.didInsert this.fetchedCategoriesGroupings}}
                 >
                   <label
                     class="sidebar-categories-form__category-label"

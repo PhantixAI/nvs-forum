@@ -2,12 +2,10 @@
 
 module Acl
   class Permissions
-    OWNER = "owner"
-
     attr_reader :values
 
     def initialize(*permissions)
-      @values = (permissions.map(&:to_s) + [OWNER]).map(&:freeze).uniq.freeze
+      @values = permissions.map { |permission| permission.to_s.freeze }.uniq.freeze
 
       @values.each do |permission|
         if !permission.match?(/\A[a-z][a-z0-9_]*\z/) || respond_to?(permission, true)

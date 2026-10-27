@@ -178,11 +178,12 @@ class CurrentUserSerializer < BasicUserSerializer
     scope.can_send_private_messages?
   end
 
+  # The wizard only offers the core themes and rewrites the site's design in one
+  # pass, so it stops being useful once a site has been customized past what it
+  # covers.
   def include_can_run_design_wizard?
-    return false if !object.admin?
-
-    theme_ids = DesignWizard::Themes.ids
-    theme_ids.include?(SiteSetting.default_theme_id) && !Theme.where.not(id: theme_ids).exists?
+    object.admin? && Theme::CORE_THEMES.value?(SiteSetting.default_theme_id) &&
+      !Theme.where.not(id: Theme::CORE_THEMES.values).exists?
   end
 
   def can_run_design_wizard

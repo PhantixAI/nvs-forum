@@ -77,14 +77,9 @@ module(
         .dom(
           ".design-wizard__theme-card[data-theme-id='-2'] .design-wizard__theme-screenshot"
         )
-        .doesNotExist(
-          "does not render an empty screenshot for a theme without one"
-        );
-      assert
-        .dom(".design-wizard__theme-card[data-theme-id='-2']")
-        .hasClass(
-          "--without-screenshot",
-          "uses a compact card without a screenshot"
+        .doesNotHaveClass(
+          "--loading",
+          "does not leave a skeleton running for a theme with no screenshot"
         );
     });
 

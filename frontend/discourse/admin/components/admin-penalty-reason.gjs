@@ -2,6 +2,7 @@ import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { on } from "@ember/modifier";
 import { action } from "@ember/object";
+import { trustHTML } from "@ember/template";
 import withEventValue from "discourse/helpers/with-event-value";
 import ComboBox from "discourse/select-kit/components/combo-box";
 import DTextField from "discourse/ui-kit/d-text-field";
@@ -72,9 +73,8 @@ export default class AdminPenaltyReason extends Component {
           />
         {{/if}}
       {{else if (eq @penaltyType "silence")}}
-        <label class="silence-reason-title">{{i18n
-            "admin.user.silence_reason_title"
-          }}</label>
+        <label class="silence-reason-title">
+          {{trustHTML (i18n "admin.user.silence_reason_label")}}</label>
 
         <ComboBox
           class="silence-reason"

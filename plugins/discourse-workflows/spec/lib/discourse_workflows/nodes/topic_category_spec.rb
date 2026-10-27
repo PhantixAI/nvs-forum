@@ -16,8 +16,6 @@ RSpec.describe DiscourseWorkflows::Nodes::TopicCategory::V1 do
       expect(result["topic_id"]).to eq(topic.id)
       expect(result["category_id"]).to eq(other_category.id)
       expect(result["old_category_id"]).to eq(category.id)
-      expect(result.dig("topic", "category_id")).to eq(other_category.id)
-      expect(result).to match_node_output_schema(described_class)
       expect(topic.reload.category_id).to eq(other_category.id)
     end
 

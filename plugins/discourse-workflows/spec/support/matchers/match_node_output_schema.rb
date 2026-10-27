@@ -2,41 +2,24 @@
 
 RSpec::Matchers.define :match_node_output_schema do |node_class, configuration: {}, input_schemas: [], output_index: 0|
   match do |output|
-    next false if (@non_hash_output = !output.is_a?(Hash))
+    @resolved_schema = nil
+    @validation_errors = []
+    @non_hash_output = !output.is_a?(Hash)
 
-    @resolved_schema =
-      node_class.output_schemas(configuration, input_schemas: input_schemas)[output_index] || {}
-    next false if @resolved_schema.blank?
-
-    @validation_errors =
-      JSONSchemer
-        .schema(require_declared_properties(@resolved_schema))
-        .validate(output.deep_stringify_keys)
-        .to_a
-    @validation_errors.empty?
-  end
-
-  def require_declared_properties(schema)
-    case schema
-    when Hash
-      strict = schema.transform_values { |value| require_declared_properties(value) }
-      return strict if !schema["properties"].is_a?(Hash)
-
-      strict["required"] = schema["properties"].reject { |_, value| optional?(value) }.keys
-      strict["properties"] = strict["properties"].to_h do |name, value|
-        next name, value if !optional?(value) || value["type"] != "object"
-        [name, { "anyOf" => [{ "type" => "object", "maxProperties" => 0 }, value] }]
-      end
-      strict
-    when Array
-      schema.map { |value| require_declared_properties(value) }
+    if @non_hash_output
+      false
     else
-      schema
-    end
-  end
+      @resolved_schema =
+        node_class.output_schemas(configuration, input_schemas: input_schemas)[output_index] || {}
 
-  def optional?(schema)
-    schema.is_a?(Hash) && schema["x-optional"]
+      if @resolved_schema.blank?
+        false
+      else
+        @validation_errors =
+          JSONSchemer.schema(@resolved_schema).validate(output.deep_stringify_keys).to_a
+        @validation_errors.empty?
+      end
+    end
   end
 
   failure_message do |output|

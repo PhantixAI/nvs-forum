@@ -52,7 +52,6 @@ export default class BoardsFabricators {
       columns: args.columns || [],
       can_write: args.can_write ?? true,
       can_manage: args.can_manage ?? true,
-      owners: args.owners || [this.coreFabricators.user()],
     });
   }
 

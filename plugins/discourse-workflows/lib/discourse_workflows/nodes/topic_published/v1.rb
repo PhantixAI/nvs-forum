@@ -44,7 +44,7 @@ module DiscourseWorkflows
         end
 
         def output
-          { topic: serialize_topic_list_item(@topic), published_at: @published_at.iso8601 }
+          { topic: topic_data(@topic), published_at: @published_at.iso8601 }
         end
 
         def matches?(trigger_ctx)

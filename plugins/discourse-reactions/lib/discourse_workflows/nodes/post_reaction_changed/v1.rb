@@ -54,16 +54,6 @@ if defined?(DiscourseWorkflows)
             },
           )
 
-          deprecated(
-            superseded_by: "2.0",
-            changes: {
-              "user" => "actor",
-            },
-            notice_key: "discourse_workflows.node_deprecated.user_is_post_author",
-            description_key:
-              "discourse_workflows.node_descriptions.trigger:post_reaction_changed_v1",
-          )
-
           def initialize(post, user, previous_reaction)
             super(parameters: {})
             @post = post
@@ -85,7 +75,7 @@ if defined?(DiscourseWorkflows)
               reaction:,
               previous_reaction: @previous_reaction,
               post: serialize_post(@post),
-              topic: serialize_topic_list_item(@post.topic),
+              topic: topic_data(@post.topic),
               user: serialize_user(@user),
             }
           end

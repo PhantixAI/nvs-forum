@@ -22,23 +22,16 @@ module Acl
     end
 
     def has_target_permission?(target, permission)
-      target_permissions = @target_lookup[target_key(target)] || []
-      target_permissions.intersect?([permission, Acl::Permissions::OWNER])
+      @target_lookup[target_key(target)]&.include?(permission)
     end
 
     def has_any_target_permission?(target, permissions)
       target_permissions = @target_lookup[target_key(target)]
-      (target_permissions || []).include?(Acl::Permissions::OWNER) ||
-        (target_permissions || []).any? { |permission| permissions.include?(permission) }
+      (target_permissions || []).any? { |permission| permissions.include?(permission) }
     end
 
     def target_ids_with_permission(target_class, permission)
-      target_ids = (@permission_lookup[permission] || {}).dig(target_class.polymorphic_name) || []
-      return target_ids.dup if permission == Acl::Permissions::OWNER
-
-      owner_target_ids =
-        (@permission_lookup[Acl::Permissions::OWNER] || {}).dig(target_class.polymorphic_name) || []
-      (target_ids + owner_target_ids).uniq
+      ((@permission_lookup[permission] || {}).dig(target_class.polymorphic_name) || []).dup
     end
 
     def target_ids_with_any_permissions(target_class, permissions)

@@ -33,20 +33,6 @@ export default class DAccessControlField extends Component {
       }
     }
 
-    if (
-      this.args.aclTarget.id &&
-      !acl.some(
-        (entry) => entry.type === "user" && entry.permission === "owner"
-      )
-    ) {
-      addError(name, {
-        title: this.args.title,
-        message: i18n("access_control.manage.owner_required", {
-          typeName: this.args.aclTarget.name,
-        }),
-      });
-    }
-
     let evaluation = {};
 
     try {
@@ -113,9 +99,7 @@ export default class DAccessControlField extends Component {
         <DAccessControl
           @acl={{field.value}}
           @aclTarget={{@aclTarget}}
-          @canManageOwners={{@canManageOwners}}
           @groups={{this.site.groups}}
-          @isNew={{@isNew}}
           @onChange={{or @onChange field.set}}
           @transformPermissionOptions={{@transformPermissionOptions}}
         />

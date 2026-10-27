@@ -519,12 +519,7 @@ class Reviewable < ActiveRecord::Base
     save!
 
     log_history(:transitioned, performed_by)
-    DiscourseEvent.trigger(
-      :reviewable_transitioned_to,
-      status_symbol,
-      self,
-      acting_user: performed_by,
-    )
+    DiscourseEvent.trigger(:reviewable_transitioned_to, status_symbol, self)
 
     if score_status = ReviewableScore.score_transitions[status_symbol]
       scores.update_all(
