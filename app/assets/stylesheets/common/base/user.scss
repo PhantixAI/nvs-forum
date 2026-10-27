@@ -1464,6 +1464,11 @@
         background-color: var(--tertiary-low);
         color: var(--tertiary);
       }
+
+      &.--closed {
+        background-color: var(--primary-low);
+        color: var(--primary-medium);
+      }
     }
 
     .extracted-request-error {

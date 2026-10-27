@@ -326,7 +326,12 @@ export default <template>
                       </div>
                     </td>
                     <td class="d-table__cell --controls">
-                      {{#if (eq request.status "ready")}}
+                      {{#if
+                        (or
+                          (eq request.status "ready")
+                          (eq request.status "closed")
+                        )
+                      }}
                         <DButton
                           class="btn-default btn-small"
                           @action={{fn
@@ -339,6 +344,11 @@ export default <template>
                         <span class="extracted-request-error">
                           {{request.error_message}}
                         </span>
+                        <DButton
+                          class="btn-default btn-small"
+                          @action={{fn @controller.retryExtraction request}}
+                          @label="user.invited.bulk_invite.url_extraction.retry_button"
+                        />
                       {{/if}}
                     </td>
                   </tr>

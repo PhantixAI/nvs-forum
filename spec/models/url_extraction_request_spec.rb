@@ -26,6 +26,21 @@ RSpec.describe UrlExtractionRequest do
       expect(UrlExtractionRequest.statuses[:processing]).to eq(1)
       expect(UrlExtractionRequest.statuses[:ready]).to eq(2)
       expect(UrlExtractionRequest.statuses[:failed]).to eq(3)
+      expect(UrlExtractionRequest.statuses[:closed]).to eq(4)
+    end
+  end
+
+  describe "#broadcast_progress!" do
+    it "publishes the serialized request to the creator's progress channel" do
+      request = Fabricate(:url_extraction_request, created_by: admin)
+
+      messages =
+        MessageBus.track_publish(UrlExtractionRequest::PROGRESS_CHANNEL) do
+          request.broadcast_progress!
+        end
+
+      expect(messages.map(&:user_ids)).to eq([[admin.id]])
+      expect(messages.first.data[:request][:id]).to eq(request.id)
     end
   end
 

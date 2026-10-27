@@ -110,7 +110,13 @@ export default class Invite extends EmberObject {
   // immediately.
   static createDraftsFromCsv(
     csv,
-    { allowAnyEmail, scheduleSend, aiPersonalization, sourceUrl } = {}
+    {
+      allowAnyEmail,
+      scheduleSend,
+      aiPersonalization,
+      sourceUrl,
+      requestId,
+    } = {}
   ) {
     return ajax("/invites/create-drafts", {
       type: "POST",
@@ -120,6 +126,10 @@ export default class Invite extends EmberObject {
         schedule_send: scheduleSend,
         ai_personalization: aiPersonalization,
         source_url: sourceUrl,
+        // Lets the server flip this specific UrlExtractionRequest to
+        // :closed once its CSV has been acted on -- see
+        // InvitesController#create_drafts.
+        request_id: requestId,
       },
     });
   }

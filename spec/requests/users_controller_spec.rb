@@ -2860,14 +2860,46 @@ RSpec.describe UsersController do
         expect(response.parsed_body["invites"]).to eq([])
       end
 
-      it "ignores search/domain/status params instead of erroring" do
+      it "filters by its own status set, narrowing the count along with the list" do
+        sign_in(admin)
+        ready =
+          Fabricate(
+            :url_extraction_request,
+            created_by: admin,
+            status: UrlExtractionRequest.statuses[:ready],
+          )
+        Fabricate(
+          :url_extraction_request,
+          created_by: admin,
+          status: UrlExtractionRequest.statuses[:failed],
+        )
+
+        get "/u/#{admin.username}/invited.json", params: { filter: "extracted", status: "ready" }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["counts"]["extracted"]).to eq(1)
+        expect(response.parsed_body["invites"].map { |r| r["id"] }).to eq([ready.id])
+      end
+
+      it "searches by a URL substring, case-insensitively" do
+        sign_in(admin)
+        matching =
+          Fabricate(:url_extraction_request, created_by: admin, url: "https://example.edu/Students")
+        Fabricate(:url_extraction_request, created_by: admin, url: "https://other.edu/alumni")
+
+        get "/u/#{admin.username}/invited.json", params: { filter: "extracted", search: "students" }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["invites"].map { |r| r["id"] }).to eq([matching.id])
+      end
+
+      it "ignores a bogus status or the domain param instead of erroring" do
         sign_in(admin)
         Fabricate(:url_extraction_request, created_by: admin)
 
         get "/u/#{admin.username}/invited.json",
             params: {
               filter: "extracted",
-              search: "whatever",
               domain: "example.com",
               status: "sent",
             }

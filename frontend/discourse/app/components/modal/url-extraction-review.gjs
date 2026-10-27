@@ -53,6 +53,7 @@ export default class UrlExtractionReviewModal extends Component {
         scheduleSend: this.#formApi.get("scheduleSend"),
         aiPersonalization: this.#formApi.get("aiPersonalization"),
         sourceUrl: this.args.model.url,
+        requestId: this.args.model.id,
       });
       this.draftsCreated = result.created_count;
       this.draftErrors = result.errors;

@@ -924,6 +924,27 @@ class InvitesController < ApplicationController
             params[:ai_personalization].blank? || Invite.truthy_param?(params[:ai_personalization]),
           source_url: params[:source_url].presence,
         )
+
+      # Flips the source UrlExtractionRequest to :closed once its CSV has
+      # been acted on -- even a run where every row got skipped as an
+      # existing invite still means the admin reviewed and submitted it, so
+      # the Extracted tab shouldn't keep showing it as "Ready" (which reads
+      # as "still needs review") indefinitely. Only a request this exact
+      # user owns, still at :ready, is eligible -- a stale/already-closed
+      # id, or someone else's, is silently ignored rather than erroring.
+      if params[:request_id].present?
+        request =
+          UrlExtractionRequest.find_by(
+            id: params[:request_id],
+            created_by_id: current_user.id,
+            status: UrlExtractionRequest.statuses[:ready],
+          )
+        if request
+          request.update!(status: UrlExtractionRequest.statuses[:closed])
+          request.broadcast_progress!
+        end
+      end
+
       render json: success_json.merge(created_count: result.created_count, errors: result.errors)
     end
   end

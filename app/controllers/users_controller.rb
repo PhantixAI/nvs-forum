@@ -570,6 +570,16 @@ class UsersController < ApplicationController
       # Redeemed invites don't show a delivery status, so there's nothing to
       # filter on for that tab.
       status = params[:status].presence if Invite::DELIVERY_STATUSES.include?(params[:status])
+      # UrlExtractionRequest's own status set (queued/processing/ready/
+      # failed/closed) is unrelated to Invite::DELIVERY_STATUSES above --
+      # only meaningful, and only ever applied, on the extracted branch.
+      extracted_status =
+        (
+          if filter == "extracted" &&
+               UrlExtractionRequest.statuses.key?(params[:status].to_s.to_sym)
+            UrlExtractionRequest.statuses[params[:status].to_s.to_sym]
+          end
+        )
 
       invites =
         if filter == "pending" && can_see_invite_details
@@ -577,7 +587,9 @@ class UsersController < ApplicationController
         elsif filter == "expired" && can_see_invite_details
           Invite.includes(:topics, :groups).expired(inviter, domain:, status:)
         elsif filter == "extracted" && is_self
-          UrlExtractionRequest.where(created_by_id: inviter.id).order(created_at: :desc)
+          requests = UrlExtractionRequest.where(created_by_id: inviter.id)
+          requests = requests.where(status: extracted_status) if extracted_status
+          requests.order(created_at: :desc)
         elsif filter == "redeemed"
           Invite.redeemed_users(inviter, domain:)
         else
@@ -587,11 +599,21 @@ class UsersController < ApplicationController
       invites = invites.offset(params[:offset].to_i || 0).limit(SiteSetting.invites_per_page)
 
       show_emails = guardian.can_see_invite_emails?(inviter)
-      # Invite.search_filter queries Invite-specific columns -- meaningless
-      # (and would error) against the extracted tab's UrlExtractionRequest
-      # relation, which has no search UI of its own anyway.
-      if invites.present? && filter != "extracted"
-        invites = Invite.search_filter(invites, params[:search], show_emails: show_emails)
+      if invites.present?
+        if filter == "extracted"
+          # Invite.search_filter queries Invite-specific columns -- meaningless
+          # against this UrlExtractionRequest relation. A plain substring match
+          # on url is all this tab's search box offers.
+          if params[:search].present?
+            invites =
+              invites.where(
+                "url ILIKE ?",
+                "%#{UrlExtractionRequest.sanitize_sql_like(params[:search])}%",
+              )
+          end
+        else
+          invites = Invite.search_filter(invites, params[:search], show_emails: show_emails)
+        end
       end
 
       # The domain and status filters (unlike search) also narrow the tab
@@ -615,7 +637,13 @@ class UsersController < ApplicationController
         )
       redeemed_count = Invite.redeemed_users(inviter, domain:).reorder(nil).count.to_i
       extracted_count =
-        is_self ? UrlExtractionRequest.where(created_by_id: inviter.id).count.to_i : 0
+        if is_self
+          scope = UrlExtractionRequest.where(created_by_id: inviter.id)
+          scope = scope.where(status: extracted_status) if extracted_status
+          scope.count.to_i
+        else
+          0
+        end
       # Same gate as pending_count/expired_count above -- without it, a viewer who can't
       # see this inviter's invite details (e.g. a TL2 user viewing someone else's invited
       # page) could still learn every domain the inviter has invited to, via a field that
