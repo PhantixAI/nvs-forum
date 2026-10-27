@@ -1449,6 +1449,26 @@
         background-color: var(--tertiary-low);
         color: var(--tertiary);
       }
+
+      &.--ready {
+        background-color: var(--success);
+        color: var(--secondary);
+      }
+
+      &.--failed {
+        background-color: var(--danger);
+        color: var(--secondary);
+      }
+
+      &.--processing {
+        background-color: var(--tertiary-low);
+        color: var(--tertiary);
+      }
+    }
+
+    .extracted-request-error {
+      color: var(--danger);
+      font-size: var(--font-down-1);
     }
   }
 }

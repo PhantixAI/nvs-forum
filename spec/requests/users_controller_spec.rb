@@ -2828,6 +2828,55 @@ RSpec.describe UsersController do
       expect(invite["user"]).not_to include("email")
     end
 
+    context "when filter is \"extracted\"" do
+      it "lists the inviter's own extraction requests when viewing self, most-recent-first, paginated like the other tabs" do
+        sign_in(admin)
+        older = Fabricate(:url_extraction_request, created_by: admin, created_at: 1.hour.ago)
+        newer = Fabricate(:url_extraction_request, created_by: admin)
+
+        get "/u/#{admin.username}/invited.json", params: { filter: "extracted" }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["counts"]["extracted"]).to eq(2)
+        expect(response.parsed_body["invites"].map { |r| r["id"] }).to eq([newer.id, older.id])
+        expect(response.parsed_body["invites"].first).to include(
+          "url" => newer.url,
+          "status" => "queued",
+        )
+
+        get "/u/#{admin.username}/invited.json", params: { filter: "extracted", offset: 1 }
+        expect(response.parsed_body["invites"].map { |r| r["id"] }).to eq([older.id])
+      end
+
+      it "returns nothing and a zero count for a viewer who isn't the inviter, even an admin" do
+        Fabricate(:url_extraction_request, created_by: inviter)
+        other_admin = Fabricate(:admin)
+
+        sign_in(other_admin)
+        get "/u/#{inviter.username}/invited.json", params: { filter: "extracted" }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["counts"]["extracted"]).to eq(0)
+        expect(response.parsed_body["invites"]).to eq([])
+      end
+
+      it "ignores search/domain/status params instead of erroring" do
+        sign_in(admin)
+        Fabricate(:url_extraction_request, created_by: admin)
+
+        get "/u/#{admin.username}/invited.json",
+            params: {
+              filter: "extracted",
+              search: "whatever",
+              domain: "example.com",
+              status: "sent",
+            }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["invites"].size).to eq(1)
+      end
+    end
+
     it "finds an allow_any_email invite by its stashed recipient in description" do
       inviter = Fabricate(:user, trust_level: TrustLevel[2])
       sign_in(inviter)

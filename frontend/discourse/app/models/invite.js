@@ -128,18 +128,13 @@ export default class Invite extends EmberObject {
   // pages, sharing the same rules -- one UrlExtractionRequest per URL,
   // each with its own CSV. Runs off-request (see
   // Jobs::ProcessUrlExtractionRequest); each result arrives later via
-  // MessageBus or #fetchUrlExtractionRequests, not in this response.
+  // MessageBus, or by loading the Invited page's "Extracted" tab
+  // (UsersController#invited, filter: "extracted"), not in this response.
   static submitUrlExtraction(urls, rules) {
     return ajax("/invites/extract-from-url.json", {
       type: "POST",
       data: { urls, rules },
     });
-  }
-
-  // The current admin's own extraction requests, recent-first -- see
-  // InvitesController#url_extraction_requests.
-  static fetchUrlExtractionRequests() {
-    return ajax("/invites/url-extraction-requests.json");
   }
 
   // Sends (or first-sends, for a draft) every invite in inviteIds, reusing

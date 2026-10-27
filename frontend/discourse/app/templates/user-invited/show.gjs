@@ -281,6 +281,70 @@ export default <template>
                 {{/each}}
               </tbody>
             </table>
+          {{else if @controller.inviteExtracted}}
+            <table class="d-table user-invite-list">
+              <thead class="d-table__header">
+                <tr class="d-table__row">
+                  <th class="d-table__header-cell">{{i18n
+                      "user.invited.extracted_url"
+                    }}</th>
+                  <th class="d-table__header-cell">{{i18n
+                      "user.invited.extracted_submitted_at"
+                    }}</th>
+                  <th class="d-table__header-cell">{{i18n
+                      "user.invited.extracted_status"
+                    }}</th>
+                  <th class="d-table__header-cell"></th>
+                </tr>
+              </thead>
+              <tbody class="d-table__body">
+                {{#each @controller.model.invites as |request|}}
+                  <tr class="d-table__row">
+                    <td class="d-table__cell --overview">
+                      <div class="d-table__mobile-label">
+                        {{i18n "user.invited.extracted_url"}}
+                      </div>
+                      {{request.url}}
+                    </td>
+                    <td class="d-table__cell --detail">
+                      <div class="d-table__mobile-label">
+                        {{i18n "user.invited.extracted_submitted_at"}}
+                      </div>
+                      {{dFormatDate request.created_at}}
+                    </td>
+                    <td class="d-table__cell --detail">
+                      <div class="d-table__mobile-label">
+                        {{i18n "user.invited.extracted_status"}}
+                      </div>
+                      <div class="delivery-status-pill --{{request.status}}">
+                        {{i18n
+                          (concat
+                            "user.invited.bulk_invite.url_extraction.status."
+                            request.status
+                          )
+                        }}
+                      </div>
+                    </td>
+                    <td class="d-table__cell --controls">
+                      {{#if (eq request.status "ready")}}
+                        <DButton
+                          class="btn-default btn-small"
+                          @action={{fn
+                            @controller.openExtractedRequest
+                            request
+                          }}
+                          @label="user.invited.bulk_invite.url_extraction.open_request"
+                        />
+                      {{else if (eq request.status "failed")}}
+                        <span class="extracted-request-error">
+                          {{request.error_message}}
+                        </span>
+                      {{/if}}
+                    </td>
+                  </tr>
+                {{/each}}
+              </tbody>
+            </table>
           {{else}}
             <table class="d-table user-invite-list">
               <thead class="d-table__header">
@@ -537,7 +601,11 @@ export default <template>
             @identifier="empty-channels-list"
             @svgContent={{SvgEnvelopeZero}}
             @tipIcon={{if @controller.canBulkInvite "upload"}}
-            @title={{i18n "user.invited.none.title"}}
+            @title={{if
+              @controller.inviteExtracted
+              (i18n "user.invited.none.extracted_title")
+              (i18n "user.invited.none.title")
+            }}
           >
             <:tip>
               {{#if @controller.canBulkInvite}}

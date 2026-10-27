@@ -557,6 +557,11 @@ class UsersController < ApplicationController
           include_inactive: current_user.staff? || SiteSetting.show_inactive_accounts,
         )
       can_see_invite_details = guardian.can_see_invite_details?(inviter)
+      # Extracted requests can carry scraped PII still mid-review -- unlike
+      # pending/expired (visible to staff-or-self via can_see_invite_details),
+      # this tab is self-view only, matching the Bulk Invite button's own
+      # viewingSelf gate on the frontend.
+      is_self = current_user&.id == inviter.id
       # params[:domain] is client-supplied -- only accept it if it's actually
       # shaped like a domain, so a crafted value can't do anything beyond
       # "no invites match" (and can't reach the rate-limiter key in
@@ -571,6 +576,8 @@ class UsersController < ApplicationController
           Invite.includes(:topics, :groups).pending(inviter, domain:, status:)
         elsif filter == "expired" && can_see_invite_details
           Invite.includes(:topics, :groups).expired(inviter, domain:, status:)
+        elsif filter == "extracted" && is_self
+          UrlExtractionRequest.where(created_by_id: inviter.id).order(created_at: :desc)
         elsif filter == "redeemed"
           Invite.redeemed_users(inviter, domain:)
         else
@@ -580,7 +587,10 @@ class UsersController < ApplicationController
       invites = invites.offset(params[:offset].to_i || 0).limit(SiteSetting.invites_per_page)
 
       show_emails = guardian.can_see_invite_emails?(inviter)
-      if invites.present?
+      # Invite.search_filter queries Invite-specific columns -- meaningless
+      # (and would error) against the extracted tab's UrlExtractionRequest
+      # relation, which has no search UI of its own anyway.
+      if invites.present? && filter != "extracted"
         invites = Invite.search_filter(invites, params[:search], show_emails: show_emails)
       end
 
@@ -604,6 +614,8 @@ class UsersController < ApplicationController
           end
         )
       redeemed_count = Invite.redeemed_users(inviter, domain:).reorder(nil).count.to_i
+      extracted_count =
+        is_self ? UrlExtractionRequest.where(created_by_id: inviter.id).count.to_i : 0
       # Same gate as pending_count/expired_count above -- without it, a viewer who can't
       # see this inviter's invite details (e.g. a TL2 user viewing someone else's invited
       # page) could still learn every domain the inviter has invited to, via a field that
@@ -663,6 +675,7 @@ class UsersController < ApplicationController
                        pending: pending_count,
                        expired: expired_count,
                        redeemed: redeemed_count,
+                       extracted: extracted_count,
                        total: pending_count + expired_count,
                      },
                    ),

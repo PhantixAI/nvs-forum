@@ -10,6 +10,8 @@ class InvitedSerializer < ApplicationSerializer
         (
           if object.type == "pending" || object.type == "expired"
             InviteSerializer
+          elsif object.type == "extracted"
+            UrlExtractionRequestSerializer
           else
             InvitedUserSerializer
           end

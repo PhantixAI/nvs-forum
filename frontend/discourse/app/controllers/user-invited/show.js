@@ -8,19 +8,28 @@ import { observes } from "@ember-decorators/object";
 import CreateInviteBulk from "discourse/components/modal/create-invite-bulk";
 import ResendInviteModal from "discourse/components/modal/resend-invite";
 import SentInviteEmail from "discourse/components/modal/sent-invite-email";
+import UrlExtractionReviewModal from "discourse/components/modal/url-extraction-review";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import { removeValueFromArray } from "discourse/lib/array-tools";
-import { debounce } from "discourse/lib/decorators";
+import { bind, debounce } from "discourse/lib/decorators";
 import { INPUT_DELAY } from "discourse/lib/environment";
 import { showCreateInviteModal } from "discourse/lib/invite-modal";
 import Invite from "discourse/models/invite";
 import { i18n } from "discourse-i18n";
+
+// Matches Jobs::ProcessUrlExtractionRequest::CHANNEL -- published once an
+// extraction request finishes (ready or failed), targeted at the admin who
+// submitted it. Kept subscribed for the controller's whole lifetime rather
+// than only while the Extracted tab is active -- a push for a request id
+// not in the currently loaded model.invites is just a no-op.
+const EXTRACTION_PROGRESS_CHANNEL = "/url-extraction-progress";
 
 export default class UserInvitedShowController extends Controller {
   @service dialog;
   @service modal;
   @service toasts;
   @service currentUser;
+  @service messageBus;
   @service siteSettings;
   @controller("user-invited") userInvitedController;
 
@@ -49,6 +58,22 @@ export default class UserInvitedShowController extends Controller {
 
   @tracked _canInviteToForumOverride;
 
+  constructor() {
+    super(...arguments);
+    this.messageBus.subscribe(
+      EXTRACTION_PROGRESS_CHANNEL,
+      this.onExtractionProgress
+    );
+  }
+
+  willDestroy() {
+    super.willDestroy(...arguments);
+    this.messageBus.unsubscribe(
+      EXTRACTION_PROGRESS_CHANNEL,
+      this.onExtractionProgress
+    );
+  }
+
   @computed("currentUser.can_invite_to_forum", "user.profile_hidden")
   get canInviteToForum() {
     if (this._canInviteToForumOverride !== undefined) {
@@ -74,6 +99,11 @@ export default class UserInvitedShowController extends Controller {
   @dependentKeyCompat
   get invitePending() {
     return this.filter === "pending";
+  }
+
+  @dependentKeyCompat
+  get inviteExtracted() {
+    return this.filter === "extracted";
   }
 
   // No longer a separate tab -- "review" is just another value of the
@@ -127,6 +157,12 @@ export default class UserInvitedShowController extends Controller {
 
   @computed("invitesCount", "filter", "selectedDomain", "selectedStatus")
   get showSearch() {
+    // No search UI on the Extracted tab -- it has no Invite.search_filter
+    // equivalent (see UsersController#invited).
+    if (this.inviteExtracted) {
+      return false;
+    }
+
     // Keep visible once a filter is selected even if it narrows the count to
     // <=5 (or 0) -- otherwise .user-invite-search's margin-right: auto (the
     // flex anchor that right-aligns .user-invite-buttons) disappears along
@@ -146,12 +182,17 @@ export default class UserInvitedShowController extends Controller {
     }));
   }
 
-  @computed("domainOptions", "currentUser.staff")
+  @computed("domainOptions", "currentUser.staff", "filter")
   get showDomainFilter() {
     // Intentionally not gated on model.invites like showBulkActionButtons --
     // a domain filter that narrows the current tab to zero results must stay
-    // visible, or there would be no way to clear it again.
-    return this.currentUser?.staff && this.domainOptions.length > 0;
+    // visible, or there would be no way to clear it again. Extraction
+    // requests have no email_domain column to filter on.
+    return (
+      this.currentUser?.staff &&
+      !this.inviteExtracted &&
+      this.domainOptions.length > 0
+    );
   }
 
   @computed("model.available_statuses", "filter")
@@ -170,11 +211,13 @@ export default class UserInvitedShowController extends Controller {
 
   @computed("statusOptions", "currentUser.staff", "filter")
   get showStatusFilter() {
-    // Redeemed invites don't show a delivery status, so there's nothing to
-    // filter by on that tab.
+    // Redeemed invites don't show a delivery status, and extraction
+    // requests have their own (queued/processing/ready/failed) status that
+    // isn't filterable the same way -- nothing to filter by on either tab.
     return (
       this.currentUser?.staff &&
       this.filter !== "redeemed" &&
+      !this.inviteExtracted &&
       this.statusOptions.length > 0
     );
   }
@@ -281,6 +324,22 @@ export default class UserInvitedShowController extends Controller {
           invite.reinvite({ keywords, aiPersonalization, scheduleSend }),
       },
     });
+  }
+
+  @action
+  openExtractedRequest(request) {
+    this.modal.show(UrlExtractionReviewModal, { model: request });
+  }
+
+  @bind
+  onExtractionProgress(data) {
+    const invites = this.model?.invites;
+    const updated = data.request;
+    const index = invites?.findIndex((request) => request.id === updated.id);
+
+    if (index !== undefined && index !== -1) {
+      invites.splice(index, 1, Invite.create(updated));
+    }
   }
 
   @action
