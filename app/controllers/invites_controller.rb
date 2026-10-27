@@ -168,7 +168,7 @@ class InvitesController < ApplicationController
       RateLimiter.new(
         current_user,
         "admin-invites-per-day",
-        10,
+        SiteSetting.invite_admin_rate_limit_per_day,
         1.day,
         apply_limit_to_staff: true,
       ).performed!
@@ -352,7 +352,12 @@ class InvitesController < ApplicationController
 
         if invite.emailed_status != Invite.emailed_status_types[:pending]
           begin
-            RateLimiter.new(current_user, "resend-invite-per-hour", 10, 1.hour).performed!
+            RateLimiter.new(
+              current_user,
+              "resend-invite-per-hour",
+              SiteSetting.invite_resend_rate_limit_per_hour,
+              1.hour,
+            ).performed!
           rescue RateLimiter::LimitExceeded
             return render_json_error(I18n.t("rate_limiter.slow_down"))
           end
@@ -529,7 +534,12 @@ class InvitesController < ApplicationController
       return render_json_error(I18n.t("invite.email_invites_disabled"))
     end
 
-    RateLimiter.new(current_user, "resend-invite-per-hour", 10, 1.hour).performed!
+    RateLimiter.new(
+      current_user,
+      "resend-invite-per-hour",
+      SiteSetting.invite_resend_rate_limit_per_hour,
+      1.hour,
+    ).performed!
 
     # allow_any_email invites are unbound (email: nil) by design -- their
     # real recipient lives in description instead (see Jobs::BulkInvite,
@@ -566,7 +576,12 @@ class InvitesController < ApplicationController
       return render_json_error(I18n.t("invite.email_invites_disabled"))
     end
 
-    RateLimiter.new(current_user, "send-now-invite-per-hour", 30, 1.hour).performed!
+    RateLimiter.new(
+      current_user,
+      "send-now-invite-per-hour",
+      SiteSetting.invite_send_now_rate_limit_per_hour,
+      1.hour,
+    ).performed!
 
     invite = Invite.find_by(id: params[:invite_id])
     raise Discourse::InvalidParameters.new(:invite_id) if invite.blank?
@@ -628,7 +643,13 @@ class InvitesController < ApplicationController
       # string -- resending it doesn't double-count against (or get blocked
       # by) an individual institute's own bucket, by design.
       rate_limit_key = ["bulk-reinvite-per-day", domain, status].compact.join("-")
-      RateLimiter.new(current_user, rate_limit_key, 1, 1.day, apply_limit_to_staff: true).performed!
+      RateLimiter.new(
+        current_user,
+        rate_limit_key,
+        SiteSetting.bulk_invite_resend_rate_limit_per_day,
+        1.day,
+        apply_limit_to_staff: true,
+      ).performed!
     rescue RateLimiter::LimitExceeded
       return render_json_error(I18n.t("rate_limiter.slow_down"))
     end
@@ -680,7 +701,13 @@ class InvitesController < ApplicationController
       # Separate key from bulk-reinvite-per-day so resending and deleting
       # the same filtered set the same day don't block each other.
       rate_limit_key = ["bulk-destroy-invite-per-day", domain, status].compact.join("-")
-      RateLimiter.new(current_user, rate_limit_key, 1, 1.day, apply_limit_to_staff: true).performed!
+      RateLimiter.new(
+        current_user,
+        rate_limit_key,
+        SiteSetting.bulk_invite_destroy_rate_limit_per_day,
+        1.day,
+        apply_limit_to_staff: true,
+      ).performed!
     rescue RateLimiter::LimitExceeded
       return render_json_error(I18n.t("rate_limiter.slow_down"))
     end
@@ -833,7 +860,7 @@ class InvitesController < ApplicationController
       RateLimiter.new(
         current_user,
         "bulk-invite-url-extraction-per-hour",
-        10,
+        SiteSetting.bulk_invite_url_extraction_rate_limit_per_hour,
         1.hour,
         apply_limit_to_staff: true,
       )

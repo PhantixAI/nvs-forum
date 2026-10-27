@@ -4388,6 +4388,58 @@ uncategorized:
     depends_behavior: "hidden"
     dependent_setting_display: "inline"
 
+  bulk_invite_url_extraction_rate_limit_per_hour:
+    default: 10
+    type: integer
+    min: 1
+    max: 1000
+    client: false
+    area: "users"
+    depends_on:
+      - bulk_invite_url_extraction_enabled
+    depends_behavior: "hidden"
+    dependent_setting_display: "inline"
+
+  invite_admin_rate_limit_per_day:
+    default: 10
+    type: integer
+    min: 1
+    max: 1000
+    client: false
+    area: "users"
+
+  invite_resend_rate_limit_per_hour:
+    default: 10
+    type: integer
+    min: 1
+    max: 1000
+    client: false
+    area: "users"
+
+  invite_send_now_rate_limit_per_hour:
+    default: 30
+    type: integer
+    min: 1
+    max: 1000
+    client: false
+    area: "users"
+
+  bulk_invite_resend_rate_limit_per_day:
+    default: 1
+    type: integer
+    min: 1
+    max: 1000
+    client: false
+    area: "users"
+
+  bulk_invite_destroy_rate_limit_per_day:
+    default: 1
+    type: integer
+    min: 1
+    max: 1000
+    client: false
+    area: "users"
+
   bulk_invite_email_delay_min_seconds:
     default: 5
     client: false

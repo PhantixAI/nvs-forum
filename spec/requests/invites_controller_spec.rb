@@ -877,10 +877,22 @@ RSpec.describe InvitesController do
         sign_in(admin)
         RateLimiter.enable
 
-        10.times do |i|
+        SiteSetting.invite_admin_rate_limit_per_day.times do |i|
           post "/invites.json", params: { email: "test#{i}@example.com", is_admin: "true" }
           expect(response.status).to eq(200)
         end
+
+        post "/invites.json", params: { email: "test-over@example.com", is_admin: "true" }
+        expect(response.status).to eq(429)
+      end
+
+      it "honors invite_admin_rate_limit_per_day instead of a fixed limit" do
+        sign_in(admin)
+        RateLimiter.enable
+        SiteSetting.invite_admin_rate_limit_per_day = 1
+
+        post "/invites.json", params: { email: "test@example.com", is_admin: "true" }
+        expect(response.status).to eq(200)
 
         post "/invites.json", params: { email: "test-over@example.com", is_admin: "true" }
         expect(response.status).to eq(429)
@@ -1311,7 +1323,12 @@ RSpec.describe InvitesController do
           invite = Fabricate(:invite, invited_by: user, email: "test@example.com")
 
           expect { put "/invites/#{invite.id}", params: { send_email: true } }.to change {
-            RateLimiter.new(user, "resend-invite-per-hour", 10, 1.hour).remaining
+            RateLimiter.new(
+              user,
+              "resend-invite-per-hour",
+              SiteSetting.invite_resend_rate_limit_per_hour,
+              1.hour,
+            ).remaining
           }.by(-1)
           expect(response.status).to eq(200)
           expect(Jobs::InviteEmail.jobs.size).to eq(1)
@@ -2365,6 +2382,17 @@ RSpec.describe InvitesController do
         expect(response.parsed_body["errors"]).to include(I18n.t("invite.email_invites_disabled"))
       end
 
+      it "honors invite_resend_rate_limit_per_hour instead of a fixed limit" do
+        RateLimiter.enable
+        SiteSetting.invite_resend_rate_limit_per_hour = 1
+
+        post "/invites/reinvite.json", params: { email: invite.email }
+        expect(response.status).to eq(200)
+
+        post "/invites/reinvite.json", params: { email: invite.email }
+        expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
+      end
+
       it "regenerates the custom_subject and custom_message with the given keywords by default" do
         allow(BulkInvitePersonalization::Generator).to receive(:personalize).and_return(
           subject: "A fresh subject",
@@ -2540,6 +2568,17 @@ RSpec.describe InvitesController do
         expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
       end
 
+      it "honors invite_send_now_rate_limit_per_hour instead of a fixed limit" do
+        RateLimiter.enable
+        SiteSetting.invite_send_now_rate_limit_per_hour = 1
+
+        post "/invites/send-now.json", params: { invite_id: invite.id }
+        expect(response.status).to eq(200)
+
+        post "/invites/send-now.json", params: { invite_id: invite.id }
+        expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
+      end
+
       it "sends a plain pending invite immediately too" do
         invite.update_column(:emailed_status, Invite.emailed_status_types[:pending])
 
@@ -2632,6 +2671,19 @@ RSpec.describe InvitesController do
       expect(response.parsed_body["errors"]).to_not be_present
 
       freeze_time(start + 10.minutes)
+      post "/invites/reinvite-all"
+      expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
+    end
+
+    it "honors bulk_invite_resend_rate_limit_per_day instead of a fixed limit" do
+      sign_in(admin)
+      SiteSetting.bulk_invite_resend_rate_limit_per_day = 2
+
+      2.times do
+        post "/invites/reinvite-all"
+        expect(response.parsed_body["errors"]).to_not be_present
+      end
+
       post "/invites/reinvite-all"
       expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
     end
@@ -3078,6 +3130,19 @@ RSpec.describe InvitesController do
       expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
     end
 
+    it "honors bulk_invite_destroy_rate_limit_per_day instead of a fixed limit" do
+      sign_in(admin)
+      SiteSetting.bulk_invite_destroy_rate_limit_per_day = 2
+
+      2.times do
+        post "/invites/destroy-all"
+        expect(response.parsed_body["errors"]).to_not be_present
+      end
+
+      post "/invites/destroy-all"
+      expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
+    end
+
     it "rate limits deleting independently from resending the same filtered set the same day" do
       Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
 
@@ -3462,6 +3527,28 @@ RSpec.describe InvitesController do
 
         expect(response.status).to eq(429)
         expect(UrlExtractionRequest.where(created_by_id: admin.id).count).to eq(0)
+      end
+
+      it "honors bulk_invite_url_extraction_rate_limit_per_hour instead of a fixed limit" do
+        sign_in(admin)
+        RateLimiter.enable
+        SiteSetting.bulk_invite_url_extraction_rate_limit_per_hour = 2
+
+        2.times do
+          post "/invites/extract-from-url.json",
+               params: {
+                 urls: ["https://example.com"],
+                 rules: "rules",
+               }
+          expect(response.status).to eq(201)
+        end
+
+        post "/invites/extract-from-url.json",
+             params: {
+               urls: ["https://example.com"],
+               rules: "rules",
+             }
+        expect(response.status).to eq(429)
       end
     end
   end
