@@ -37,7 +37,7 @@ module Jobs
     # can arrive out of order, and once one of these terminal outcomes is
     # recorded it's the more useful signal than a later, contradictory one.
     def process_bounce(message)
-      message_id = original_message_id(message["mail"])
+      message_id = message.dig("mail", "messageId").presence
       return log_no_message_id("Bounce", message["mail"]) if message_id.nil?
       return unless bounce_type = message.dig("bounce", "bounceType").presence
 
@@ -63,16 +63,8 @@ module Jobs
       end
     end
 
-    def original_message_id(mail)
-      header =
-        Array(mail&.dig("headers")).find { |entry| entry["name"].to_s.casecmp?("Message-ID") }
-      message_id = header&.dig("value").presence || mail&.dig("commonHeaders", "messageId").presence
-      # Provider-assigned IDs do not identify the original message stored in EmailLog.
-      Email::MessageIdService.message_id_clean(message_id.strip) if message_id
-    end
-
     def process_delivery(message)
-      message_id = original_message_id(message["mail"])
+      message_id = message.dig("mail", "messageId").presence
       return log_no_message_id("Delivery", message["mail"]) if message_id.nil?
 
       Array(message.dig("delivery", "recipients")).each do |email_address|
@@ -89,7 +81,7 @@ module Jobs
     end
 
     def process_complaint(message)
-      message_id = original_message_id(message["mail"])
+      message_id = message.dig("mail", "messageId").presence
       return log_no_message_id("Complaint", message["mail"]) if message_id.nil?
 
       Array(message.dig("complaint", "complainedRecipients")).each do |r|
@@ -104,9 +96,18 @@ module Jobs
       end
     end
 
+    # The SES-assigned message ID (mail.messageId) is always present on every
+    # real SES notification regardless of account configuration, unlike the
+    # original Message-ID header -- which SES only echoes back when the
+    # identity's "include original headers" notification setting is turned
+    # on (confirmed off on every site identity here via
+    # get-identity-notification-attributes). Matching on the SES-assigned ID
+    # against EmailLog#ses_message_id (set from the SMTP "250 Ok <id>"
+    # response at send time, see lib/email/sender.rb) is what actually works
+    # against this AWS account's configuration.
     def find_email_log(message_id, email_address)
       return if email_address.blank?
-      EmailLog.find_by(message_id: message_id, to_address: email_address)
+      EmailLog.find_by(ses_message_id: message_id, to_address: email_address)
     end
 
     # Surfaces in Logster (admin-visible at /logs) exactly why a Bounce/
@@ -114,17 +115,15 @@ module Jobs
     # otherwise looks identical to a notification that was never sent at all.
     def log_no_message_id(type, mail)
       Rails.logger.warn(
-        "[ProcessSnsNotification] no original Message-ID found for a #{type} notification " \
-          "(headers_present=#{mail&.dig("headers").present?}, " \
-          "common_headers_message_id=#{mail&.dig("commonHeaders", "messageId").inspect}, " \
-          "ses_message_id=#{mail&.dig("messageId").inspect})",
+        "[ProcessSnsNotification] no SES message ID found for a #{type} notification " \
+          "(mail_present=#{mail.present?})",
       )
     end
 
     def log_no_match(type, message_id, email_address)
       Rails.logger.warn(
         "[ProcessSnsNotification] no EmailLog matched a #{type} notification " \
-          "(message_id=#{message_id.inspect}, email_address=#{email_address.inspect})",
+          "(ses_message_id=#{message_id.inspect}, email_address=#{email_address.inspect})",
       )
     end
   end
