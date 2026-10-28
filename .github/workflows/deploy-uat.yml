@@ -61,6 +61,14 @@ jobs:
 
           aws lightsail attach-static-ip --static-ip-name uat-nitians-ip --instance-name uat-nitians
 
+          # A fresh instance's default firewall only opens 22/80 -- 443 must be opened
+          # explicitly or nginx's SSL listener is unreachable even when fully working.
+          # (If the base snapshot already carries this open from a prior fix, this is
+          # a harmless no-op.) Requires lightsail:OpenInstancePublicPorts on the
+          # deploy IAM user.
+          aws lightsail open-instance-public-ports --instance-name uat-nitians \
+            --port-info fromPort=443,toPort=443,protocol=TCP,cidrs=0.0.0.0/0,ipv6Cidrs=::/0
+
           echo "Attaching persistent DB disk..."
           aws lightsail attach-disk \
             --disk-name uat-nitians-db-disk \
