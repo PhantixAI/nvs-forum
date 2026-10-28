@@ -61,21 +61,35 @@ jobs:
 
           aws lightsail attach-static-ip --static-ip-name uat-nitians-ip --instance-name uat-nitians
 
-          echo "Waiting for SSH to accept connections..."
-          until nc -z -w2 uat.nitians.in 22; do sleep 5; done
+          echo "Waiting for sshd to accept the SSH protocol handshake..."
+          # A bare TCP accept (nc -z) can succeed while sshd is still starting up on a
+          # freshly-booted instance, before it's ready to do the actual key exchange --
+          # ssh-keyscan is the real readiness check.
+          keys=""
+          for attempt in $(seq 1 60); do
+            keys="$(ssh-keyscan -H uat.nitians.in 2>/dev/null)"
+            if [ -n "$keys" ]; then break; fi
+            echo "Waiting for SSH host keys ($attempt/60)..."; sleep 5
+          done
+          if [ -z "$keys" ]; then
+            echo "sshd never became ready for key exchange"
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          echo "$keys" >> ~/.ssh/known_hosts
 
       - name: Write SSH key
         env:
           UAT_SSH_PRIVATE_KEY: ${{ secrets.UAT_SSH_PRIVATE_KEY }}
         run: |
-          key="$(mktemp)"
-          trap 'rm -f "$key"' EXIT
-          echo "$UAT_SSH_PRIVATE_KEY" > "$key"
-          chmod 600 "$key"
           mkdir -p ~/.ssh
-          cp "$key" ~/.ssh/uat_key
+          echo "$UAT_SSH_PRIVATE_KEY" > ~/.ssh/uat_key
           chmod 600 ~/.ssh/uat_key
-          ssh-keyscan -H uat.nitians.in >> ~/.ssh/known_hosts 2>/dev/null
+          # When the instance was reused (not freshly created this run), its host keys
+          # were never scanned above -- do it now if missing.
+          if ! ssh-keygen -F uat.nitians.in >/dev/null 2>&1; then
+            ssh-keyscan -H uat.nitians.in >> ~/.ssh/known_hosts 2>/dev/null
+          fi
 
       - name: Write containers/uat.yml with secrets and upload it
         env:
