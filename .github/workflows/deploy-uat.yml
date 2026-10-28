@@ -149,12 +149,12 @@ jobs:
             sudo mount "$DEV" /var/discourse/shared/uat
             sudo mkdir -p /var/discourse/shared/uat/ssl
             sudo mkdir -p /var/discourse/shared/uat/log/var-log
-            if ! grep -q "git remote set-url origin" /var/discourse/templates/web.template.yml; then
+            if ! sudo grep -q "git remote set-url origin" /var/discourse/templates/web.template.yml; then
               sudo sed -i "100a\\        - sudo -H -E -u discourse git remote set-url origin \$git_url" /var/discourse/templates/web.template.yml
             fi
             echo "--- after ---"; sudo ls -la /var/discourse
             sudo ls -la /var/discourse/containers
-            df -h /var/discourse/shared/uat
+            sudo df -h /var/discourse/shared/uat
           '
 
       - name: Write containers/uat.yml with secrets and upload it
