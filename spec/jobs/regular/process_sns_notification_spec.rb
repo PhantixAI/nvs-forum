@@ -2,9 +2,19 @@
 
 RSpec.describe Jobs::ProcessSnsNotification do
   let(:ses_message_id) { "010901a075d1bd53-2bdf9bfa-57d6-41e7-a08f-e1884959e9a6-000000" }
+  let(:message_id) { "abc123@mail.example.com" }
   let(:topic_arn) { "arn:aws:sns:us-east-1:123456789012:discourse-ses-events" }
 
-  let!(:email_log) { Fabricate(:email_log, ses_message_id: ses_message_id) }
+  let!(:email_log) { Fabricate(:email_log, message_id: message_id) }
+
+  # The original Message-ID header, not the SES-assigned id, is what
+  # EmailLog#message_id is matched against (see WebhooksController#aws specs).
+  let(:mail) do
+    {
+      "messageId" => ses_message_id,
+      "headers" => [{ "name" => "Message-ID", "value" => "<#{message_id}>" }],
+    }
+  end
 
   def notification_args(message)
     json = { "TopicArn" => topic_arn, "Message" => message.to_json }
@@ -20,9 +30,7 @@ RSpec.describe Jobs::ProcessSnsNotification do
     Email::Sns.stubs(:allowed_topic_arn?).returns(false)
     message = {
       "notificationType" => "Bounce",
-      "mail" => {
-        "messageId" => ses_message_id,
-      },
+      "mail" => mail,
       "bounce" => {
         "bounceType" => "Permanent",
         "bouncedRecipients" => [{ "emailAddress" => email_log.to_address, "status" => "5.1.1" }],
@@ -38,9 +46,7 @@ RSpec.describe Jobs::ProcessSnsNotification do
     Email::Sns.stubs(:authentic?).returns(false)
     message = {
       "notificationType" => "Bounce",
-      "mail" => {
-        "messageId" => ses_message_id,
-      },
+      "mail" => mail,
       "bounce" => {
         "bounceType" => "Permanent",
         "bouncedRecipients" => [{ "emailAddress" => email_log.to_address, "status" => "5.1.1" }],
@@ -53,12 +59,7 @@ RSpec.describe Jobs::ProcessSnsNotification do
   end
 
   it "does nothing for an unrecognized notification type" do
-    message = {
-      "notificationType" => "SomeFutureType",
-      "mail" => {
-        "messageId" => ses_message_id,
-      },
-    }
+    message = { "notificationType" => "SomeFutureType", "mail" => mail }
 
     expect { described_class.new.execute(notification_args(message)) }.not_to raise_error
   end
@@ -70,12 +71,10 @@ RSpec.describe Jobs::ProcessSnsNotification do
   end
 
   describe "Bounce notifications" do
-    it "marks the matching EmailLog as bounced by ses_message_id" do
+    it "marks the matching EmailLog as bounced by the original message ID" do
       message = {
         "notificationType" => "Bounce",
-        "mail" => {
-          "messageId" => ses_message_id,
-        },
+        "mail" => mail,
         "bounce" => {
           "bounceType" => "Permanent",
           "bouncedRecipients" => [{ "emailAddress" => email_log.to_address, "status" => "5.1.1" }],
@@ -89,12 +88,15 @@ RSpec.describe Jobs::ProcessSnsNotification do
       expect(email_log.bounce_error_code).to eq("5.1.1")
     end
 
-    it "does not match on the old locally-generated message_id" do
-      email_log.update!(message_id: "some-local-id@example.com", ses_message_id: nil)
+    # The SES-assigned id (mail.messageId) is never used for matching, even
+    # when it happens to equal a stored EmailLog#ses_message_id -- only the
+    # original Message-ID header, matched against EmailLog#message_id, counts.
+    it "does not match on the SES-assigned id alone, without an original message ID header" do
+      email_log.update!(message_id: nil, ses_message_id: ses_message_id)
       message = {
         "notificationType" => "Bounce",
         "mail" => {
-          "messageId" => "some-local-id@example.com",
+          "messageId" => ses_message_id,
         },
         "bounce" => {
           "bounceType" => "Permanent",
@@ -111,7 +113,8 @@ RSpec.describe Jobs::ProcessSnsNotification do
       message = {
         "notificationType" => "Bounce",
         "mail" => {
-          "messageId" => "unmatched-id",
+          "messageId" => ses_message_id,
+          "headers" => [{ "name" => "Message-ID", "value" => "<unmatched-id@example.com>" }],
         },
         "bounce" => {
           "bounceType" => "Permanent",
@@ -125,9 +128,7 @@ RSpec.describe Jobs::ProcessSnsNotification do
     it "does not overwrite an existing delivery or complaint" do
       message = {
         "notificationType" => "Bounce",
-        "mail" => {
-          "messageId" => ses_message_id,
-        },
+        "mail" => mail,
         "bounce" => {
           "bounceType" => "Permanent",
           "bouncedRecipients" => [{ "emailAddress" => email_log.to_address, "status" => "5.1.1" }],
@@ -148,9 +149,7 @@ RSpec.describe Jobs::ProcessSnsNotification do
     it "sets delivered_at on the matching EmailLog" do
       message = {
         "notificationType" => "Delivery",
-        "mail" => {
-          "messageId" => ses_message_id,
-        },
+        "mail" => mail,
         "delivery" => {
           "recipients" => [email_log.to_address],
         },
@@ -165,9 +164,7 @@ RSpec.describe Jobs::ProcessSnsNotification do
       email_log.update!(bounced: true)
       message = {
         "notificationType" => "Delivery",
-        "mail" => {
-          "messageId" => ses_message_id,
-        },
+        "mail" => mail,
         "delivery" => {
           "recipients" => [email_log.to_address],
         },
@@ -183,9 +180,7 @@ RSpec.describe Jobs::ProcessSnsNotification do
     it "sets complained_at on the matching EmailLog" do
       message = {
         "notificationType" => "Complaint",
-        "mail" => {
-          "messageId" => ses_message_id,
-        },
+        "mail" => mail,
         "complaint" => {
           "complainedRecipients" => [{ "emailAddress" => email_log.to_address }],
         },
@@ -200,9 +195,7 @@ RSpec.describe Jobs::ProcessSnsNotification do
       email_log.update!(bounced: true)
       message = {
         "notificationType" => "Complaint",
-        "mail" => {
-          "messageId" => ses_message_id,
-        },
+        "mail" => mail,
         "complaint" => {
           "complainedRecipients" => [{ "emailAddress" => email_log.to_address }],
         },

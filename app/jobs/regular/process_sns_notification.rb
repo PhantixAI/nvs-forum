@@ -91,7 +91,7 @@ module Jobs
 
     def find_email_log(message_id, email_address)
       return if email_address.blank?
-      EmailLog.find_by(ses_message_id: message_id, to_address: email_address)
+      EmailLog.find_by(message_id: message_id, to_address: email_address)
     end
   end
 end

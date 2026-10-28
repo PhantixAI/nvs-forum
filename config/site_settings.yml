@@ -4440,6 +4440,14 @@ uncategorized:
     client: false
     area: "users"
 
+  invite_reinvite_rate_limit_per_day:
+    default: 3
+    type: integer
+    min: 1
+    max: 1000
+    client: false
+    area: "users"
+
   bulk_invite_email_delay_min_seconds:
     default: 5
     client: false

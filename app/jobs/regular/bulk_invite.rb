@@ -319,7 +319,7 @@ module Jobs
             RateLimiter.new(
               @current_user,
               "reinvites-per-day-#{email_digest}",
-              3,
+              SiteSetting.invite_reinvite_rate_limit_per_day,
               1.day.to_i,
             ).performed!
           end
