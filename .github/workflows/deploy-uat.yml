@@ -101,6 +101,13 @@ jobs:
             ssh-keyscan -H uat.nitians.in >> ~/.ssh/known_hosts 2>/dev/null
           fi
 
+      - name: TEMP debug - find actual disk device path
+        run: |
+          ssh -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
+            echo "--- lsblk ---"; lsblk
+            echo "--- /dev xvd/nvme ---"; ls -la /dev | grep -E "xvd|nvme" || true
+          '
+
       - name: TEMP repair - fix incomplete discourse_docker clone on base image
         run: |
           ssh -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
