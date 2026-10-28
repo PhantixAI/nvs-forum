@@ -103,7 +103,7 @@ jobs:
 
       - name: TEMP repair - fix incomplete discourse_docker clone on base image
         run: |
-          ssh -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
             set -e
             echo "--- before ---"; sudo ls -la /var/discourse
             # A reused instance may still have the uat container running from a
@@ -187,12 +187,12 @@ jobs:
               content = content.replace(placeholder, os.environ[envvar])
           sys.stdout.write(content)
           PYEOF
-          scp -i ~/.ssh/uat_key "$tmp" ubuntu@uat.nitians.in:/tmp/uat.yml
-          ssh -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'sudo mv /tmp/uat.yml /var/discourse/containers/uat.yml'
+          scp -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key "$tmp" ubuntu@uat.nitians.in:/tmp/uat.yml
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'sudo mv /tmp/uat.yml /var/discourse/containers/uat.yml'
 
       - name: Build and swap (over SSH)
         run: |
-          ssh -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
             sudo bash -c "
               cd /var/discourse &&
               ./launcher bootstrap uat &&
@@ -213,7 +213,7 @@ jobs:
           done
           if [ "$up" != true ]; then
             echo "uat.nitians.in did not come up in time"
-            ssh -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'sudo docker logs --tail 200 uat'
+            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'sudo docker logs --tail 200 uat'
             exit 1
           fi
           echo "uat.nitians.in is up"
@@ -231,16 +231,16 @@ jobs:
           '
           scp -i ~/.ssh/prod_key ubuntu@52.66.136.102:/tmp/nitians_forum.dump /tmp/nitians_forum.dump
           rm -f ~/.ssh/prod_key
-          scp -i ~/.ssh/uat_key /tmp/nitians_forum.dump ubuntu@uat.nitians.in:/tmp/nitians_forum.dump
+          scp -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key /tmp/nitians_forum.dump ubuntu@uat.nitians.in:/tmp/nitians_forum.dump
           rm -f /tmp/nitians_forum.dump
-          ssh -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
             sudo docker cp /tmp/nitians_forum.dump uat:/tmp/nitians_forum.dump
             rm -f /tmp/nitians_forum.dump
           '
 
       - name: TEMP seed - restore production data into local DB and scrub PII
         run: |
-          ssh -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'sudo docker exec -i uat bash -s' <<'EOF'
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'sudo docker exec -i uat bash -s' <<'EOF'
           set -euo pipefail
 
           echo "=== drop bootstrap-empty DB, recreate ==="
@@ -323,7 +323,7 @@ jobs:
           done
           if [ "$up" != true ]; then
             echo "uat.nitians.in did not come back up after seeding"
-            ssh -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'sudo docker logs --tail 200 uat'
+            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'sudo docker logs --tail 200 uat'
             exit 1
           fi
           echo "uat.nitians.in is up after seeding"
@@ -338,7 +338,7 @@ jobs:
 
           # Stop the app and unmount cleanly before detaching -- the DB disk is
           # persistent and must survive this instance's deletion untouched.
-          ssh -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
             sudo bash -c "cd /var/discourse && ./launcher stop uat"
             sudo umount /var/discourse/shared/uat
           '
