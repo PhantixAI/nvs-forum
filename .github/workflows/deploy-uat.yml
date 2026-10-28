@@ -91,13 +91,21 @@ jobs:
             ssh-keyscan -H uat.nitians.in >> ~/.ssh/known_hosts 2>/dev/null
           fi
 
-      - name: TEMP debug - inspect base provisioning
+      - name: TEMP repair - fix incomplete discourse_docker clone on base image
         run: |
           ssh -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
-            echo "--- /var ---"; ls -la /var | grep discourse
-            echo "--- /var/discourse ---"; sudo ls -la /var/discourse 2>&1
-            echo "--- docker ---"; sudo docker --version 2>&1
-            echo "--- os-release ---"; cat /etc/os-release
+            set -e
+            echo "--- before ---"; sudo ls -la /var/discourse
+            sudo rm -rf /var/discourse
+            sudo git clone https://github.com/discourse/discourse_docker.git /var/discourse
+            sudo chmod 700 /var/discourse
+            sudo mkdir -p /var/discourse/shared/uat/ssl
+            sudo mkdir -p /var/discourse/shared/uat/log/var-log
+            if ! grep -q "git remote set-url origin" /var/discourse/templates/web.template.yml; then
+              sudo sed -i "100a\\        - sudo -H -E -u discourse git remote set-url origin \$git_url" /var/discourse/templates/web.template.yml
+            fi
+            echo "--- after ---"; sudo ls -la /var/discourse
+            sudo ls -la /var/discourse/containers
           '
 
       - name: Write containers/uat.yml with secrets and upload it
