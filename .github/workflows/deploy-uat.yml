@@ -109,7 +109,7 @@ jobs:
             ssh-keyscan -H uat.nitians.in >> ~/.ssh/known_hosts 2>/dev/null
           fi
 
-      - name: TEMP repair - fix incomplete discourse_docker clone on base image
+      - name: Refresh discourse_docker clone and mount the persistent disk
         run: |
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
             set -e
@@ -169,30 +169,6 @@ jobs:
             sudo ls -la /var/discourse/containers
             sudo df -h /var/discourse/shared/uat
           '
-
-      - name: TEMP fix - grant discourse role access to any pre-existing data
-        run: |
-          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'bash -s' <<'OUTER'
-          set -e
-          # A previous run's restore-as-postgres + failed REASSIGN OWNED can leave
-          # the persisted DB with tables owned by postgres and no grants to
-          # discourse -- every subsequent bootstrap's automatic db:migrate then hits
-          # "permission denied for table schema_migrations" before anything else
-          # runs. Fix it using the last successfully-built image (already has the
-          # right postgresql.conf baked in), without needing the full app container.
-          IMAGE=$(sudo docker images --format "{{.Repository}}:{{.Tag}}" | grep -m1 "local_discourse/uat" || true)
-          if [ -z "$IMAGE" ]; then
-            echo "No previously-built uat image found, nothing to fix"
-            exit 0
-          fi
-          echo "Using image: $IMAGE"
-          sudo docker run --rm -i -v /var/discourse/shared/uat:/shared "$IMAGE" bash -s <<'INNER'
-          set -e
-          sudo -u postgres /usr/lib/postgresql/18/bin/pg_ctl -D /etc/postgresql/18/main -o "-c listen_addresses='' -p 5432" -w start
-          sudo -u postgres psql discourse -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO discourse; GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO discourse; GRANT USAGE, CREATE ON SCHEMA public TO discourse;" || true
-          sudo -u postgres /usr/lib/postgresql/18/bin/pg_ctl -D /etc/postgresql/18/main -m fast -w stop
-          INNER
-          OUTER
 
       - name: Write containers/uat.yml with secrets and upload it
         env:
@@ -270,127 +246,6 @@ jobs:
           fi
           echo "uat.nitians.in is up"
 
-      - name: TEMP seed - transfer production dump onto the UAT disk
-        env:
-          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
-        run: |
-          echo "$PROD_SSH_PRIVATE_KEY" > ~/.ssh/prod_key
-          chmod 600 ~/.ssh/prod_key
-          ssh-keyscan -H 52.66.136.102 >> ~/.ssh/known_hosts 2>/dev/null
-          ssh -i ~/.ssh/prod_key ubuntu@52.66.136.102 '
-            sudo docker cp app:/tmp/nitians_forum.dump /tmp/nitians_forum.dump
-            sudo chmod 644 /tmp/nitians_forum.dump
-          '
-          scp -i ~/.ssh/prod_key ubuntu@52.66.136.102:/tmp/nitians_forum.dump /tmp/nitians_forum.dump
-          rm -f ~/.ssh/prod_key
-          scp -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key /tmp/nitians_forum.dump ubuntu@uat.nitians.in:/tmp/nitians_forum.dump
-          rm -f /tmp/nitians_forum.dump
-          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
-            sudo docker cp /tmp/nitians_forum.dump uat:/tmp/nitians_forum.dump
-            rm -f /tmp/nitians_forum.dump
-          '
-
-      - name: TEMP seed - restore production data into local DB and scrub PII
-        run: |
-          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'sudo docker exec -i uat bash -s' <<'EOF'
-          set -euo pipefail
-
-          echo "=== drop bootstrap-empty DB, recreate ==="
-          # --force: the uat container's own unicorn/sidekiq are live (Verify already
-          # passed) and hold open connections to "discourse" -- force terminates them
-          # before dropping, rather than failing with "being accessed by other users".
-          sudo -u postgres dropdb --force discourse
-          # -O discourse: makes the discourse role own the DB (and, via the
-          # pg_database_owner pseudo-role on PG15+, the public schema too) so the
-          # restore below needs no ownership fixup afterward.
-          sudo -u postgres createdb -O discourse discourse
-
-          echo "=== restore production dump ==="
-          # Restore AS discourse (not postgres) so every object is owned by it from
-          # the start -- avoids REASSIGN OWNED, which fails on some objects ("required
-          # by the database system") when attempted after the fact.
-          # pg_restore exits 1 if ANY statement errors, even cosmetic ones -- the only
-          # errors here are "must be owner of extension {hstore,pg_trgm,vector}" on
-          # COMMENT ON EXTENSION statements (those extensions are owned by postgres
-          # from bootstrap's own create_db, not discourse); all actual data restores
-          # fine, so don't let that nonzero exit abort the whole script.
-          sudo -u discourse pg_restore -d discourse --no-owner --no-acl /tmp/nitians_forum.dump || true
-
-          echo "=== catch up migrations (dump may be behind this build's code) ==="
-          su discourse -c 'cd /var/www/discourse && RAILS_ENV=production bundle exec rake db:migrate'
-
-          echo "=== PII scrub (local discourse DB only) ==="
-          sudo -u postgres psql discourse -v ON_ERROR_STOP=1 <<'SQL'
-          BEGIN;
-          UPDATE user_emails SET email = 'user+' || user_id || '+' || id || '@uat.invalid',
-                                  normalized_email = 'user' || user_id || 'plus' || id || 'uatinvalid';
-          UPDATE email_tokens SET email = 'user+' || user_id || '@uat.invalid';
-          UPDATE email_change_requests SET old_email = 'user+' || user_id || '@uat.invalid',
-                                            new_email = 'user+' || user_id || '@uat.invalid';
-          DELETE FROM email_login_codes;
-          DELETE FROM email_logs;
-          DELETE FROM incoming_emails;
-          DELETE FROM screened_emails;
-          UPDATE users SET ip_address = NULL, registration_ip_address = NULL;
-          UPDATE incoming_links SET ip_address = NULL;
-          UPDATE user_histories SET ip_address = NULL, email = NULL;
-          DELETE FROM user_ip_address_histories;
-          DELETE FROM user_auth_tokens;
-          DELETE FROM user_auth_token_logs;
-          DELETE FROM user_api_keys;
-          DELETE FROM user_second_factors;
-          DELETE FROM user_security_keys;
-          UPDATE user_passwords
-          SET password_hash = md5(random()::text || clock_timestamp()::text || id::text),
-              password_salt = md5(random()::text || clock_timestamp()::text || id::text || 'salt');
-          UPDATE posts SET raw = '[redacted - UAT PII scrub]',
-                           cooked = '<p>[redacted - UAT PII scrub]</p>',
-                           raw_email = NULL
-          WHERE topic_id IN (SELECT id FROM topics WHERE archetype = 'private_message');
-          UPDATE topics SET title = 'Private message ' || id,
-                             fancy_title = 'Private message ' || id,
-                             excerpt = NULL
-          WHERE archetype = 'private_message';
-          UPDATE chat_messages SET message = '[redacted - UAT PII scrub]',
-                                    cooked = '<p>[redacted - UAT PII scrub]</p>'
-          WHERE chat_channel_id IN (SELECT id FROM chat_channels WHERE chatable_type = 'DirectMessage');
-          COMMIT;
-          SQL
-
-          echo "=== verify ==="
-          sudo -u postgres psql discourse -t -c "
-          SELECT 'email_logs', count(*) FROM email_logs
-          UNION ALL SELECT 'incoming_emails', count(*) FROM incoming_emails
-          UNION ALL SELECT 'user_auth_tokens', count(*) FROM user_auth_tokens
-          UNION ALL SELECT 'user_api_keys', count(*) FROM user_api_keys
-          UNION ALL SELECT 'user_emails_total', count(*) FROM user_emails
-          UNION ALL SELECT 'user_emails_still_real_domain', count(*) FROM user_emails WHERE email NOT LIKE '%@uat.invalid'
-          "
-
-          echo "=== cleanup dump ==="
-          rm -f /tmp/nitians_forum.dump
-
-          echo "=== restart app server ==="
-          sv restart unicorn
-          EOF
-
-      - name: Re-verify uat.nitians.in after seeding
-        run: |
-          up=false
-          for attempt in $(seq 1 60); do
-            if [ "$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' https://uat.nitians.in/)" = "200" ]; then
-              up=true
-              break
-            fi
-            echo "Waiting for uat.nitians.in ($attempt/60)..."; sleep 5
-          done
-          if [ "$up" != true ]; then
-            echo "uat.nitians.in did not come back up after seeding"
-            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'sudo docker logs --tail 200 uat'
-            exit 1
-          fi
-          echo "uat.nitians.in is up after seeding"
-
       - name: Idle-delete the instance after 30 minutes of inactivity
         run: |
           # If a newer trigger arrives during this wait, cancel-in-progress kills
@@ -405,6 +260,15 @@ jobs:
             sudo bash -c "cd /var/discourse && ./launcher stop uat"
             sudo umount /var/discourse/shared/uat
           '
+
+          # detach-disk requires the INSTANCE itself to be stopped, not just the app
+          # inside it ("You can only detach the disk when the target instance is
+          # stopped") -- stop it and wait before attempting the detach.
+          aws lightsail stop-instance --instance-name uat-nitians
+          until [ "$(aws lightsail get-instance-state --instance-name uat-nitians --query state.name --output text)" = "stopped" ]; do
+            sleep 5
+          done
+
           aws lightsail detach-disk --disk-name uat-nitians-db-disk
           until [ "$(aws lightsail get-disk --disk-name uat-nitians-db-disk --query disk.isAttached --output text)" = "False" ]; do
             sleep 3
