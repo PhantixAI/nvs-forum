@@ -101,13 +101,6 @@ jobs:
             ssh-keyscan -H uat.nitians.in >> ~/.ssh/known_hosts 2>/dev/null
           fi
 
-      - name: TEMP debug - find actual disk device path
-        run: |
-          ssh -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
-            echo "--- lsblk ---"; lsblk
-            echo "--- /dev xvd/nvme ---"; ls -la /dev | grep -E "xvd|nvme" || true
-          '
-
       - name: TEMP repair - fix incomplete discourse_docker clone on base image
         run: |
           ssh -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
@@ -126,15 +119,34 @@ jobs:
             sudo git clone https://github.com/discourse/discourse_docker.git /var/discourse
             sudo chmod 700 /var/discourse
             sudo mkdir -p /var/discourse/shared/uat
+            # This bundle runs on Nitro/NVMe, where Lightsail requested-disk-path
+            # (/dev/xvdf) is not honored by the guest -- the attached disk shows up
+            # as /dev/nvme1n1 instead. Detect it: the one top-level disk that is not
+            # the root devices parent.
+            root_disk=$(lsblk -no PKNAME "$(findmnt -no SOURCE /)")
+            data_disk=""
             for attempt in $(seq 1 20); do
-              [ -b /dev/xvdf ] && break
-              echo "Waiting for /dev/xvdf to appear ($attempt/20)..."; sleep 3
+              for d in /sys/block/nvme*n1 /sys/block/xvd*; do
+                [ -e "$d" ] || continue
+                name=$(basename "$d")
+                if [ "$name" != "$root_disk" ]; then
+                  data_disk="$name"
+                  break 2
+                fi
+              done
+              echo "Waiting for the persistent data disk to appear ($attempt/20)..."; sleep 3
             done
-            if ! sudo blkid /dev/xvdf >/dev/null 2>&1; then
-              echo "First-ever use of the persistent disk -- formatting it"
-              sudo mkfs.ext4 -q /dev/xvdf
+            if [ -z "$data_disk" ]; then
+              echo "Persistent disk never appeared"
+              exit 1
             fi
-            sudo mount /dev/xvdf /var/discourse/shared/uat
+            DEV="/dev/$data_disk"
+            echo "Using data disk: $DEV"
+            if ! sudo blkid "$DEV" >/dev/null 2>&1; then
+              echo "First-ever use of the persistent disk -- formatting it"
+              sudo mkfs.ext4 -q "$DEV"
+            fi
+            sudo mount "$DEV" /var/discourse/shared/uat
             sudo mkdir -p /var/discourse/shared/uat/ssl
             sudo mkdir -p /var/discourse/shared/uat/log/var-log
             if ! grep -q "git remote set-url origin" /var/discourse/templates/web.template.yml; then
