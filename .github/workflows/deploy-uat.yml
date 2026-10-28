@@ -170,6 +170,30 @@ jobs:
             sudo df -h /var/discourse/shared/uat
           '
 
+      - name: TEMP fix - grant discourse role access to any pre-existing data
+        run: |
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'bash -s' <<'OUTER'
+          set -e
+          # A previous run's restore-as-postgres + failed REASSIGN OWNED can leave
+          # the persisted DB with tables owned by postgres and no grants to
+          # discourse -- every subsequent bootstrap's automatic db:migrate then hits
+          # "permission denied for table schema_migrations" before anything else
+          # runs. Fix it using the last successfully-built image (already has the
+          # right postgresql.conf baked in), without needing the full app container.
+          IMAGE=$(sudo docker images --format "{{.Repository}}:{{.Tag}}" | grep -m1 "local_discourse/uat" || true)
+          if [ -z "$IMAGE" ]; then
+            echo "No previously-built uat image found, nothing to fix"
+            exit 0
+          fi
+          echo "Using image: $IMAGE"
+          sudo docker run --rm -i -v /var/discourse/shared/uat:/shared "$IMAGE" bash -s <<'INNER'
+          set -e
+          sudo -u postgres /usr/lib/postgresql/18/bin/pg_ctl -D /etc/postgresql/18/main -o "-c listen_addresses='' -p 5432" -w start
+          sudo -u postgres psql discourse -c "GRANT ALL ON ALL TABLES IN SCHEMA public TO discourse; GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO discourse; GRANT USAGE, CREATE ON SCHEMA public TO discourse;" || true
+          sudo -u postgres /usr/lib/postgresql/18/bin/pg_ctl -D /etc/postgresql/18/main -m fast -w stop
+          INNER
+          OUTER
+
       - name: Write containers/uat.yml with secrets and upload it
         env:
           NVS_GITHUB_PAT: ${{ secrets.NVS_GITHUB_PAT }}
