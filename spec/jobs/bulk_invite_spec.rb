@@ -634,7 +634,7 @@ RSpec.describe Jobs::BulkInvite do
 
       it "does not immediately enqueue delivery for a bulk_pending batch" do
         bulk_invites =
-          (Invite::BULK_INVITE_EMAIL_LIMIT + 1).times.map do |i|
+          3.times.map do |i|
             {
               email: "student#{i}@college.edu",
               allow_any_email: "true",
@@ -651,11 +651,9 @@ RSpec.describe Jobs::BulkInvite do
         expect(Jobs::GenerateInvitePersonalization.jobs).to be_empty
       end
 
-      it "routes an over-the-limit batch through drafting instead, when ai_personalization is true (the default) -- without this, a large personalized allow_any_email batch would silently never get personalized at all, since Jobs::ProcessBulkInviteEmails no longer calls the generator itself" do
+      it "routes a small allow_any_email batch through drafting too, when ai_personalization is true (the default) -- without this, a personalized allow_any_email batch would silently never get personalized at all, since Jobs::ProcessBulkInviteEmails no longer calls the generator itself" do
         bulk_invites =
-          (Invite::BULK_INVITE_EMAIL_LIMIT + 1).times.map do |i|
-            { email: "student#{i}@college.edu", allow_any_email: "true" }
-          end
+          3.times.map { |i| { email: "student#{i}@college.edu", allow_any_email: "true" } }
 
         described_class.new.execute(current_user_id: admin.id, invites: bulk_invites)
 
@@ -665,7 +663,45 @@ RSpec.describe Jobs::BulkInvite do
         expect(Jobs::GenerateInvitePersonalization.jobs.size).to eq(1)
         expect(
           Jobs::GenerateInvitePersonalization.jobs.first["args"].first["invite_ids"].size,
-        ).to eq(Invite::BULK_INVITE_EMAIL_LIMIT + 1)
+        ).to eq(3)
+      end
+
+      # Regression test for a real production incident: a small (well under
+      # 100 rows) allow_any_email CSV with schedule_send/ai_personalization
+      # explicitly set to true on every row was still sent immediately,
+      # unpaced and unpersonalized -- allow_any_email rows used to only honor
+      # those per-row flags once the batch exceeded a since-removed 200-row
+      # threshold (Invite::BULK_INVITE_EMAIL_LIMIT).
+      it "honors explicit schedule_send/ai_personalization on an allow_any_email row regardless of batch size" do
+        bulk_invites = [
+          {
+            email: "student@college.edu",
+            allow_any_email: "true",
+            schedule_send: "true",
+            ai_personalization: "true",
+          },
+        ]
+
+        described_class.new.execute(current_user_id: admin.id, invites: bulk_invites)
+
+        invite = Invite.last
+        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:drafting])
+        expect(Jobs::InviteEmail.jobs).to be_empty
+        expect(Jobs::GenerateInvitePersonalization.jobs.size).to eq(1)
+      end
+
+      it "still sends an allow_any_email row immediately when schedule_send is explicitly false, regardless of batch size" do
+        bulk_invites = [
+          { email: "student@college.edu", allow_any_email: "true", schedule_send: "false" },
+        ]
+
+        described_class.new.execute(current_user_id: admin.id, invites: bulk_invites)
+
+        invite = Invite.last
+        expect(invite.schedule_send).to eq(false)
+        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:sending])
+        expect(Jobs::InviteEmail.jobs.size).to eq(1)
+        expect(Jobs::GenerateInvitePersonalization.jobs).to be_empty
       end
     end
 
