@@ -91,6 +91,15 @@ jobs:
             ssh-keyscan -H uat.nitians.in >> ~/.ssh/known_hosts 2>/dev/null
           fi
 
+      - name: TEMP debug - inspect base provisioning
+        run: |
+          ssh -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
+            echo "--- /var ---"; ls -la /var | grep discourse
+            echo "--- /var/discourse ---"; sudo ls -la /var/discourse 2>&1
+            echo "--- docker ---"; sudo docker --version 2>&1
+            echo "--- os-release ---"; cat /etc/os-release
+          '
+
       - name: Write containers/uat.yml with secrets and upload it
         env:
           NVS_GITHUB_PAT: ${{ secrets.NVS_GITHUB_PAT }}
