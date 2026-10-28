@@ -21,8 +21,10 @@ only deleting it actually avoids cost — that's why this uses create/delete rat
   into `containers/uat.yml`'s `<UAT_VERSION>` placeholder — so a PR preview actually reflects that
   PR's commits, not just whatever's on `master`.
 - `containers/uat.yml` is `app.yml`'s single-site counterpart: no `config/multisite.yml` mount, no
-  multisite hooks/nginx patches, points at its own database (`uat_nitians_forum`) and S3 bucket
-  (`uat-nitians-forum-uploads`) on the same RDS instance/region as production.
+  multisite hooks/nginx patches. Its database is a **local PostgreSQL container** (not production's
+  RDS instance) backed by a persistent Lightsail block storage disk, so UAT workloads never share
+  CPU/IO/connections with production (see "Database" below). Its uploads go to their own S3 bucket
+  (`uat-nitians-forum-uploads`).
 
 ## Checking current state / SSH access
 
@@ -57,6 +59,21 @@ If the snapshot, key pair, or static IP are ever lost and need to be redone:
    ```bash
    aws lightsail allocate-static-ip --static-ip-name uat-nitians-ip --profile personal
    ```
+
+2a. **Create the persistent DB disk** (stays constant across every future create/delete cycle,
+    same as the static IP — this is what lets the database survive the instance's own idle-delete):
+   ```bash
+   aws lightsail create-disk \
+     --disk-name uat-nitians-db-disk \
+     --availability-zone ap-south-1a \
+     --size-in-gb 8 \
+     --profile personal
+   ```
+   `deploy-uat.yml` attaches this at `/dev/xvdf` and mounts it at `/var/discourse/shared/uat` on
+   every instance create, formatting it with `mkfs.ext4` only the very first time (detected via
+   `blkid`). Since PostgreSQL's data directory (`/shared/postgres_data` inside the container) lives
+   under that same mount, the database persists across every instance delete/recreate cycle even
+   though the compute instance itself doesn't.
 
 3. **Base instance**: create one Ubuntu 24.04 Lightsail instance, region `ap-south-1`, plan
    `small_3_1` (2 GB RAM, 2 vCPU, $12/mo — current Lightsail bundle naming as of 2026-10;
@@ -102,50 +119,54 @@ If the snapshot, key pair, or static IP are ever lost and need to be redone:
 9. **GitHub repo secrets**:
    - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — a dedicated IAM user scoped to the Lightsail
      actions the workflow needs (`CreateInstancesFromSnapshot`, `DeleteInstance`, `GetInstance`,
-     `GetInstanceState`, `AttachStaticIp`, `DetachStaticIp`, `GetInstanceSnapshot`). Lightsail's
-     IAM support for resource-ARN scoping is limited, so this will likely be action-scoped rather
-     than restricted to just this one instance — an accepted tradeoff.
+     `GetInstanceState`, `AttachStaticIp`, `DetachStaticIp`, `GetInstanceSnapshot`, `CreateDisk`,
+     `GetDisk`, `AttachDisk`, `DetachDisk`). Lightsail's IAM support for resource-ARN scoping is
+     limited, so this will likely be action-scoped rather than restricted to just this one
+     instance/disk — an accepted tradeoff.
    - `UAT_SSH_PRIVATE_KEY` — from step 1.
    - `UAT_DISCOURSE_S3_ACCESS_KEY_ID` / `UAT_DISCOURSE_S3_SECRET_ACCESS_KEY` — scoped to just the
      UAT bucket (or reuse production's key if its IAM policy already covers the new bucket).
-   - `NVS_GITHUB_PAT` and `DISCOURSE_DB_PASSWORD` are reused as-is from the existing production
-     secrets (same GitHub repo, same RDS user).
+   - `NVS_GITHUB_PAT` is reused as-is from the existing production secret (same GitHub repo).
+     `DISCOURSE_DB_PASSWORD` is **not** used by UAT — its database is local, not RDS.
 
-## Database: one-time seed + mandatory PII scrub
+## Database: local PostgreSQL, one-time seed + mandatory PII scrub
 
-`uat_nitians_forum` is a one-time clone of production's `nitians_forum`. It is **not** re-dumped
-on every deploy — it persists and accumulates its own test data across every deploy/delete cycle,
-independent of the UAT compute instance's lifecycle (the database lives on RDS, not on the
-Lightsail instance).
+UAT's database is **not** production's shared RDS instance — `containers/uat.yml` includes
+`templates/postgres.template.yml`, so each UAT instance runs its own local PostgreSQL container,
+with data stored at `/shared/postgres_data` (i.e. under the `/var/discourse/shared/uat` bind mount,
+which is the persistent disk described above, not the instance's ephemeral root volume). This is
+what keeps UAT's bootstrap/migration/test load from ever competing with production for CPU, IOPS,
+or connection slots on the shared `db.t4g.micro` RDS instance.
 
-```bash
-# 1. Create the DB and restore a logical dump (safe against a live source --
-#    pg_dump takes a consistent snapshot without locking production).
-createdb -h navodians-pg15.cdey8w2mceyp.ap-south-1.rds.amazonaws.com -U phantixai_admin uat_nitians_forum
+The database was seeded **once**, directly on the persistent disk, from a `pg_dump` of production's
+`nitians_forum` (taken over SSH from inside production's own `app` container, a consistent
+snapshot that doesn't lock production), restored into the local `discourse` database and then
+PII-scrubbed in place before the UAT container was ever pointed at it. It is **not** re-dumped on
+later deploys — it persists and accumulates its own test data across every subsequent deploy/delete
+cycle, independent of the compute instance's lifecycle, because the disk (not the instance) is what
+carries it forward.
 
-pg_dump -h navodians-pg15.cdey8w2mceyp.ap-south-1.rds.amazonaws.com \
-  -U phantixai_admin --no-owner --no-acl -Fc nitians_forum -f /tmp/nitians_forum.dump
+**The PII scrub is required, not optional** — `nitians_forum` is a real community DB with real user
+emails, IPs, and private messages. What was scrubbed, against the local `discourse` DB only (never
+against production):
 
-pg_restore -h navodians-pg15.cdey8w2mceyp.ap-south-1.rds.amazonaws.com \
-  -U phantixai_admin -d uat_nitians_forum --no-owner --no-acl /tmp/nitians_forum.dump
+- Every row in `user_emails` (keyed by row id, since some users have 2 rows) replaced with a
+  synthetic `user+<user_id>+<id>@uat.invalid`; same pattern for `email_tokens`/`email_change_requests`.
+- `email_login_codes`, `email_logs`, `incoming_emails`, `screened_emails` fully deleted (no safe
+  per-row re-keying, and not needed for a preview env).
+- IP columns nulled on `users`, `incoming_links`, `user_histories`.
+- `user_ip_address_histories` fully deleted; `user_auth_tokens`, `user_auth_token_logs`,
+  `user_api_keys`, `user_second_factors`, `user_security_keys` fully deleted (forces fresh
+  login/2FA/API-key setup on UAT, no production session/credential carries over).
+- `user_passwords.password_hash`/`password_salt` randomized per row.
+- Private-message topic content (`posts.raw`/`cooked`/`raw_email`, `topics.title`/`fancy_title`/`excerpt`
+  for `archetype = 'private_message'`) redacted.
+- DM-only chat content redacted (`chat_messages.message`/`cooked` where the channel's
+  `chatable_type = 'DirectMessage'` — public Category-backed chat channels are left alone, since
+  that's public forum content, not PII).
 
-rm /tmp/nitians_forum.dump
-```
-
-**Before the UAT container ever points at this database, scrub it of PII** (required, not
-optional — `nitians_forum` is a real community DB with real user emails, IPs, and private
-messages). At minimum, against `uat_nitians_forum` only (never against `nitians_forum`):
-
-- Replace every user's email (and any pending/secondary email columns) with a synthetic one
-  derived from their id, e.g. `user+<id>@uat.invalid`.
-- Null out IP-address columns on `users`, `user_histories`, and similar tracking tables.
-- Clear private message content (`posts.raw`/`cooked` for PM topics, plus `email_logs`,
-  `email_tokens`, `user_api_keys`).
-- Reset all passwords/sessions (new random `password_hash`/`salt`, clear `user_api_keys`,
-  invalidate existing sessions) so no production credential carries over.
-
-This is schema-aware; write it as a small, reviewed one-off script rather than improvising it
-live against a copy that already has real PM content exposed.
+If the disk is ever lost and needs reseeding, repeat this against the local `discourse` DB on the
+UAT instance (not RDS) — see git history for the exact scrub script.
 
 No `multisite:migrate` involvement here — UAT isn't listed in any `multisite.yml`, so ordinary
 single-site `db:migrate` (run automatically by the standard pups hook on every

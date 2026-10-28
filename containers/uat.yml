@@ -4,7 +4,11 @@
 ## of the production multisite install: no config/multisite.yml, no multisite hooks.
 
 templates:
-  ## PostgreSQL is external (RDS) — do NOT include postgres.template.yml
+  ## Local PostgreSQL (not RDS) — data lives at /shared/postgres_data, which is
+  ## the host's /var/discourse/shared/uat, which is a persistent Lightsail block
+  ## storage disk attached/mounted by deploy-uat.yml on every create — survives
+  ## the instance's own 30-min idle-delete cycle. See docs/UAT.md.
+  - "templates/postgres.template.yml"
   - "templates/redis.template.yml"
   - "templates/web.template.yml"
   - "templates/web.ratelimited.template.yml"
@@ -43,13 +47,9 @@ env:
   DISCOURSE_HOSTNAME: uat.nitians.in
   DISCOURSE_DEVELOPER_EMAILS: 'phantixai@gmail.com'
 
-  ## ===== EXTERNAL RDS POSTGRESQL (same RDS instance as production, separate DB) =====
-  DISCOURSE_DB_USERNAME: phantixai_admin
-  DISCOURSE_DB_PASSWORD: '<DISCOURSE_DB_PASSWORD>'
-  DISCOURSE_DB_HOST: navodians-pg15.cdey8w2mceyp.ap-south-1.rds.amazonaws.com
-  DISCOURSE_DB_PORT: 5432
-  DISCOURSE_DB_NAME: uat_nitians_forum
-  DISCOURSE_DB_BACKUP_PORT: 5432
+  ## No DISCOURSE_DB_* block: with postgres.template.yml included, Discourse
+  ## defaults to the local socket and db_name/db_user ("discourse"/"discourse"
+  ## below), never touching production's shared RDS instance.
 
   ## ===== AMAZON SES SMTP =====
   ## Shares production's SES sending identity/domain reputation — acceptable for a
@@ -89,7 +89,7 @@ hooks:
           - npm install -g pnpm@10.34.5
   ## No after_db_migrate hook: UAT is single-site, so the standard pups db_migrate
   ## step (plain `db:migrate`) already wired into web.template.yml is sufficient.
-  ## multisite:migrate is production-only and must never run against uat_nitians_forum.
+  ## multisite:migrate is production-only and never applies here.
 
 run:
   - exec: echo "Beginning of custom commands"
