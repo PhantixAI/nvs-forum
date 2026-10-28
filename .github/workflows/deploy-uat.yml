@@ -272,7 +272,10 @@ jobs:
           set -euo pipefail
 
           echo "=== drop bootstrap-empty DB, recreate ==="
-          sudo -u postgres dropdb discourse
+          # --force: the uat container's own unicorn/sidekiq are live (Verify already
+          # passed) and hold open connections to "discourse" -- force terminates them
+          # before dropping, rather than failing with "being accessed by other users".
+          sudo -u postgres dropdb --force discourse
           sudo -u postgres createdb discourse
 
           echo "=== restore production dump ==="
