@@ -248,7 +248,12 @@ class Invite < ActiveRecord::Base
         invite = nil
       end
       email_digest = Digest::SHA256.hexdigest(email)
-      RateLimiter.new(invited_by, "reinvites-per-day-#{email_digest}", 3, 1.day.to_i).performed!
+      RateLimiter.new(
+        invited_by,
+        "reinvites-per-day-#{email_digest}",
+        SiteSetting.invite_reinvite_rate_limit_per_day,
+        1.day.to_i,
+      ).performed!
     end
 
     emailed_status =

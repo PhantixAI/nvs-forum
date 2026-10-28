@@ -2178,6 +2178,7 @@ en:
     invite_send_now_rate_limit_per_hour: "Maximum number of times a staff member can use \"Send Now\" to immediately send a scheduled invite, bypassing the paced queue, per hour."
     bulk_invite_resend_rate_limit_per_day: "Maximum number of times an admin can use Resend All Invites (or Send Invites, for review drafts) per day, for a given combination of domain and status filters."
     bulk_invite_destroy_rate_limit_per_day: "Maximum number of times an admin can use Delete All Invites per day, for a given combination of domain and status filters."
+    invite_reinvite_rate_limit_per_day: "Maximum number of new invites a staff member can send to the same email address per day, across both single and bulk invite creation."
     disabled: "disabled"
     display_local_time_in_user_card: "Display the local time based on a user's timezone when their user card is opened."
     censored_words: "Words that will be automatically replaced with &#9632;&#9632;&#9632;&#9632;"

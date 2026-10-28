@@ -897,6 +897,22 @@ RSpec.describe InvitesController do
         post "/invites.json", params: { email: "test-over@example.com", is_admin: "true" }
         expect(response.status).to eq(429)
       end
+
+      it "logs the rate limit event" do
+        sign_in(admin)
+        RateLimiter.enable
+        SiteSetting.invite_admin_rate_limit_per_day = 1
+
+        post "/invites.json", params: { email: "test@example.com", is_admin: "true" }
+
+        allow(Discourse).to receive(:warn_exception)
+        post "/invites.json", params: { email: "test-over@example.com", is_admin: "true" }
+
+        expect(Discourse).to have_received(:warn_exception) do |e, message:, **|
+          expect(e).to be_a(RateLimiter::LimitExceeded)
+          expect(message).to include("action=create")
+        end
+      end
     end
 
     context "with moderator invite" do
@@ -1332,6 +1348,23 @@ RSpec.describe InvitesController do
           }.by(-1)
           expect(response.status).to eq(200)
           expect(Jobs::InviteEmail.jobs.size).to eq(1)
+        end
+
+        it "logs the rate limit event when exceeded" do
+          sign_in(user)
+          SiteSetting.invite_resend_rate_limit_per_hour = 1
+
+          invite = Fabricate(:invite, invited_by: user, email: "test@example.com")
+          put "/invites/#{invite.id}", params: { send_email: true }
+
+          other_invite = Fabricate(:invite, invited_by: user, email: "other@example.com")
+          allow(Discourse).to receive(:warn_exception)
+          put "/invites/#{other_invite.id}", params: { send_email: true }
+
+          expect(Discourse).to have_received(:warn_exception) do |e, message:, **|
+            expect(e).to be_a(RateLimiter::LimitExceeded)
+            expect(message).to include("action=update")
+          end
         end
       end
 
@@ -2393,6 +2426,21 @@ RSpec.describe InvitesController do
         expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
       end
 
+      it "logs the rate limit event" do
+        RateLimiter.enable
+        SiteSetting.invite_resend_rate_limit_per_hour = 1
+
+        post "/invites/reinvite.json", params: { email: invite.email }
+
+        allow(Discourse).to receive(:warn_exception)
+        post "/invites/reinvite.json", params: { email: invite.email }
+
+        expect(Discourse).to have_received(:warn_exception) do |e, message:, **|
+          expect(e).to be_a(RateLimiter::LimitExceeded)
+          expect(message).to include("action=resend_invite")
+        end
+      end
+
       it "regenerates the custom_subject and custom_message with the given keywords by default" do
         allow(BulkInvitePersonalization::Generator).to receive(:personalize).and_return(
           subject: "A fresh subject",
@@ -2579,6 +2627,21 @@ RSpec.describe InvitesController do
         expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
       end
 
+      it "logs the rate limit event" do
+        RateLimiter.enable
+        SiteSetting.invite_send_now_rate_limit_per_hour = 1
+
+        post "/invites/send-now.json", params: { invite_id: invite.id }
+
+        allow(Discourse).to receive(:warn_exception)
+        post "/invites/send-now.json", params: { invite_id: invite.id }
+
+        expect(Discourse).to have_received(:warn_exception) do |e, message:, **|
+          expect(e).to be_a(RateLimiter::LimitExceeded)
+          expect(message).to include("action=send_now_invite")
+        end
+      end
+
       it "sends a plain pending invite immediately too" do
         invite.update_column(:emailed_status, Invite.emailed_status_types[:pending])
 
@@ -2686,6 +2749,21 @@ RSpec.describe InvitesController do
 
       post "/invites/reinvite-all"
       expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
+    end
+
+    it "logs the rate limit event" do
+      sign_in(admin)
+      SiteSetting.bulk_invite_resend_rate_limit_per_day = 1
+
+      post "/invites/reinvite-all"
+
+      allow(Discourse).to receive(:warn_exception)
+      post "/invites/reinvite-all"
+
+      expect(Discourse).to have_received(:warn_exception) do |e, message:, **|
+        expect(e).to be_a(RateLimiter::LimitExceeded)
+        expect(message).to include("action=resend_all_invites")
+      end
     end
 
     it "only resends invites matching the given domain" do
@@ -3143,6 +3221,21 @@ RSpec.describe InvitesController do
       expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
     end
 
+    it "logs the rate limit event" do
+      sign_in(admin)
+      SiteSetting.bulk_invite_destroy_rate_limit_per_day = 1
+
+      post "/invites/destroy-all"
+
+      allow(Discourse).to receive(:warn_exception)
+      post "/invites/destroy-all"
+
+      expect(Discourse).to have_received(:warn_exception) do |e, message:, **|
+        expect(e).to be_a(RateLimiter::LimitExceeded)
+        expect(message).to include("action=destroy_all_invites")
+      end
+    end
+
     it "rate limits deleting independently from resending the same filtered set the same day" do
       Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
 
@@ -3549,6 +3642,30 @@ RSpec.describe InvitesController do
                rules: "rules",
              }
         expect(response.status).to eq(429)
+      end
+
+      it "logs the rate limit event" do
+        sign_in(admin)
+        RateLimiter.enable
+        SiteSetting.bulk_invite_url_extraction_rate_limit_per_hour = 1
+
+        post "/invites/extract-from-url.json",
+             params: {
+               urls: ["https://example.com"],
+               rules: "rules",
+             }
+
+        allow(Discourse).to receive(:warn_exception)
+        post "/invites/extract-from-url.json",
+             params: {
+               urls: ["https://example.com"],
+               rules: "rules",
+             }
+
+        expect(Discourse).to have_received(:warn_exception) do |e, message:, **|
+          expect(e).to be_a(RateLimiter::LimitExceeded)
+          expect(message).to include("action=extract_from_url")
+        end
       end
     end
   end

@@ -406,14 +406,25 @@ RSpec.describe Invite do
         expect(invite.invite_key).not_to eq(another_invite.invite_key)
       end
 
-      context "when email is already invited 3 times" do
+      context "when email is already invited the maximum number of times" do
         before do
           RateLimiter.enable
-          3.times { Invite.generate(user, email: "test@example.com") }
+          SiteSetting.invite_reinvite_rate_limit_per_day.times do
+            Invite.generate(user, email: "test@example.com")
+          end
         end
 
         it "raises an error" do
           expect { Invite.generate(user, email: "test@example.com") }.to raise_error(
+            RateLimiter::LimitExceeded,
+          )
+        end
+
+        it "honors invite_reinvite_rate_limit_per_day instead of a fixed limit" do
+          SiteSetting.invite_reinvite_rate_limit_per_day = 1
+
+          expect { Invite.generate(user, email: "another@example.com") }.not_to raise_error
+          expect { Invite.generate(user, email: "another@example.com") }.to raise_error(
             RateLimiter::LimitExceeded,
           )
         end

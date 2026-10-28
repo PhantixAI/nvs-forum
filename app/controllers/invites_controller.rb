@@ -165,13 +165,18 @@ class InvitesController < ApplicationController
         raise Discourse::InvalidParameters.new(is_admin_invite ? :is_admin : :is_moderator)
       end
 
-      RateLimiter.new(
-        current_user,
-        "admin-invites-per-day",
-        SiteSetting.invite_admin_rate_limit_per_day,
-        1.day,
-        apply_limit_to_staff: true,
-      ).performed!
+      begin
+        RateLimiter.new(
+          current_user,
+          "admin-invites-per-day",
+          SiteSetting.invite_admin_rate_limit_per_day,
+          1.day,
+          apply_limit_to_staff: true,
+        ).performed!
+      rescue RateLimiter::LimitExceeded => e
+        log_invite_rate_limit_exceeded(e, action: "create")
+        raise
+      end
     end
 
     if params[:topic_id].present?
@@ -358,7 +363,8 @@ class InvitesController < ApplicationController
               SiteSetting.invite_resend_rate_limit_per_hour,
               1.hour,
             ).performed!
-          rescue RateLimiter::LimitExceeded
+          rescue RateLimiter::LimitExceeded => e
+            log_invite_rate_limit_exceeded(e, action: "update")
             return render_json_error(I18n.t("rate_limiter.slow_down"))
           end
         end
@@ -558,7 +564,8 @@ class InvitesController < ApplicationController
 
     perform_resend(invite, resend_overrides_from_params)
     render json: success_json
-  rescue RateLimiter::LimitExceeded
+  rescue RateLimiter::LimitExceeded => e
+    log_invite_rate_limit_exceeded(e, action: "resend_invite")
     render_json_error(I18n.t("rate_limiter.slow_down"))
   rescue BulkInvitePersonalization::Generator::GenerationFailed
     render_json_error(I18n.t("invite.ai_personalization_failed"))
@@ -615,7 +622,8 @@ class InvitesController < ApplicationController
     ::Jobs::ProcessBulkInviteEmails.ensure_chain!
 
     render json: success_json.merge(delivery_status: claimed.reload.delivery_status)
-  rescue RateLimiter::LimitExceeded
+  rescue RateLimiter::LimitExceeded => e
+    log_invite_rate_limit_exceeded(e, action: "send_now_invite")
     render_json_error(I18n.t("rate_limiter.slow_down"))
   end
 
@@ -650,7 +658,8 @@ class InvitesController < ApplicationController
         1.day,
         apply_limit_to_staff: true,
       ).performed!
-    rescue RateLimiter::LimitExceeded
+    rescue RateLimiter::LimitExceeded => e
+      log_invite_rate_limit_exceeded(e, action: "resend_all_invites")
       return render_json_error(I18n.t("rate_limiter.slow_down"))
     end
 
@@ -708,7 +717,8 @@ class InvitesController < ApplicationController
         1.day,
         apply_limit_to_staff: true,
       ).performed!
-    rescue RateLimiter::LimitExceeded
+    rescue RateLimiter::LimitExceeded => e
+      log_invite_rate_limit_exceeded(e, action: "destroy_all_invites")
       return render_json_error(I18n.t("rate_limiter.slow_down"))
     end
 
@@ -864,7 +874,12 @@ class InvitesController < ApplicationController
         1.hour,
         apply_limit_to_staff: true,
       )
-    urls.size.times { limiter.performed! }
+    begin
+      urls.size.times { limiter.performed! }
+    rescue RateLimiter::LimitExceeded => e
+      log_invite_rate_limit_exceeded(e, action: "extract_from_url")
+      raise
+    end
 
     PluginStore.set("bulk_invite_url_extraction", "last_rules", rules)
 
@@ -992,6 +1007,25 @@ class InvitesController < ApplicationController
   end
 
   private
+
+  # Surfaces every invite rate-limit block in Logster (admin-visible at /logs)
+  # instead of only the generic message the blocked admin sees -- without
+  # this, diagnosing which limiter/key/bucket was hit requires raw production
+  # log and Redis access. RateLimiter::LimitExceeded already carries the
+  # limiter's type (key) and available_in (retry wait), so no caller needs to
+  # pass those separately.
+  def log_invite_rate_limit_exceeded(e, action:)
+    Discourse.warn_exception(
+      e,
+      message:
+        "Invite rate limit exceeded (action=#{action}, key=#{e.type}, retry_in=#{e.available_in}s)",
+      env: {
+        current_user_id: current_user&.id,
+        current_username: current_user&.username,
+        params: params.except(:controller, :action, :authenticity_token, :urls, :rules).to_unsafe_h,
+      },
+    )
+  end
 
   # #resend_invite's single-invite path: persists any explicitly provided
   # override, then personalizes (unless ai_personalization is false, which
