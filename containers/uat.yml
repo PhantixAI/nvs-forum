@@ -80,6 +80,15 @@ hooks:
         cmd:
           - git clone https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-follow.git
           - git clone https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-authentication-validations.git
+    ## config/multisite.yml is checked into this same repo (production's app.yml bind-mounts
+    ## the real secrets-filled copy over it from /var/discourse/shared/standalone -- UAT has no
+    ## such mount, so without this the raw git-committed file, with its unsubstituted
+    ## <DISCOURSE_DB_PASSWORD> placeholder and production's RDS host, ships as-is). Discourse
+    ## enables multisite mode purely because this file exists, which made every UAT boot hang
+    ## for most of an hour trying (and timing out) to connect to all three production tenants.
+    - exec:
+        cmd:
+          - rm -f $home/config/multisite.yml
   # Same pnpm pin workaround as containers/app.yml -- see that file for the full
   # explanation (ERR_PNPM_INVALID_DEPENDENCY_NAME on scoped self-typed peers).
   before_yarn:
