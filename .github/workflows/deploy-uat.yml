@@ -201,6 +201,26 @@ jobs:
             "
           '
 
+      - name: Wait for nginx and ensure SSL is loaded
+        run: |
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
+            for attempt in $(seq 1 60); do
+              if sudo docker exec uat sv status nginx | grep -q "^run:"; then break; fi
+              echo "Waiting for nginx to start ($attempt/60)..."; sleep 5
+            done
+            if ! sudo docker exec uat sv status nginx | grep -q "^run:"; then
+              echo "nginx did not start in time"
+              sudo docker logs --tail 200 uat
+              exit 1
+            fi
+            # configure-ssl/letsencrypt installs certs during the containers own boot
+            # hooks and calls "sv reload nginx" right after -- that can race runits
+            # own supervise-dir setup (seen as "unable to open supervise/ok") and
+            # silently fail, leaving nginx serving plain HTTP only. Reload again now
+            # that nginx is confirmed supervised, so the already-issued certs load.
+            sudo docker exec uat sv reload nginx
+          '
+
       - name: Verify uat.nitians.in is up
         run: |
           up=false
