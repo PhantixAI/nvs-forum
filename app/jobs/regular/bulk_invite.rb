@@ -280,12 +280,11 @@ module Jobs
             allow_any_email: allow_any_email,
           }
 
-          # allow_any_email rows keep their original immediate-send-under-the-limit
-          # behavior (delivered explicitly via to_override below), unaffected by
-          # schedule_send. A bound invite's own routing is decided purely by
-          # schedule_send: true queues it for paced sending; false leaves
-          # emailed_status unset, so Invite.generate's own default (:pending)
-          # sends it immediately instead, the same way it always has. Either
+          # Routing is decided purely by schedule_send, the same way for both
+          # bound and allow_any_email rows: true queues it for paced sending;
+          # false leaves emailed_status unset, so Invite.generate's own
+          # default (:pending) -- or, for allow_any_email, the immediate
+          # to_override send below -- delivers it right away instead. Either
           # paced path further splits on ai_personalization: true routes
           # through :drafting first (Jobs::GenerateInvitePersonalization
           # generates its content, then flips it to :bulk_pending itself --
@@ -295,13 +294,7 @@ module Jobs
           # silently stop getting personalized at all once
           # Jobs::ProcessBulkInviteEmails#deliver stopped calling the
           # generator inline.
-          if allow_any_email
-            if @invites.length > Invite::BULK_INVITE_EMAIL_LIMIT
-              invite_opts[:emailed_status] = bulk_send_status(ai_personalization)
-            end
-          elsif schedule_send
-            invite_opts[:emailed_status] = bulk_send_status(ai_personalization)
-          end
+          invite_opts[:emailed_status] = bulk_send_status(ai_personalization) if schedule_send
 
           # Invite.generate's own reinvites-per-day limiter only runs when email is
           # present, which allow_any_email rows never satisfy (they pass email: nil by

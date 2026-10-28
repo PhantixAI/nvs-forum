@@ -13,11 +13,6 @@ class Invite < ActiveRecord::Base
   include RateLimiter::OnCreateRecord
   include Trashable
 
-  # Only governs the immediate-vs-throttled threshold for unbound
-  # (allow_any_email) bulk-invite rows -- see Jobs::BulkInvite#send_invite.
-  # Bound bulk invites always throttle through :bulk_pending regardless of
-  # CSV size (Jobs::ProcessBulkInviteEmails paces them one at a time).
-  BULK_INVITE_EMAIL_LIMIT = 200
   DOMAIN_REGEX =
     /\A(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)+([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])\z/
   # Selecting this in the domain filter is an umbrella match (see
