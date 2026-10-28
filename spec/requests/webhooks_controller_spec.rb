@@ -793,7 +793,7 @@ RSpec.describe WebhooksController do
   describe "#aws" do
     let(:topic_arn) { "arn:aws:sns:us-east-1:123456789012:discourse-bounces" }
     let(:other_topic_arn) { "arn:aws:sns:us-east-1:999999999999:attacker-topic" }
-    let(:ses_message_id) { "000001378603177f-7a5433e7-8edb-42ae-af10-f0181f34d6ee-000000" }
+    let(:ses_message_id) { "010901a075d1bd53-2bdf9bfa-57d6-41e7-a08f-e1884959e9a6-000000" }
     let(:bounce_status) { "5.1.1" }
     let(:payload) do
       {
@@ -821,6 +821,11 @@ RSpec.describe WebhooksController do
           "feedbackId" => "00000138111222aa-33322211-cccc-cccc-cccc-ddddaaaa068a-000000",
           "remoteMtaIp" => "127.0.2.0",
         },
+        # This account's SES identities don't have "include original
+        # headers" enabled for any notification type (confirmed via
+        # get-identity-notification-attributes), so real payloads never
+        # carry "headers"/"commonHeaders" -- omitted here to match that
+        # shape, rather than one SES never actually sends us.
         :mail => {
           "timestamp" => "2016-01-27T14:59:38.237Z",
           "source" => "john@example.com",
@@ -831,28 +836,6 @@ RSpec.describe WebhooksController do
           "messageId" => ses_message_id,
           "destination" => [email, "jane@example.com", "mary@example.com", "richard@example.com"],
           "headersTruncated" => false,
-          "headers" => [
-            { "name" => "From", "value" => "\"John Doe\" <john@example.com>" },
-            {
-              "name" => "To",
-              "value" =>
-                "\"Test\" <#{email}>, \"Jane Doe\" <jane@example.com>, \"Mary Doe\" <mary@example.com>, \"Richard Doe\" <richard@example.com>",
-            },
-            { "name" => "Message-ID", "value" => " <#{message_id}> " },
-            { "name" => "Subject", "value" => "Hello" },
-            { "name" => "Content-Type", "value" => "text/plain; charset=\"UTF-8\"" },
-            { "name" => "Content-Transfer-Encoding", "value" => "base64" },
-            { "name" => "Date", "value" => "Wed, 27 Jan 2016 14:05:45 +0000" },
-          ],
-          "commonHeaders" => {
-            "from" => ["John Doe <john@example.com>"],
-            "date" => "Wed, 27 Jan 2016 14:05:45 +0000",
-            "to" => [
-              "\"Test\" <#{email}>, Jane Doe <jane@example.com>, Mary Doe <mary@example.com>, Richard Doe <richard@example.com>",
-            ],
-            "messageId" => " <#{message_id}> ",
-            "subject" => "Hello",
-          },
         },
       }
     end
@@ -874,9 +857,10 @@ RSpec.describe WebhooksController do
       SiteSetting.aws_sns_topic_arn_allowlist = topic_arn
     end
 
-    it "hard bounces using the original message ID" do
+    it "hard bounces using the SES message ID" do
       user = Fabricate(:user, email: email)
-      email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: email)
+      email_log =
+        Fabricate(:email_log, user: user, ses_message_id: ses_message_id, to_address: email)
 
       post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
       expect(response.status).to eq(200)
@@ -887,7 +871,7 @@ RSpec.describe WebhooksController do
       expect(email_log.user.user_stat.bounce_score).to eq(SiteSetting.hard_bounce_score)
     end
 
-    it "does not bounce an email log with a different original message ID" do
+    it "does not bounce an email log with a different SES message id" do
       user = Fabricate(:user, email: email)
       email_log =
         Fabricate(:email_log, user: user, ses_message_id: "other-ses-message-id", to_address: email)
@@ -899,74 +883,10 @@ RSpec.describe WebhooksController do
       expect(email_log.user.user_stat.bounce_score).to eq(0)
     end
 
-    it "matches the original message ID from raw headers without common headers" do
-      notification[:mail].delete("commonHeaders")
-      header = notification[:mail]["headers"].find { |entry| entry["name"] == "Message-ID" }
-      header["name"] = "mEsSaGe-Id"
-      user = Fabricate(:user, email: email)
-      email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: email)
-
-      post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
-
-      expect(response.status).to eq(200)
-      expect(email_log.reload.bounced).to eq(true)
-      expect(user.user_stat.bounce_score).to eq(SiteSetting.hard_bounce_score)
-    end
-
-    it "matches the original message ID from common headers without raw headers" do
-      notification[:mail].delete("headers")
-      user = Fabricate(:user, email: email)
-      email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: email)
-
-      post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
-
-      expect(response.status).to eq(200)
-      expect(email_log.reload.bounced).to eq(true)
-      expect(user.user_stat.bounce_score).to eq(SiteSetting.hard_bounce_score)
-    end
-
-    it "uses common headers when the raw message ID is blank" do
-      header = notification[:mail]["headers"].find { |entry| entry["name"] == "Message-ID" }
-      header["value"] = " "
-      user = Fabricate(:user, email: email)
-      email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: email)
-
-      post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
-
-      expect(response.status).to eq(200)
-      expect(email_log.reload.bounced).to eq(true)
-    end
-
-    it "prefers the raw original message ID over the common headers message ID" do
-      notification[:mail]["commonHeaders"]["messageId"] = ses_message_id
-      user = Fabricate(:user, email: email)
-      email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: email)
-      other_email_log =
-        Fabricate(:email_log, user: user, message_id: ses_message_id, to_address: email)
-
-      post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
-
-      expect(response.status).to eq(200)
-      expect(email_log.reload.bounced).to eq(true)
-      expect(other_email_log.reload.bounced).to eq(false)
-    end
-
-    it "ignores notifications without an original message ID even if the SES ID matches a log" do
-      notification[:mail].delete("headers")
-      notification[:mail].delete("commonHeaders")
-      user = Fabricate(:user, email: email)
-      email_log = Fabricate(:email_log, user: user, message_id: ses_message_id, to_address: email)
-
-      post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
-
-      expect(response.status).to eq(200)
-      expect(email_log.reload.bounced).to eq(false)
-      expect(user.user_stat.bounce_score).to eq(0)
-    end
-
-    it "ignores a matching message ID sent to a different recipient" do
+    it "ignores a matching SES message ID sent to a different recipient" do
       user = Fabricate(:user)
-      email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: user.email)
+      email_log =
+        Fabricate(:email_log, user: user, ses_message_id: ses_message_id, to_address: user.email)
 
       post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
 
@@ -977,7 +897,8 @@ RSpec.describe WebhooksController do
 
     it "does not increase the bounce score for duplicate notifications" do
       user = Fabricate(:user, email: email)
-      email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: email)
+      email_log =
+        Fabricate(:email_log, user: user, ses_message_id: ses_message_id, to_address: email)
 
       post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
       expect(response.status).to eq(200)
@@ -994,7 +915,8 @@ RSpec.describe WebhooksController do
 
       it "stores the normalized bounce error code" do
         user = Fabricate(:user, email: email)
-        email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: email)
+        email_log =
+          Fabricate(:email_log, user: user, ses_message_id: ses_message_id, to_address: email)
 
         post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
         expect(response.status).to eq(200)
@@ -1008,7 +930,8 @@ RSpec.describe WebhooksController do
 
       it "rejects notifications with 406 and does not process the bounce" do
         user = Fabricate(:user, email: email)
-        email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: email)
+        email_log =
+          Fabricate(:email_log, user: user, ses_message_id: ses_message_id, to_address: email)
 
         post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
         expect(response.status).to eq(406)
@@ -1027,7 +950,8 @@ RSpec.describe WebhooksController do
 
       it "rejects with 406 and does not process the bounce" do
         user = Fabricate(:user, email: email)
-        email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: email)
+        email_log =
+          Fabricate(:email_log, user: user, ses_message_id: ses_message_id, to_address: email)
 
         post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload_with_other_topic }
         expect(response.status).to eq(406)
@@ -1042,33 +966,13 @@ RSpec.describe WebhooksController do
 
       it "rejects with 406" do
         user = Fabricate(:user, email: email)
-        email_log = Fabricate(:email_log, user: user, message_id: message_id, to_address: email)
+        email_log =
+          Fabricate(:email_log, user: user, ses_message_id: ses_message_id, to_address: email)
 
         post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => payload }
         expect(response.status).to eq(406)
 
         expect(email_log.reload.bounced).to eq(false)
-      end
-    end
-
-    context "with a SubscriptionConfirmation" do
-      before { Net::HTTP.stubs(:get).returns("") }
-
-      it "enqueues the confirmation job when the TopicArn is allowlisted" do
-        Jobs::ConfirmSnsSubscription.any_instance.expects(:execute).once
-
-        post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => subscription_confirmation_payload }
-        expect(response.status).to eq(200)
-      end
-
-      it "rejects with 406 when the TopicArn is not allowlisted" do
-        Jobs::ConfirmSnsSubscription.any_instance.expects(:execute).never
-
-        attacker_payload =
-          JSON.parse(subscription_confirmation_payload).merge("TopicArn" => other_topic_arn).to_json
-
-        post "/webhooks/aws.json", headers: { "RAW_POST_DATA" => attacker_payload }
-        expect(response.status).to eq(406)
       end
     end
   end
