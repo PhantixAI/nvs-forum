@@ -141,10 +141,12 @@ jobs:
       - name: Build and swap (over SSH)
         run: |
           ssh -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
-            cd /var/discourse &&
-            sudo ./launcher bootstrap uat &&
-            sudo ./launcher destroy uat &&
-            sudo ./launcher start uat
+            sudo bash -c "
+              cd /var/discourse &&
+              ./launcher bootstrap uat &&
+              ./launcher destroy uat &&
+              ./launcher start uat
+            "
           '
 
       - name: Verify uat.nitians.in is up
