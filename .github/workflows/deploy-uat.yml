@@ -108,8 +108,13 @@ jobs:
             echo "--- before ---"; sudo ls -la /var/discourse
             # A reused instance may still have the uat container running from a
             # prior trigger, with /shared bind-mounted from /var/discourse/shared/uat
-            # -- stop it first or the umount below fails with "target is busy".
-            sudo docker stop uat >/dev/null 2>&1 || true
+            # -- stop it first or the umount below fails with "target is busy". Also
+            # kill any OTHER container (e.g. a bootstrap build container orphaned by a
+            # previous run getting killed mid-build) -- its postgres process keeps
+            # listening on /shared/postgres_run/.s.PGSQL.5432 on the persistent disk,
+            # which makes every subsequent bootstrap abort with "postgres already
+            # running stop container" even though "uat" itself was never up.
+            sudo docker ps -aq | xargs -r sudo docker rm -f >/dev/null 2>&1 || true
             # /var/discourse/shared/uat is the mountpoint for the persistent DB disk
             # (/dev/xvdf) -- unmount before rm -rf so a plain directory-tree wipe of
             # the launcher scaffolding can never touch the actual Postgres data,
