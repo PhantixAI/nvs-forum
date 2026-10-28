@@ -276,13 +276,16 @@ jobs:
           # passed) and hold open connections to "discourse" -- force terminates them
           # before dropping, rather than failing with "being accessed by other users".
           sudo -u postgres dropdb --force discourse
-          sudo -u postgres createdb discourse
+          # -O discourse: makes the discourse role own the DB (and, via the
+          # pg_database_owner pseudo-role on PG15+, the public schema too) so the
+          # restore below needs no ownership fixup afterward.
+          sudo -u postgres createdb -O discourse discourse
 
           echo "=== restore production dump ==="
-          sudo -u postgres pg_restore -d discourse --no-owner --no-acl /tmp/nitians_forum.dump
-
-          echo "=== fix ownership (dump has no-owner, restored as postgres) ==="
-          sudo -u postgres psql discourse -c "REASSIGN OWNED BY postgres TO discourse;"
+          # Restore AS discourse (not postgres) so every object is owned by it from
+          # the start -- avoids REASSIGN OWNED, which fails on some objects ("required
+          # by the database system") when attempted after the fact.
+          sudo -u discourse pg_restore -d discourse --no-owner --no-acl /tmp/nitians_forum.dump
 
           echo "=== catch up migrations (dump may be behind this build's code) ==="
           su discourse -c 'cd /var/www/discourse && RAILS_ENV=production bundle exec rake db:migrate'
