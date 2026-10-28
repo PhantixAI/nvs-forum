@@ -51,7 +51,7 @@ jobs:
             --instance-names uat-nitians \
             --availability-zone ap-south-1a \
             --instance-snapshot-name uat-nitians-base-snapshot \
-            --bundle-id small_2_0 \
+            --bundle-id small_3_1 \
             --key-pair-name uat-nitians-key
 
           echo "Waiting for instance to be running..."

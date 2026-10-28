@@ -59,8 +59,9 @@ If the snapshot, key pair, or static IP are ever lost and need to be redone:
    ```
 
 3. **Base instance**: create one Ubuntu 24.04 Lightsail instance, region `ap-south-1`, plan
-   `small_2_0` (2 GB — confirm current plan naming/pricing in the console), using the
-   `uat-nitians-key` key pair. Attach the static IP to it temporarily. Open ports 22/80/443.
+   `small_3_1` (2 GB RAM, 2 vCPU, $12/mo — current Lightsail bundle naming as of 2026-10;
+   `small_2_0` no longer exists), using the `uat-nitians-key` key pair. Attach the static IP to it
+   temporarily. Open ports 22/80/443.
 
 4. **Base provisioning** (SSH in; same as production's first-time setup in `DEPLOYMENT.md`):
    ```bash
