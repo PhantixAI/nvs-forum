@@ -309,7 +309,12 @@ jobs:
           # Restore AS discourse (not postgres) so every object is owned by it from
           # the start -- avoids REASSIGN OWNED, which fails on some objects ("required
           # by the database system") when attempted after the fact.
-          sudo -u discourse pg_restore -d discourse --no-owner --no-acl /tmp/nitians_forum.dump
+          # pg_restore exits 1 if ANY statement errors, even cosmetic ones -- the only
+          # errors here are "must be owner of extension {hstore,pg_trgm,vector}" on
+          # COMMENT ON EXTENSION statements (those extensions are owned by postgres
+          # from bootstrap's own create_db, not discourse); all actual data restores
+          # fine, so don't let that nonzero exit abort the whole script.
+          sudo -u discourse pg_restore -d discourse --no-owner --no-acl /tmp/nitians_forum.dump || true
 
           echo "=== catch up migrations (dump may be behind this build's code) ==="
           su discourse -c 'cd /var/www/discourse && RAILS_ENV=production bundle exec rake db:migrate'
