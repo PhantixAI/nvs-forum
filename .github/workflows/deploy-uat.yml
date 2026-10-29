@@ -1,0 +1,286 @@
+name: Deploy to UAT
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    types: [opened, synchronize]
+    branches:
+      - master
+
+concurrency:
+  group: uat-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy uat.nitians.in
+    runs-on: ubuntu-latest
+    # Generous backstop: bootstrap (~15 min) + the 30-min idle-delete wait at the end.
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version to deploy
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "version=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=master" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Ensure the UAT instance exists
+        run: |
+          if aws lightsail get-instance --instance-name uat-nitians >/dev/null 2>&1; then
+            echo "uat-nitians already exists, reusing it"
+            exit 0
+          fi
+
+          echo "uat-nitians not found, creating from snapshot"
+          aws lightsail create-instances-from-snapshot \
+            --instance-names uat-nitians \
+            --availability-zone ap-south-1a \
+            --instance-snapshot-name uat-nitians-base-snapshot \
+            --bundle-id small_3_1 \
+            --key-pair-name uat-nitians-key
+
+          echo "Waiting for instance to be running..."
+          until [ "$(aws lightsail get-instance-state --instance-name uat-nitians --query state.name --output text)" = "running" ]; do
+            sleep 5
+          done
+
+          aws lightsail attach-static-ip --static-ip-name uat-nitians-ip --instance-name uat-nitians
+
+          # A fresh instance's default firewall only opens 22/80 -- 443 must be opened
+          # explicitly or nginx's SSL listener is unreachable even when fully working.
+          # (If the base snapshot already carries this open from a prior fix, this is
+          # a harmless no-op.) Requires lightsail:OpenInstancePublicPorts on the
+          # deploy IAM user.
+          aws lightsail open-instance-public-ports --instance-name uat-nitians \
+            --port-info fromPort=443,toPort=443,protocol=TCP,cidrs=0.0.0.0/0,ipv6Cidrs=::/0
+
+          echo "Attaching persistent DB disk..."
+          aws lightsail attach-disk \
+            --disk-name uat-nitians-db-disk \
+            --instance-name uat-nitians \
+            --disk-path /dev/xvdf \
+            --no-auto-mounting
+          until [ "$(aws lightsail get-disk --disk-name uat-nitians-db-disk --query disk.isAttached --output text)" = "True" ]; do
+            sleep 3
+          done
+
+          echo "Waiting for sshd to accept the SSH protocol handshake..."
+          # A bare TCP accept (nc -z) can succeed while sshd is still starting up on a
+          # freshly-booted instance, before it's ready to do the actual key exchange --
+          # ssh-keyscan is the real readiness check.
+          keys=""
+          for attempt in $(seq 1 60); do
+            # GitHub Actions runs steps under `bash -e`; ssh-keyscan exits non-zero
+            # (connection refused) on every attempt before sshd is actually up, which
+            # would otherwise kill this whole step on the very first iteration instead
+            # of letting the retry loop run.
+            keys="$(ssh-keyscan -H uat.nitians.in 2>/dev/null || true)"
+            if [ -n "$keys" ]; then break; fi
+            echo "Waiting for SSH host keys ($attempt/60)..."; sleep 5
+          done
+          if [ -z "$keys" ]; then
+            echo "sshd never became ready for key exchange"
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          echo "$keys" >> ~/.ssh/known_hosts
+
+      - name: Write SSH key
+        env:
+          UAT_SSH_PRIVATE_KEY: ${{ secrets.UAT_SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$UAT_SSH_PRIVATE_KEY" > ~/.ssh/uat_key
+          chmod 600 ~/.ssh/uat_key
+          # When the instance was reused (not freshly created this run), its host keys
+          # were never scanned above -- do it now if missing.
+          if ! ssh-keygen -F uat.nitians.in >/dev/null 2>&1; then
+            ssh-keyscan -H uat.nitians.in >> ~/.ssh/known_hosts 2>/dev/null || true
+          fi
+
+      - name: Refresh discourse_docker clone and mount the persistent disk
+        run: |
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
+            set -e
+            echo "--- before ---"; sudo ls -la /var/discourse
+            # A reused instance may still have the uat container running from a
+            # prior trigger, with /shared bind-mounted from /var/discourse/shared/uat
+            # -- stop it first or the umount below fails with "target is busy". Also
+            # kill any OTHER container (e.g. a bootstrap build container orphaned by a
+            # previous run getting killed mid-build) -- its postgres process keeps
+            # listening on /shared/postgres_run/.s.PGSQL.5432 on the persistent disk,
+            # which makes every subsequent bootstrap abort with "postgres already
+            # running stop container" even though "uat" itself was never up.
+            sudo docker ps -aq | xargs -r sudo docker rm -f >/dev/null 2>&1 || true
+            # /var/discourse/shared/uat is the mountpoint for the persistent DB disk
+            # (/dev/xvdf) -- unmount before rm -rf so a plain directory-tree wipe of
+            # the launcher scaffolding can never touch the actual Postgres data,
+            # which lives on the separate block device, not under /var/discourse.
+            sudo mountpoint -q /var/discourse/shared/uat && sudo umount /var/discourse/shared/uat
+            sudo rm -rf /var/discourse
+            sudo git clone https://github.com/discourse/discourse_docker.git /var/discourse
+            sudo chmod 700 /var/discourse
+            sudo mkdir -p /var/discourse/shared/uat
+            # This bundle runs on Nitro/NVMe, where Lightsail requested-disk-path
+            # (/dev/xvdf) is not honored by the guest -- the attached disk shows up
+            # as /dev/nvme1n1 instead. Detect it: the one top-level disk that is not
+            # the root devices parent.
+            root_disk=$(lsblk -no PKNAME "$(findmnt -no SOURCE /)")
+            data_disk=""
+            for attempt in $(seq 1 20); do
+              for d in /sys/block/nvme*n1 /sys/block/xvd*; do
+                [ -e "$d" ] || continue
+                name=$(basename "$d")
+                if [ "$name" != "$root_disk" ]; then
+                  data_disk="$name"
+                  break 2
+                fi
+              done
+              echo "Waiting for the persistent data disk to appear ($attempt/20)..."; sleep 3
+            done
+            if [ -z "$data_disk" ]; then
+              echo "Persistent disk never appeared"
+              exit 1
+            fi
+            DEV="/dev/$data_disk"
+            echo "Using data disk: $DEV"
+            if ! sudo blkid "$DEV" >/dev/null 2>&1; then
+              echo "First-ever use of the persistent disk -- formatting it"
+              sudo mkfs.ext4 -q "$DEV"
+            fi
+            sudo mount "$DEV" /var/discourse/shared/uat
+            sudo mkdir -p /var/discourse/shared/uat/ssl
+            sudo mkdir -p /var/discourse/shared/uat/log/var-log
+            if ! sudo grep -q "git remote set-url origin" /var/discourse/templates/web.template.yml; then
+              sudo sed -i "100a\\        - sudo -H -E -u discourse git remote set-url origin \$git_url" /var/discourse/templates/web.template.yml
+            fi
+            echo "--- after ---"; sudo ls -la /var/discourse
+            sudo ls -la /var/discourse/containers
+            sudo df -h /var/discourse/shared/uat
+          '
+
+      - name: Write containers/uat.yml with secrets and upload it
+        env:
+          NVS_GITHUB_PAT: ${{ secrets.NVS_GITHUB_PAT }}
+          DISCOURSE_SMTP_USERNAME: ${{ secrets.DISCOURSE_SMTP_USERNAME }}
+          DISCOURSE_SMTP_PASSWORD: ${{ secrets.DISCOURSE_SMTP_PASSWORD }}
+          UAT_DISCOURSE_S3_ACCESS_KEY_ID: ${{ secrets.UAT_DISCOURSE_S3_ACCESS_KEY_ID }}
+          UAT_DISCOURSE_S3_SECRET_ACCESS_KEY: ${{ secrets.UAT_DISCOURSE_S3_SECRET_ACCESS_KEY }}
+          UAT_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          python3 - << 'PYEOF' > "$tmp"
+          import os, sys
+          content = open('containers/uat.yml').read()
+          for placeholder, envvar in [
+              ('<GITHUB_PAT>', 'NVS_GITHUB_PAT'),
+              ('<DISCOURSE_SMTP_USERNAME>', 'DISCOURSE_SMTP_USERNAME'),
+              ('<DISCOURSE_SMTP_PASSWORD>', 'DISCOURSE_SMTP_PASSWORD'),
+              ('<UAT_DISCOURSE_S3_ACCESS_KEY_ID>', 'UAT_DISCOURSE_S3_ACCESS_KEY_ID'),
+              ('<UAT_DISCOURSE_S3_SECRET_ACCESS_KEY>', 'UAT_DISCOURSE_S3_SECRET_ACCESS_KEY'),
+              ('<UAT_VERSION>', 'UAT_VERSION'),
+          ]:
+              content = content.replace(placeholder, os.environ[envvar])
+          sys.stdout.write(content)
+          PYEOF
+          scp -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key "$tmp" ubuntu@uat.nitians.in:/tmp/uat.yml
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'sudo mv /tmp/uat.yml /var/discourse/containers/uat.yml'
+
+      - name: Build and swap (over SSH)
+        run: |
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
+            sudo bash -c "
+              cd /var/discourse &&
+              ./launcher bootstrap uat &&
+              ./launcher destroy uat &&
+              ./launcher start uat
+            "
+          '
+
+      - name: Wait for nginx and ensure SSL is loaded
+        run: |
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
+            for attempt in $(seq 1 60); do
+              if sudo docker exec uat sv status nginx | grep -q "^run:"; then break; fi
+              echo "Waiting for nginx to start ($attempt/60)..."; sleep 5
+            done
+            if ! sudo docker exec uat sv status nginx | grep -q "^run:"; then
+              echo "nginx did not start in time"
+              sudo docker logs --tail 200 uat
+              exit 1
+            fi
+            # configure-ssl/letsencrypt installs certs during the containers own boot
+            # hooks and calls "sv reload nginx" right after -- that can race runits
+            # own supervise-dir setup (seen as "unable to open supervise/ok") and
+            # silently fail, leaving nginx serving plain HTTP only. Reload again now
+            # that nginx is confirmed supervised, so the already-issued certs load.
+            sudo docker exec uat sv reload nginx
+          '
+
+      - name: Verify uat.nitians.in is up
+        run: |
+          up=false
+          for attempt in $(seq 1 60); do
+            if [ "$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' https://uat.nitians.in/)" = "200" ]; then
+              up=true
+              break
+            fi
+            echo "Waiting for uat.nitians.in ($attempt/60)..."; sleep 5
+          done
+          if [ "$up" != true ]; then
+            echo "uat.nitians.in did not come up in time"
+            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'sudo docker logs --tail 200 uat'
+            exit 1
+          fi
+          echo "uat.nitians.in is up"
+
+      - name: Idle-delete the instance after 30 minutes of inactivity
+        run: |
+          # If a newer trigger arrives during this wait, cancel-in-progress kills
+          # this job before it reaches the delete call below, so the instance
+          # survives and the next run's "Ensure the UAT instance exists" step
+          # reuses it -- this is what resets the idle clock.
+          sleep 1800
+
+          # Stop the app and unmount cleanly before detaching -- the DB disk is
+          # persistent and must survive this instance's deletion untouched.
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
+            sudo bash -c "cd /var/discourse && ./launcher stop uat"
+            sudo umount /var/discourse/shared/uat
+          '
+
+          # detach-disk requires the INSTANCE itself to be stopped, not just the app
+          # inside it ("You can only detach the disk when the target instance is
+          # stopped") -- stop it and wait before attempting the detach.
+          aws lightsail stop-instance --instance-name uat-nitians
+          until [ "$(aws lightsail get-instance-state --instance-name uat-nitians --query state.name --output text)" = "stopped" ]; do
+            sleep 5
+          done
+
+          aws lightsail detach-disk --disk-name uat-nitians-db-disk
+          until [ "$(aws lightsail get-disk --disk-name uat-nitians-db-disk --query disk.isAttached --output text)" = "False" ]; do
+            sleep 3
+          done
+
+          aws lightsail detach-static-ip --static-ip-name uat-nitians-ip
+          aws lightsail delete-instance --instance-name uat-nitians
+
+      - name: Clean up SSH key
+        if: always()
+        run: rm -f ~/.ssh/uat_key

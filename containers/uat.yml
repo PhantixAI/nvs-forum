@@ -1,0 +1,105 @@
+## UAT (single-site) container for uat.nitians.in.
+## Runs on a dedicated, ephemeral Lightsail instance (created from a snapshot per
+## deploy cycle, deleted after ~30 min of inactivity — see docs/UAT.md). Not part
+## of the production multisite install: no config/multisite.yml, no multisite hooks.
+
+templates:
+  ## Local PostgreSQL (not RDS) — data lives at /shared/postgres_data, which is
+  ## the host's /var/discourse/shared/uat, which is a persistent Lightsail block
+  ## storage disk attached/mounted by deploy-uat.yml on every create — survives
+  ## the instance's own 30-min idle-delete cycle. See docs/UAT.md.
+  - "templates/postgres.template.yml"
+  - "templates/redis.template.yml"
+  - "templates/web.template.yml"
+  - "templates/web.ratelimited.template.yml"
+  - "templates/web.ssl.template.yml"
+  - "templates/web.letsencrypt.ssl.template.yml"
+
+expose:
+  - "80:80"
+  - "443:443"
+
+volumes:
+  - volume:
+      host: /var/discourse/shared/uat
+      guest: /shared
+  - volume:
+      host: /var/discourse/shared/uat/log/var-log
+      guest: /var/log
+
+params:
+  db_default_text_search_config: "pg_catalog.english"
+  db_shared_buffers: "128MB"
+  db_work_mem: "10MB"
+  ## Overwritten per-run by .github/workflows/deploy-uat.yml with either "master"
+  ## or the triggering PR's head SHA, so UAT always reflects the exact commit
+  ## that triggered the deploy rather than always tracking master.
+  version: <UAT_VERSION>
+  ## Replace <GITHUB_PAT> with a fine-grained token (Contents: read-only) for PhantixAI/nvs-forum
+  git_url: https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-forum.git
+
+env:
+  LANG: en_US.UTF-8
+  ## 1 worker for the 2 GB UAT instance
+  UNICORN_WORKERS: 1
+
+  ## ===== DISCOURSE BASE =====
+  DISCOURSE_HOSTNAME: uat.nitians.in
+  DISCOURSE_DEVELOPER_EMAILS: 'phantixai@gmail.com'
+
+  ## No DISCOURSE_DB_* block: with postgres.template.yml included, Discourse
+  ## defaults to the local socket and db_name/db_user ("discourse"/"discourse"
+  ## below), never touching production's shared RDS instance.
+
+  ## ===== AMAZON SES SMTP =====
+  ## Shares production's SES sending identity/domain reputation — acceptable for a
+  ## low-volume preview environment, but worth knowing if investigating SES issues.
+  DISCOURSE_SMTP_ADDRESS: email-smtp.ap-south-1.amazonaws.com
+  DISCOURSE_SMTP_PORT: 587
+  DISCOURSE_SMTP_USER_NAME: '<DISCOURSE_SMTP_USERNAME>'
+  DISCOURSE_SMTP_PASSWORD: '<DISCOURSE_SMTP_PASSWORD>'
+  DISCOURSE_SMTP_AUTHENTICATION: login
+  DISCOURSE_SMTP_ENABLE_START_TLS: true
+  DISCOURSE_SMTP_DOMAIN: uat.nitians.in
+
+  ## ===== LET'S ENCRYPT =====
+  LETSENCRYPT_ACCOUNT_EMAIL: phantixai@gmail.com
+
+  ## ===== S3 (separate bucket from any production bucket) =====
+  DISCOURSE_USE_S3: true
+  DISCOURSE_S3_REGION: ap-south-1
+  DISCOURSE_S3_ACCESS_KEY_ID: '<UAT_DISCOURSE_S3_ACCESS_KEY_ID>'
+  DISCOURSE_S3_SECRET_ACCESS_KEY: '<UAT_DISCOURSE_S3_SECRET_ACCESS_KEY>'
+  DISCOURSE_S3_BUCKET: uat-nitians-forum-uploads
+  DISCOURSE_S3_USE_ACLS: false
+
+hooks:
+  after_code:
+    - exec:
+        cd: $home/plugins
+        cmd:
+          - git clone https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-follow.git
+          - git clone https://oauth2:<GITHUB_PAT>@github.com/PhantixAI/nvs-authentication-validations.git
+    ## config/multisite.yml is checked into this same repo (production's app.yml bind-mounts
+    ## the real secrets-filled copy over it from /var/discourse/shared/standalone -- UAT has no
+    ## such mount, so without this the raw git-committed file, with its unsubstituted
+    ## <DISCOURSE_DB_PASSWORD> placeholder and production's RDS host, ships as-is). Discourse
+    ## enables multisite mode purely because this file exists, which made every UAT boot hang
+    ## for most of an hour trying (and timing out) to connect to all three production tenants.
+    - exec:
+        cmd:
+          - rm -f $home/config/multisite.yml
+  # Same pnpm pin workaround as containers/app.yml -- see that file for the full
+  # explanation (ERR_PNPM_INVALID_DEPENDENCY_NAME on scoped self-typed peers).
+  before_yarn:
+    - exec:
+        cd: $home
+        cmd:
+          - npm install -g pnpm@10.34.5
+  ## No after_db_migrate hook: UAT is single-site, so the standard pups db_migrate
+  ## step (plain `db:migrate`) already wired into web.template.yml is sufficient.
+  ## multisite:migrate is production-only and never applies here.
+
+run:
+  - exec: echo "Beginning of custom commands"
+  - exec: echo "End of custom commands"

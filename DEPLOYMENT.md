@@ -68,9 +68,11 @@ ssh -i /tmp/ls_key.pem ubuntu@52.66.136.102
 
 ## Deploying Custom Changes
 
-Deploys are automated via `.github/workflows/deploy.yml`, which runs on a self-hosted GitHub
-Actions runner on this same Lightsail box. **Every push to `master` triggers it automatically**
-— there is no manual SSH step for a normal deploy anymore. It:
+Production deploys are **manual-only**: `.github/workflows/deploy.yml` runs only on
+`workflow_dispatch` (Actions tab → "Deploy to Production" → Run workflow, or
+`gh workflow run deploy.yml`). Merging to `master` no longer auto-deploys production — review the
+change on UAT first (see `docs/UAT.md`; every push to `master` and every PR gets an automatic UAT
+preview), then explicitly trigger this workflow when ready to ship. It:
 
 1. Writes `containers/app.yml`/`config/multisite.yml` with real secrets injected.
 2. Runs `sudo ./launcher bootstrap app` to build the new image — **the site stays up** during
@@ -87,6 +89,13 @@ earlier warning (see the revert commits around `570ffdda808`/`4368431eb4b` for t
 
 A manual `ssh` + `sudo ./launcher rebuild app` (as in First-Time Setup above) is only needed for
 one-off recovery, not routine deploys.
+
+## UAT Environment
+
+A separate, single-site UAT install at `uat.nitians.in` previews every push to `master` and every
+PR before it reaches production. Its Lightsail instance is created on demand and deleted after
+~30 minutes of inactivity (not always-on) — see `docs/UAT.md` for the full setup, access, and
+deploy pipeline details.
 
 ## app.yml Credentials
 
