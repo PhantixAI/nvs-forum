@@ -95,6 +95,7 @@ peerDependencyRules:
   ignoreMissing:
     - "webpack"
     - "@types/react"
+    - "vite"
 overrides:
   "tmp": "^0.2.7"
   typescript: "^6.0.3"

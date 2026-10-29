@@ -931,6 +931,25 @@ RSpec.describe ListController do
       expect(response.headers["X-Robots-Tag"]).to eq("noindex")
     end
 
+    it "localizes latest RSS from Accept-Language for clients classified as crawlers" do
+      SiteSetting.allow_user_locale = true
+      SiteSetting.set_locale_from_param = true
+      SiteSetting.set_locale_from_accept_language_header = true
+      SiteSetting.content_localization_enabled = true
+      SiteSetting.content_localization_crawler_param = true
+      SiteSetting.content_localization_supported_locales = "ja"
+
+      get "/latest.rss",
+          headers: {
+            "HTTP_USER_AGENT" => "curl/8.0",
+            "HTTP_ACCEPT" => "*/*",
+            "HTTP_ACCEPT_LANGUAGE" => "ja",
+          }
+
+      title = Nokogiri.XML(response.body).at_xpath("/rss/channel/title").text
+      expect(title).to eq("#{SiteSetting.title} - #{I18n.t("rss_description.latest", locale: :ja)}")
+    end
+
     it "does not allow a topic author to forge RSS items" do
       attacker = Fabricate(:user, refresh_auto_groups: true)
       forged_title = "Forged RSS item"
@@ -1387,6 +1406,19 @@ RSpec.describe ListController do
           get "/c/#{category.slug}/#{category.id}/l/latest"
           expect(response.status).to eq(200)
           expect(css_select("link[rel=canonical]").length).to eq(1)
+        end
+
+        it "keeps the page number on later pages of a category" do
+          category_url = "#{Discourse.base_url}/c/#{category.slug}/#{category.id}"
+
+          get "/c/#{category.slug}/#{category.id}?page=2&order=views"
+          expect(css_select("link[rel=canonical]").first["href"]).to eq("#{category_url}?page=2")
+
+          get "/c/#{category.slug}/#{category.id}/l/latest?page=2"
+          expect(css_select("link[rel=canonical]").first["href"]).to eq("#{category_url}?page=2")
+
+          get "/c/#{category.slug}/#{category.id}?page=0"
+          expect(css_select("link[rel=canonical]").first["href"]).to eq(category_url)
         end
       end
 
