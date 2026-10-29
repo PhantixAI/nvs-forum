@@ -905,13 +905,20 @@ class InvitesController < ApplicationController
   # itself: the admin reviews/edits each request's own extracted CSV
   # client-side (one CSV per URL), which then gets submitted as draft
   # invites through #create_drafts.
+  #
+  # draft: true saves the urls at :draft status with no rules required yet
+  # (see UrlExtractionRequest's :draft status) -- lets an admin queue up
+  # URLs now and come back to write rules later via UrlExtractionRetryModal,
+  # which already resubmits a request's url+edited rules through this same
+  # action to actually run it.
   def extract_from_url
     guardian.ensure_can_bulk_invite_to_forum!
 
     urls = Array(params[:urls]).map { |url| url.to_s.strip }.reject(&:blank?).uniq
     rules = params[:rules].to_s.strip
+    draft = Invite.truthy_param?(params[:draft])
 
-    if urls.blank? || rules.blank?
+    if urls.blank? || (rules.blank? && !draft)
       return(
         render json:
                  failed_json.merge(errors: [I18n.t("bulk_invite.url_extraction.missing_fields")]),
@@ -921,7 +928,9 @@ class InvitesController < ApplicationController
 
     # Consumed up front, one slot per URL, before creating anything -- a
     # submission that would exceed the hourly limit creates none of its
-    # requests, rather than queuing part of the batch.
+    # requests, rather than queuing part of the batch. Applies to drafts
+    # too -- the site setting governs requests submitted, not pages
+    # actually scraped.
     limiter =
       RateLimiter.new(
         current_user,
@@ -937,7 +946,9 @@ class InvitesController < ApplicationController
       raise
     end
 
-    PluginStore.set("bulk_invite_url_extraction", "last_rules", rules)
+    # Skipped when blank (a draft with no rules yet) -- would otherwise
+    # clobber the previously remembered rules this prefills next time.
+    PluginStore.set("bulk_invite_url_extraction", "last_rules", rules) if rules.present?
 
     requests =
       urls.map do |url|
@@ -946,9 +957,18 @@ class InvitesController < ApplicationController
             created_by: current_user,
             url: url,
             rules: rules,
-            status: UrlExtractionRequest.statuses[:queued],
+            status:
+              (
+                if draft
+                  UrlExtractionRequest.statuses[:draft]
+                else
+                  UrlExtractionRequest.statuses[:queued]
+                end
+              ),
           )
-        Jobs.enqueue(:process_url_extraction_request, request_id: request.id)
+        # A draft has no rules yet -- nothing to extract until the admin
+        # writes them and resubmits, so this never gets enqueued for one.
+        Jobs.enqueue(:process_url_extraction_request, request_id: request.id) unless draft
         request
       end
 

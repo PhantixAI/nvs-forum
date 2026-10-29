@@ -2900,9 +2900,15 @@ en:
             urls_label: "Page URLs"
             urls_help: "One URL per line. The same rules apply to all of them."
             urls_required: "Enter at least one URL."
+            rules_required: "Enter extraction rules, or save as a draft to write them later."
             rules_label: "Extraction rules"
             extract_button: "Extract"
             extracting: "Extracting…"
+            save_draft_button: "Save as draft"
+            saving_draft: "Saving…"
+            draft_saved:
+              one: "Saved as a draft. Write rules for it anytime from the Extracted tab."
+              other: "%{count} URLs saved as drafts. Write rules for them anytime from the Extracted tab."
             allow_any_email_label: "Allow any email"
             schedule_send_label: "Schedule send"
             csv_review_label: "Review and edit before creating drafts"
@@ -2916,6 +2922,7 @@ en:
               other: "%{count} URLs submitted. Find them in the Extracted tab as each one is ready."
             open_request: "Open"
             retry_button: "Retry"
+            write_rules_button: "Write rules"
             retry_title: "Retry extraction"
             retrying: "Retrying…"
             delete_button: "Delete"
@@ -2927,6 +2934,7 @@ en:
               ready: "Ready"
               failed: "Failed"
               closed: "Closed"
+              draft: "Draft"
 
       confirm_access:
         title: "Confirm access"

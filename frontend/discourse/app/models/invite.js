@@ -156,10 +156,16 @@ export default class Invite extends EmberObject {
   // Jobs::ProcessUrlExtractionRequest); each result arrives later via
   // MessageBus, or by loading the Invited page's "Extracted" tab
   // (UsersController#invited, filter: "extracted"), not in this response.
-  static submitUrlExtraction(urls, rules) {
+  // draft: true saves the urls without requiring rules yet (see
+  // UrlExtractionRequest's :draft status) and never enqueues extraction.
+  static submitUrlExtraction(urls, rules, { draft } = {}) {
+    const data = { urls, rules };
+    if (draft) {
+      data.draft = draft;
+    }
     return ajax("/invites/extract-from-url.json", {
       type: "POST",
-      data: { urls, rules },
+      data,
     });
   }
 

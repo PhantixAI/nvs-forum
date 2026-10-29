@@ -3835,6 +3835,66 @@ RSpec.describe InvitesController do
           expect(message).to include("action=extract_from_url")
         end
       end
+
+      it "saves a draft without requiring rules, and never enqueues extraction for it" do
+        sign_in(admin)
+
+        post "/invites/extract-from-url.json",
+             params: {
+               urls: ["https://example.com"],
+               draft: "true",
+             }
+
+        expect(response.status).to eq(201)
+        request = UrlExtractionRequest.last
+        expect(request.url).to eq("https://example.com")
+        expect(request.rules).to eq("")
+        expect(request.status).to eq(UrlExtractionRequest.statuses[:draft])
+        expect(response.parsed_body["requests"].first["status"]).to eq("draft")
+        expect(Jobs::ProcessUrlExtractionRequest.jobs).to be_empty
+      end
+
+      it "still requires at least one url when saving a draft" do
+        sign_in(admin)
+
+        post "/invites/extract-from-url.json", params: { urls: [], draft: "true" }
+
+        expect(response.status).to eq(422)
+        expect(UrlExtractionRequest.count).to eq(0)
+      end
+
+      it "saves whatever rules are given with a draft, without requiring them" do
+        sign_in(admin)
+
+        post "/invites/extract-from-url.json",
+             params: {
+               urls: ["https://example.com"],
+               rules: "Append RollNo to @example.edu",
+               draft: "true",
+             }
+
+        expect(response.status).to eq(201)
+        expect(UrlExtractionRequest.last.rules).to eq("Append RollNo to @example.edu")
+      end
+
+      it "does not clobber the remembered last_rules prefill with a draft's blank rules" do
+        sign_in(admin)
+
+        post "/invites/extract-from-url.json",
+             params: {
+               urls: ["https://example.com"],
+               rules: "Append RollNo to @example.edu",
+             }
+        post "/invites/extract-from-url.json",
+             params: {
+               urls: ["https://example.com/2"],
+               draft: "true",
+             }
+
+        expect(PluginStore.get("bulk_invite_url_extraction", "last_rules")).to eq(
+          "Append RollNo to @example.edu",
+        )
+      end
     end
   end
 
