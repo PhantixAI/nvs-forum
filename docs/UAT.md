@@ -26,6 +26,23 @@ only deleting it actually avoids cost — that's why this uses create/delete rat
   CPU/IO/connections with production (see "Database" below). Its uploads go to their own S3 bucket
   (`uat-nitians-forum-uploads`).
 
+## Manual start/stop
+
+`.github/workflows/uat-control.yml` is a separate, `workflow_dispatch`-only workflow for bringing
+UAT up or down on demand, independent of push/PR deploys and the 30-minute idle timer:
+
+- **Run it from the Actions tab** (or `gh workflow run uat-control.yml -f action=start` /
+  `-f action=stop`), picking `start` or `stop`.
+- `start` optionally takes a `ref` input (branch/tag/SHA, defaults to `master`) and otherwise runs
+  the exact same create-from-snapshot/bootstrap/verify steps as `deploy-uat.yml` — just without the
+  idle-delete at the end, so it stays up until someone explicitly stops it.
+- `stop` runs the same teardown `deploy-uat.yml` uses at the end of its idle wait (stop app, unmount
+  disk, stop instance, detach disk + static IP, delete instance) — immediately, instead of waiting
+  30 minutes.
+- It shares `deploy-uat.yml`'s `uat-deploy` concurrency group with `cancel-in-progress: true`, so a
+  manual `stop` immediately pre-empts a `deploy-uat.yml` run sitting in its idle wait rather than
+  racing it, and vice versa.
+
 ## Checking current state / SSH access
 
 ```bash
