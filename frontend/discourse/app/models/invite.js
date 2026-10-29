@@ -48,7 +48,15 @@ export default class Invite extends EmberObject {
     domain,
     status,
     search,
-    { keywords, aiPersonalization, scheduleSend, sendCount } = {}
+    {
+      keywords,
+      aiPersonalization,
+      scheduleSend,
+      sendCount,
+      shareable,
+      maxUsers,
+      shareableDomain,
+    } = {}
   ) {
     const data = {};
     if (!isNone(domain)) {
@@ -71,6 +79,11 @@ export default class Invite extends EmberObject {
     }
     if (!isNone(sendCount)) {
       data.send_count = sendCount;
+    }
+    data.shareable = shareable;
+    if (shareable) {
+      data.max_users = maxUsers;
+      data.shareable_domain = shareableDomain;
     }
     return ajax("/invites/reinvite-all", { type: "POST", data });
   }
@@ -215,11 +228,20 @@ export default class Invite extends EmberObject {
     }).then(() => this.set("destroyed", true));
   }
 
-  reinvite({ keywords, aiPersonalization, scheduleSend, allowAnyEmail } = {}) {
+  reinvite({
+    keywords,
+    aiPersonalization,
+    scheduleSend,
+    allowAnyEmail,
+    shareable,
+    maxUsers,
+    shareableDomain,
+  } = {}) {
     const data = {
       invite_id: this.id,
       keywords,
       ai_personalization: aiPersonalization,
+      shareable,
     };
     // Omitted params leave the invite's already-persisted values alone
     // (see InvitesController#resend_overrides_from_params) -- only send
@@ -229,6 +251,10 @@ export default class Invite extends EmberObject {
     }
     if (!isNone(allowAnyEmail)) {
       data.allow_any_email = allowAnyEmail;
+    }
+    if (shareable) {
+      data.max_users = maxUsers;
+      data.shareable_domain = shareableDomain;
     }
 
     // No .catch here, deliberately -- this is awaited from

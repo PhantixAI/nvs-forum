@@ -562,6 +562,17 @@ class InvitesController < ApplicationController
       end
     raise Discourse::InvalidParameters.new(:email) if invite.blank?
 
+    if Invite.truthy_param?(params[:shareable])
+      max_users, shareable_domain = shareable_params_or_error
+      return if max_users.nil? # error already rendered
+
+      begin
+        invite.make_shareable!(max_users, domain: shareable_domain)
+      rescue ActiveRecord::RecordInvalid => e
+        return render_json_error(e.record.errors.full_messages.to_sentence)
+      end
+    end
+
     perform_resend(invite, resend_overrides_from_params)
     render json: success_json
   rescue RateLimiter::LimitExceeded => e
@@ -699,6 +710,29 @@ class InvitesController < ApplicationController
           .pluck(:"invites.id", :"invites.updated_at")
           .map(&:first)
       invites_to_resend = Invite.where(id: capped_ids)
+    end
+
+    if Invite.truthy_param?(params[:shareable])
+      max_users, shareable_domain = shareable_params_or_error
+      return if max_users.nil? # error already rendered
+
+      # Materialize ids before mutating -- make_shareable! nils out `email`
+      # (and may set `domain`), and invites_to_resend's own WHERE clause
+      # depends on both (Invite.pending's domain filter, and the
+      # "email IS NOT NULL OR emailed_status != ..." clause above) -- so
+      # re-querying this relation afterward (dispatch_bulk_resend does, via
+      # pluck/find_each) could silently drop rows that just lost their
+      # matching email.
+      ids = invites_to_resend.reorder(nil).pluck(:id)
+      ids.each do |id|
+        Invite.find(id).make_shareable!(max_users, domain: shareable_domain)
+      rescue ActiveRecord::RecordInvalid => e
+        # Rare (e.g. an admin/moderator-granting invite can't take a count
+        # other than 1) -- skip that one row rather than failing the whole
+        # batch, same resilience pattern as Jobs::BulkInvite's per-row rescue.
+        Discourse.warn_exception(e, message: "Could not make invite #{id} shareable")
+      end
+      invites_to_resend = Invite.where(id: ids)
     end
 
     keywords = params[:keywords].presence
@@ -1129,6 +1163,24 @@ class InvitesController < ApplicationController
 
   def skip_email_param
     !SiteSetting.allow_email_invites || params[:skip_email]
+  end
+
+  # Returns [max_users, shareable_domain] after validating, or renders an
+  # error and returns [nil, nil]. Shared by #resend_invite and
+  # #resend_all_invites. shareable_domain is deliberately a different param
+  # name from the pre-existing `domain` (which both of those actions already
+  # use for a different meaning: which domain-bucket of invites to act on).
+  def shareable_params_or_error
+    max_users = params[:max_users].presence&.to_i
+    if max_users.blank? || max_users < 1
+      render_json_error(I18n.t("invite.invalid_max_users"))
+      return nil, nil
+    end
+
+    shareable_domain = params[:shareable_domain].presence if params[:shareable_domain].to_s.match?(
+      Invite::DOMAIN_REGEX,
+    )
+    [max_users, shareable_domain]
   end
 
   # Bulk personalize/schedule_send dispatch for a backgrounded batch of

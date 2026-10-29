@@ -434,6 +434,43 @@ RSpec.describe InviteRedeemer do
       expect(invite.reload).to be_redeemed
     end
 
+    context "with a shareable invite (originally bound to one email)" do
+      let(:invite) { Fabricate(:invite, email: "dept-list@example.com") }
+
+      it "lets multiple different real users redeem it, up to the cap, then rejects a third" do
+        invite.make_shareable!(2)
+
+        alice = Fabricate(:user, email: "alice@example.com")
+        bob = Fabricate(:user, email: "bob@example.com")
+        carol = Fabricate(:user, email: "carol@example.com")
+
+        expect(
+          described_class.new(invite:, email: alice.email, redeeming_user: alice).redeem,
+        ).to eq(alice)
+        expect(described_class.new(invite:, email: bob.email, redeeming_user: bob).redeem).to eq(
+          bob,
+        )
+        expect(invite.reload).to be_redeemed
+
+        expect(
+          described_class.new(invite:, email: carol.email, redeeming_user: carol).redeem,
+        ).to be_nil
+      end
+
+      it "rejects a redeemer outside the configured shareable_domain" do
+        invite.make_shareable!(5, domain: "example.com")
+
+        outsider = Fabricate(:user, email: "someone@other.com")
+        redeemer = described_class.new(invite:, email: outsider.email, redeeming_user: outsider)
+
+        expect { redeemer.redeem }.to raise_error(
+          ActiveRecord::RecordNotSaved,
+          I18n.t("invite.domain_not_allowed"),
+        )
+        expect(invite.reload).not_to be_redeemed
+      end
+    end
+
     context "with email" do
       fab!(:invite) { Fabricate(:invite, email: "foobar@example.com") }
       context "when must_approve_users setting is enabled" do

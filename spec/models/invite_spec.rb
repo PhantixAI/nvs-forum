@@ -1498,6 +1498,45 @@ RSpec.describe Invite do
     end
   end
 
+  describe "#make_shareable!" do
+    fab!(:invite) { Fabricate(:invite, email: "dept-list@invitetest.com") }
+
+    it "unbinds the invite from its email, moving it into description" do
+      invite.make_shareable!(5)
+
+      expect(invite.email).to eq(nil)
+      expect(invite.description).to eq("dept-list@invitetest.com")
+      expect(invite.allow_any_email?).to eq(true)
+      expect(invite.max_redemptions_allowed).to eq(5)
+      expect(invite.is_invite_link?).to eq(true)
+    end
+
+    it "accepts an optional domain restriction" do
+      invite.make_shareable!(5, domain: "invitetest.com")
+
+      expect(invite.domain).to eq("invitetest.com")
+    end
+
+    it "is idempotent -- calling it again on an already-shareable invite keeps the original description" do
+      invite.make_shareable!(5)
+      invite.make_shareable!(10)
+
+      expect(invite.description).to eq("dept-list@invitetest.com")
+      expect(invite.max_redemptions_allowed).to eq(10)
+    end
+
+    it "raises when the count exceeds the inviter's redemption limit" do
+      SiteSetting.invite_link_max_redemptions_limit_users = 3
+      expect { invite.make_shareable!(4) }.to raise_error(ActiveRecord::RecordInvalid)
+    end
+
+    it "raises for an admin-granting invite given a count other than 1" do
+      admin_invite =
+        Invite.generate(Fabricate(:admin), email: "grants-admin@invitetest.com", admin: true)
+      expect { admin_invite.make_shareable!(5) }.to raise_error(ActiveRecord::RecordInvalid)
+    end
+  end
+
   describe "#invalidate!" do
     subject(:invalidate) { invite.invalidate! }
 

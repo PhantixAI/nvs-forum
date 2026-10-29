@@ -2746,6 +2746,10 @@ en:
             allow_any_email_label: "Allow any email"
             send_all_label: "Send all"
             send_count_label: "Number of invites to send"
+            shareable_label: "Shareable link"
+            max_users_label: "Max users"
+            shareable_domain_label: "Restrict to domain"
+            shareable_domain_placeholder: "example.com"
             resend: "Resend"
             send: "Send"
 
