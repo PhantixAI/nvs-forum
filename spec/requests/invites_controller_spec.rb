@@ -2865,6 +2865,43 @@ RSpec.describe InvitesController do
       expect(sent.reload.expires_at).to eq_time(5.days.from_now)
     end
 
+    it "only dispatches the oldest send_count invites in the matched batch, leaving the rest untouched" do
+      freeze_time
+
+      oldest = Fabricate(:invite, invited_by: admin, email: "oldest@nit.ac.in")
+      oldest.update!(expires_at: 5.days.from_now)
+      oldest.update_column(:updated_at, 3.days.ago)
+
+      middle = Fabricate(:invite, invited_by: admin, email: "middle@nit.ac.in")
+      middle.update!(expires_at: 5.days.from_now)
+      middle.update_column(:updated_at, 2.days.ago)
+
+      newest = Fabricate(:invite, invited_by: admin, email: "newest@nit.ac.in")
+      newest.update!(expires_at: 5.days.from_now)
+      newest.update_column(:updated_at, 1.day.ago)
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { ai_personalization: "false", send_count: "2" }
+
+      expect(response.status).to eq(200)
+      expect(oldest.reload.expires_at).to eq_time(30.days.from_now)
+      expect(middle.reload.expires_at).to eq_time(30.days.from_now)
+      expect(newest.reload.expires_at).to eq_time(5.days.from_now)
+    end
+
+    it "errors on a send_count below 1 instead of silently sending the whole batch" do
+      freeze_time
+      invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      invite.update!(expires_at: 5.days.from_now)
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { ai_personalization: "false", send_count: "0" }
+
+      expect(response.status).to eq(422)
+      expect(response.parsed_body["errors"]).to include(I18n.t("invite.invalid_send_count"))
+      expect(invite.reload.expires_at).to eq_time(5.days.from_now)
+    end
+
     it "sends review (draft) invites for the first time when filtered to status: review -- the Pending tab's \"Review\" filter reuses this same action, relabeled \"Send Invites\"" do
       draft =
         Invite.generate(

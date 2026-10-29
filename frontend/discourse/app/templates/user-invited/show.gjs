@@ -276,7 +276,27 @@ export default <template>
                       <div class="d-table__mobile-label">
                         {{i18n "user.invited.extracted_url"}}
                       </div>
-                      {{request.url}}
+                      <span class="extracted-request-url">
+                        <span class="extracted-request-url__text">
+                          {{request.url}}
+                        </span>
+                        <span class="extracted-request-url__actions">
+                          <DCopyButton
+                            @ariaLabel="user.invited.extracted_copy_url"
+                            @copyClass="btn-transparent btn-small"
+                            @icon="copy"
+                            @value={{request.url}}
+                          />
+                          <DButton
+                            class="btn-transparent btn-small"
+                            rel="noopener noreferrer"
+                            target="_blank"
+                            @ariaLabel="user.invited.extracted_open_url"
+                            @href={{request.url}}
+                            @icon="up-right-from-square"
+                          />
+                        </span>
+                      </span>
                     </td>
                     <td class="d-table__cell --detail">
                       <div class="d-table__mobile-label">

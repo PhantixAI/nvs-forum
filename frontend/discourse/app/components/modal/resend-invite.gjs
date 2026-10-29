@@ -7,19 +7,23 @@ import DButton from "discourse/ui-kit/d-button";
 import DModal from "discourse/ui-kit/d-modal";
 import { i18n } from "discourse-i18n";
 
-// Shared by the per-invite "Resend" kebab item, the bulk "Resend Invites"
-// button, and the Draft tab's "Send Selected" action (see
-// user-invited/show.js) -- @model.onResend is the only thing that differs
-// between call sites. @model.drafts additionally surfaces allowAnyEmail,
-// which only matters the first time a draft is sent (an ordinary resend's
-// bound-vs-unbound shape was already decided when the invite was created).
-// scheduleSend is submitted on every resend regardless of which of these
-// modes is active -- its field is hidden for a plain single resend (where
-// changing it rarely makes sense) and for drafts (sending a batch of drafts
-// should always be paced, never a burst, so it isn't a user choice here the
-// way it still is for a plain bulk resend -- see
-// InvitesController#send_drafts). The form's seeded default (true) is what
-// gets submitted either way the field is hidden.
+// Shared by the per-invite "Resend" kebab item and the bulk "Resend
+// Invites"/"Send Invites" button (see user-invited/show.js) --
+// @model.onResend is the only thing that differs between call sites.
+// "Review" drafts (from a CSV upload or "Extract from URL") are dispatched
+// through this exact same bulk path too -- "review" is just another status
+// filter on the Pending tab (see InvitesController#resend_all_invites and
+// user-invited/show.js's inviteReview), not a separate action. @model.drafts
+// additionally surfaces allowAnyEmail, which only matters the first time a
+// draft is sent (an ordinary resend's bound-vs-unbound shape was already
+// decided when the invite was created). scheduleSend is submitted on every
+// resend regardless of which of these modes is active -- its field is
+// hidden for a plain single resend (where changing it rarely makes sense)
+// and for drafts (sending a batch of drafts should always be paced, never a
+// burst, so it isn't a user choice here). The form's seeded default (true)
+// is what gets submitted either way the field is hidden. sendAll/sendCount
+// (bulk only) let the admin cap a dispatch to the oldest N invites in the
+// matched batch instead of all of them.
 export default class ResendInviteModal extends Component {
   #formApi = null;
 
@@ -46,11 +50,21 @@ export default class ResendInviteModal extends Component {
   }
 
   @action
-  async resend({ keywords, aiPersonalization, scheduleSend, allowAnyEmail }) {
+  async resend({
+    keywords,
+    aiPersonalization,
+    scheduleSend,
+    allowAnyEmail,
+    sendAll,
+    sendCount,
+  }) {
     try {
       const payload = { keywords, aiPersonalization, scheduleSend };
       if (this.args.model.drafts) {
         payload.allowAnyEmail = allowAnyEmail;
+      }
+      if (this.args.model.bulk) {
+        payload.sendCount = sendAll ? null : sendCount;
       }
       await this.args.model.onResend(payload);
       this.args.closeModal();
@@ -76,10 +90,12 @@ export default class ResendInviteModal extends Component {
             aiPersonalization=true
             scheduleSend=true
             allowAnyEmail=true
+            sendAll=true
+            sendCount=null
           }}
           @onRegisterApi={{this.registerFormApi}}
           @onSubmit={{this.resend}}
-          as |form|
+          as |form transientData|
         >
           <form.Field
             @format="full"
@@ -118,6 +134,29 @@ export default class ResendInviteModal extends Component {
             >
               <field.Control />
             </form.Field>
+
+            <form.Field
+              @name="sendAll"
+              @title={{i18n "user.invited.resend_invite.modal.send_all_label"}}
+              @type="toggle"
+              as |field|
+            >
+              <field.Control />
+            </form.Field>
+
+            {{#unless transientData.sendAll}}
+              <form.Field
+                @name="sendCount"
+                @title={{i18n
+                  "user.invited.resend_invite.modal.send_count_label"
+                }}
+                @type="input-number"
+                @validation="required|integer"
+                as |field|
+              >
+                <field.Control min="1" />
+              </form.Field>
+            {{/unless}}
           {{/if}}
 
           {{#if @model.drafts}}

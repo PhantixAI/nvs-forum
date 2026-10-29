@@ -679,6 +679,28 @@ class InvitesController < ApplicationController
         show_emails: guardian.can_see_invite_emails?(current_user),
       )
 
+    send_count = params[:send_count].presence&.to_i
+    if send_count.present?
+      return render_json_error(I18n.t("invite.invalid_send_count")) if send_count < 1
+
+      # Oldest-first (FIFO): Invite.pending orders updated_at DESC, so
+      # reverse it here. Plucking id *and* updated_at (not just id) is
+      # required -- this relation carries a DISTINCT (from Invite.pending),
+      # and Postgres rejects SELECT DISTINCT + ORDER BY on a column that
+      # isn't in the select list (the same constraint dispatch_bulk_resend's
+      # own reorder(nil) below works around for its own pluck(:id) calls).
+      # Re-wrapping the capped ids in a fresh Invite.where(id:) relation (no
+      # DISTINCT/custom order) keeps every downstream branch of
+      # dispatch_bulk_resend working unchanged.
+      capped_ids =
+        invites_to_resend
+          .reorder("invites.updated_at ASC, invites.id ASC")
+          .limit(send_count)
+          .pluck(:"invites.id", :"invites.updated_at")
+          .map(&:first)
+      invites_to_resend = Invite.where(id: capped_ids)
+    end
+
     keywords = params[:keywords].presence
     # Two independent choices: ai_personalization decides what content goes
     # out (regenerate vs. reuse exactly what's already there);

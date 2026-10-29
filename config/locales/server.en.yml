@@ -672,6 +672,7 @@ en:
     email_required_to_send: "This invite has no email address to send to"
     ai_personalization_failed: "Couldn't generate a personalized email for this invite right now. Nothing was sent -- try resending again shortly."
     send_now_not_scheduled: "This invite is no longer scheduled -- it may have already been sent."
+    invalid_send_count: "Number of invites to send must be at least 1."
 
   bulk_invite:
     file_should_be_csv: "The uploaded file should be of csv format."
@@ -4382,7 +4383,7 @@ en:
       title: "Bulk Invite Succeeded"
       subject_template: "Bulk user invite processed successfully"
       text_body_template: |
-        Your bulk user invite file was processed, %{sent} invites mailed, %{skipped} skipped and %{warnings} warning(s).
+        Your bulk user invite file was processed, %{sent} invites created and awaiting your review, %{skipped} skipped and %{warnings} warning(s).
 
         Skipped Invites for Emails:
 
@@ -4398,7 +4399,7 @@ en:
       title: "Bulk Invite Failed"
       subject_template: "Bulk user invite processed with errors"
       text_body_template: |
-        Your bulk user invite file was processed, %{sent} invites mailed, %{skipped} skipped, %{warnings} warning(s) and %{failed} error(s).
+        Your bulk user invite file was processed, %{sent} invites created and awaiting your review, %{skipped} skipped, %{warnings} warning(s) and %{failed} error(s).
 
         Skipped Invites for Emails:
 

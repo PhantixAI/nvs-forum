@@ -2659,6 +2659,8 @@ en:
         topic: "Topic"
         sent: "Created/Last Sent"
         extracted_url: "URL"
+        extracted_copy_url: "Copy URL"
+        extracted_open_url: "Open URL"
         extracted_submitted_at: "Submitted"
         extracted_status: "Status"
         keywords: "Keywords"
@@ -2738,6 +2740,8 @@ en:
             ai_personalization_label: "AI Personalization"
             schedule_send_label: "Schedule Send"
             allow_any_email_label: "Allow any email"
+            send_all_label: "Send all"
+            send_count_label: "Number of invites to send"
             resend: "Resend"
             send: "Send"
 
@@ -2865,12 +2869,12 @@ en:
           instructions: |
             <p>Invite a list of users to get your community going quickly. Prepare a <a href="https://en.wikipedia.org/wiki/Comma-separated_values" target="_blank">CSV file</a> containing at least one row per email address of users you want to invite. The following comma separated information can be provided if you want to add people to groups or send them to a specific topic the first time they sign in.</p>
             <pre>john@smith.com,first_group_name;second_group_name,topic_id</pre>
-            <p>Every email address in your uploaded CSV file will be sent an invitation, and you will be able to manage it later.</p>
+            <p>Every email address in your uploaded CSV file will have an invite created for it, held for your review before anything is sent.</p>
             <p>Add a header row to include any of these optional columns, in any order:</p>
             <ul>
               <li><code>locale</code> – the language the invitation and signup flow are shown in for that row.</li>
               <li><code>allow_any_email</code> – set to <code>true</code> to let that invite be redeemed with any email address instead of only the one it was sent to.</li>
-              <li><code>schedule_send</code> – set to <code>false</code> to send that row immediately instead of through the paced, one-at-a-time queue. Defaults to <code>true</code> when left blank.</li>
+              <li><code>schedule_send</code> – kept on the invite for reference; every row is held for review before being sent regardless. Defaults to <code>true</code> when left blank.</li>
               <li><code>ai_personalization</code> – set to <code>false</code> to send that row the plain, non-personalized invitation email. Defaults to <code>true</code> when left blank.</li>
               <li><code>name</code> and <code>keywords</code> – recipient context (e.g. their role or interests) used to personalize the invitation email, when enabled.</li>
             </ul>
@@ -2878,7 +2882,7 @@ en:
             <pre>john@smith.com,first_group_name;second_group_name,topic_id,en,true,true,true,Jane Doe,machine learning;robotics</pre>
 
           progress: "Uploaded %{progress}%…"
-          success: "File uploaded successfully. You will be notified via message when the process is complete."
+          success: "File uploaded successfully. Invites have been created and are waiting for your review before they're sent -- see the Pending tab's Review filter."
           pending_review: "File uploaded successfully. It has been submitted for staff review and won't be processed until approved."
           error: "Sorry, file should be CSV format."
 

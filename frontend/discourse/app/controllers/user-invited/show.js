@@ -416,11 +416,17 @@ export default class UserInvitedShowController extends Controller {
       model: {
         bulk: true,
         confirmMessage: this.#reinviteAllConfirmMessage(domain, status),
-        onResend: async ({ keywords, aiPersonalization, scheduleSend }) => {
+        onResend: async ({
+          keywords,
+          aiPersonalization,
+          scheduleSend,
+          sendCount,
+        }) => {
           await Invite.reinviteAll(domain, status, search, {
             keywords,
             aiPersonalization,
             scheduleSend,
+            sendCount,
           });
           this.set("reinvitedAll", true);
         },
