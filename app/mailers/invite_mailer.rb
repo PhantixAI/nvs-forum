@@ -48,9 +48,24 @@ class InviteMailer < ActionMailer::Base
         topic_excerpt = ""
       end
 
+      # AI-authored custom_message already has the real join link appended
+      # to its own end (see BulkInvitePersonalization::Generator /
+      # ResponseValidator.clean_body) -- it must use the same link-free
+      # ai_personalized_invite_forum_mailer template the non-topic branch
+      # below uses, or custom_invite_mailer's own "click the link below"
+      # footer duplicates that link a second time.
+      template =
+        if ai_active && sanitized_message && invite.custom_subject.present?
+          "ai_personalized_invite_forum_mailer"
+        elsif sanitized_message
+          "custom_invite_mailer"
+        else
+          "invite_mailer"
+        end
+
       build_email(
         to || invite.email,
-        template: sanitized_message ? "custom_invite_mailer" : "invite_mailer",
+        template: template,
         inviter_name: inviter_name,
         site_domain_name: Discourse.current_hostname,
         invite_link: invite.link(with_email_token: !Invite.email_code_enabled?),
@@ -59,6 +74,8 @@ class InviteMailer < ActionMailer::Base
         site_description: SiteSetting.site_description,
         site_title: SiteSetting.title,
         user_custom_message: sanitized_message,
+        subject_override:
+          (template == "ai_personalized_invite_forum_mailer") ? invite.custom_subject : nil,
         invite_id: invite.id,
       )
     else
