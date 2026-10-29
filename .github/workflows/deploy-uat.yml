@@ -85,7 +85,11 @@ jobs:
           # ssh-keyscan is the real readiness check.
           keys=""
           for attempt in $(seq 1 60); do
-            keys="$(ssh-keyscan -H uat.nitians.in 2>/dev/null)"
+            # GitHub Actions runs steps under `bash -e`; ssh-keyscan exits non-zero
+            # (connection refused) on every attempt before sshd is actually up, which
+            # would otherwise kill this whole step on the very first iteration instead
+            # of letting the retry loop run.
+            keys="$(ssh-keyscan -H uat.nitians.in 2>/dev/null || true)"
             if [ -n "$keys" ]; then break; fi
             echo "Waiting for SSH host keys ($attempt/60)..."; sleep 5
           done
@@ -106,7 +110,7 @@ jobs:
           # When the instance was reused (not freshly created this run), its host keys
           # were never scanned above -- do it now if missing.
           if ! ssh-keygen -F uat.nitians.in >/dev/null 2>&1; then
-            ssh-keyscan -H uat.nitians.in >> ~/.ssh/known_hosts 2>/dev/null
+            ssh-keyscan -H uat.nitians.in >> ~/.ssh/known_hosts 2>/dev/null || true
           fi
 
       - name: Refresh discourse_docker clone and mount the persistent disk
