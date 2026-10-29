@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
 module Jobs
+  # Turns a parsed CSV upload into Invite rows, all held at
+  # emailed_status: :review -- same as BulkInviteUrlExtraction::DraftCreator's
+  # drafts from the "Extract from URL" flow. Never sends anything itself; an
+  # admin dispatches the batch later via InvitesController#resend_all_invites
+  # (the "Resend Invites"/"Send Invites" button, filtered to status=review).
   class BulkInvite < ::Jobs::Base
     sidekiq_options retry: false
 
@@ -18,7 +23,6 @@ module Jobs
       @user_fields = {}
       @valid_groups = {}
       @valid_topics = {}
-      @drafting_invite_ids = []
     end
 
     def execute(args)
@@ -33,23 +37,6 @@ module Jobs
       @guardian = Guardian.new(@current_user)
 
       process_invites(@invites)
-
-      # Rows routed straight to :bulk_pending (ai_personalization: false, see
-      # send_invite) are ready for the paced chain as-is -- this always has
-      # something to pick up for those, except when every row failed/was
-      # skipped/was allow_any_email under the limit, in which case it's a
-      # harmless no-op (Jobs::ProcessBulkInviteEmails finds nothing pending).
-      ::Jobs::ProcessBulkInviteEmails.ensure_chain!
-
-      # Rows routed to :drafting (ai_personalization: true) instead need
-      # their content generated first -- Jobs::GenerateInvitePersonalization
-      # flips each to :bulk_pending (and nudges ensure_chain! itself,
-      # incrementally) once its content is ready. A single CSV upload can
-      # contain a mix of both kinds of row, so both enqueues above/below run
-      # independently rather than one replacing the other.
-      if @drafting_invite_ids.present?
-        ::Jobs.enqueue(:generate_invite_personalization, invite_ids: @drafting_invite_ids)
-      end
     ensure
       notify_user
     end
@@ -280,21 +267,19 @@ module Jobs
             allow_any_email: allow_any_email,
           }
 
-          # Routing is decided purely by schedule_send, the same way for both
-          # bound and allow_any_email rows: true queues it for paced sending;
-          # false leaves emailed_status unset, so Invite.generate's own
-          # default (:pending) -- or, for allow_any_email, the immediate
-          # to_override send below -- delivers it right away instead. Either
-          # paced path further splits on ai_personalization: true routes
-          # through :drafting first (Jobs::GenerateInvitePersonalization
-          # generates its content, then flips it to :bulk_pending itself --
-          # see #execute); false has no content to generate, so it goes
-          # straight to :bulk_pending for Jobs::ProcessBulkInviteEmails to
-          # send as-is. Without this split, a personalized row would
-          # silently stop getting personalized at all once
-          # Jobs::ProcessBulkInviteEmails#deliver stopped calling the
-          # generator inline.
-          invite_opts[:emailed_status] = bulk_send_status(ai_personalization) if schedule_send
+          # Every row -- bound or allow_any_email, regardless of its own
+          # schedule_send/ai_personalization columns -- lands at :review,
+          # same as BulkInviteUrlExtraction::DraftCreator's drafts from the
+          # "Extract from URL" flow. Nothing created here is ever sent until
+          # an admin explicitly dispatches it (InvitesController
+          # #resend_all_invites, filtered to status=review): schedule_send
+          # and ai_personalization stay on the row as stored metadata --
+          # ai_personalization is still honored then (see
+          # BulkInvitePersonalization::Generator.personalize's own
+          # invite.ai_personalization? check), but schedule_send no longer
+          # decides anything here, since that dispatch always paces the
+          # whole batch it's given rather than reading each row's choice.
+          invite_opts[:emailed_status] = Invite.emailed_status_types[:review]
 
           # Invite.generate's own reinvites-per-day limiter only runs when email is
           # present, which allow_any_email rows never satisfy (they pass email: nil by
@@ -319,51 +304,18 @@ module Jobs
 
           invite = Invite.generate(@current_user, invite_opts)
 
-          if invite.emailed_status == Invite.emailed_status_types[:drafting]
-            @drafting_invite_ids << invite.id
-          end
-
-          # Invite.generate only auto-sends when email is present, so an unbound invite
-          # needs to be delivered explicitly -- to_override tells InviteMailer where to
-          # send it without binding the invite to that address. Skip this when the invite
-          # is bulk_pending or drafting: Jobs::ProcessBulkInviteEmails (directly, or via
-          # Jobs::GenerateInvitePersonalization first) already re-enqueues delivery for
-          # those on its own throttle, and Jobs::InviteEmail falls back to invite.description
-          # for the recipient in that case -- enqueuing here too would double-send.
-          if allow_any_email && !@skip_email &&
-               !Invite
-                 .emailed_status_types
-                 .values_at(:bulk_pending, :drafting)
-                 .include?(invite.emailed_status)
-            # Invite.generate leaves emailed_status at :not_required for an unbound invite
-            # (it only auto-assigns :pending when email is present), which would make
-            # InvitesController#resend_all_invites treat this as never-emailed and skip it
-            # forever. Set it here, via update_column so it doesn't trip Invite.generate's
-            # own :pending-triggered auto-enqueue (that has no to_override and would
-            # double-send). Jobs::InviteEmail already advances this to :sent once delivered.
-            invite.update_column(:emailed_status, Invite.emailed_status_types[:sending])
-            ::Jobs.enqueue(:invite_email, invite_id: invite.id, to_override: email)
-          end
-
+          # An allow_any_email (unbound) invite at :review is delivered the
+          # same way a bound one is once an admin later dispatches it --
+          # Jobs::InviteEmail already falls back to invite.description for
+          # the recipient address when email is nil, so no immediate
+          # to_override send is needed here the way it was before every row
+          # went through review.
           invite
         end
       rescue => e
         save_log "Error inviting '#{email}' -- #{Rails::Html::FullSanitizer.new.sanitize(e.message)}"
 
         nil
-      end
-    end
-
-    # :drafting needs Jobs::GenerateInvitePersonalization to run before this
-    # row is ready to send; :bulk_pending is already final/ready for
-    # Jobs::ProcessBulkInviteEmails to pick up as-is. Shared by both the
-    # bound-row and allow_any_email-over-limit routing branches above so
-    # they can't drift out of sync on this decision.
-    def bulk_send_status(ai_personalization)
-      if ai_personalization
-        Invite.emailed_status_types[:drafting]
-      else
-        Invite.emailed_status_types[:bulk_pending]
       end
     end
 

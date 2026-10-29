@@ -48,7 +48,7 @@ export default class Invite extends EmberObject {
     domain,
     status,
     search,
-    { keywords, aiPersonalization, scheduleSend } = {}
+    { keywords, aiPersonalization, scheduleSend, sendCount } = {}
   ) {
     const data = {};
     if (!isNone(domain)) {
@@ -68,6 +68,9 @@ export default class Invite extends EmberObject {
     }
     if (!isNone(scheduleSend)) {
       data.schedule_send = scheduleSend;
+    }
+    if (!isNone(sendCount)) {
+      data.send_count = sendCount;
     }
     return ajax("/invites/reinvite-all", { type: "POST", data });
   }

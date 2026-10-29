@@ -59,7 +59,7 @@ RSpec.describe Jobs::BulkInvite do
       expect(post.raw).to include("1 error")
     end
 
-    it "selects topic invitation emails only for rows with a valid topic" do
+    it "associates a topic invitation only for rows with a valid topic" do
       described_class.new.execute(
         current_user_id: admin.id,
         invites: [
@@ -69,20 +69,11 @@ RSpec.describe Jobs::BulkInvite do
         ],
       )
 
-      expect(Jobs::InviteEmail.jobs.map { |job| job["args"].first }).to contain_exactly(
-        hash_including(
-          "invite_id" => Invite.find_by!(email: "topic@discourse.org").id,
-          "invite_to_topic" => true,
-        ),
-        hash_including(
-          "invite_id" => Invite.find_by!(email: "forum@discourse.org").id,
-          "invite_to_topic" => false,
-        ),
-        hash_including(
-          "invite_id" => Invite.find_by!(email: "invalid-topic@discourse.org").id,
-          "invite_to_topic" => false,
-        ),
-      )
+      expect(
+        Invite.find_by!(email: "topic@discourse.org").topic_invites.pluck(:topic_id),
+      ).to contain_exactly(topic.id)
+      expect(Invite.find_by!(email: "forum@discourse.org").topic_invites).to be_empty
+      expect(Invite.find_by!(email: "invalid-topic@discourse.org").topic_invites).to be_empty
     end
 
     it "handles daylight savings time correctly" do
@@ -188,45 +179,36 @@ RSpec.describe Jobs::BulkInvite do
     context "when there are more than 200 invites" do
       let(:bulk_invites) { [] }
 
-      before do
-        # ai_personalization: false keeps this test focused on schedule_send's
-        # own pacing/rate-limiting behavior -- without it, these rows would
-        # default to ai_personalization: true and route through :drafting
-        # instead of straight to :bulk_pending (see the "with a schedule_send
-        # column" context above for that routing's own dedicated coverage).
-        202.times do |i|
-          bulk_invites << { email: "test_#{i}@discourse.org", ai_personalization: "false" }
-        end
-      end
+      before { 202.times { |i| bulk_invites << { email: "test_#{i}@discourse.org" } } }
 
-      it "rate limits email sending" do
+      it "creates every row, all held for review" do
         described_class.new.execute(current_user_id: admin.id, invites: bulk_invites)
 
         invite = Invite.last
         expect(invite.email).to eq("test_201@discourse.org")
-        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
-        expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
+        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:review])
+        expect(Jobs::InviteEmail.jobs).to be_empty
+        expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
+        expect(Jobs::GenerateInvitePersonalization.jobs).to be_empty
       end
     end
 
     context "with a small batch of bound invites" do
-      it "routes them through the paced bulk_pending throttle instead of sending immediately" do
+      it "holds them for review instead of sending immediately" do
         described_class.new.execute(
           current_user_id: admin.id,
-          invites: [
-            { email: "test2@discourse.org", ai_personalization: "false" },
-            { email: "test3@discourse.org", ai_personalization: "false" },
-          ],
+          invites: [{ email: "test2@discourse.org" }, { email: "test3@discourse.org" }],
         )
 
         Invite
           .where(email: %w[test2@discourse.org test3@discourse.org])
           .find_each do |invite|
-            expect(invite.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+            expect(invite.emailed_status).to eq(Invite.emailed_status_types[:review])
           end
 
         expect(Jobs::InviteEmail.jobs).to be_empty
-        expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
+        expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
+        expect(Jobs::GenerateInvitePersonalization.jobs).to be_empty
       end
     end
 
@@ -314,49 +296,32 @@ RSpec.describe Jobs::BulkInvite do
     end
 
     context "with a schedule_send column" do
-      it "routes through drafting when true and ai_personalization is also true (the default)" do
-        described_class.new.execute(
-          current_user_id: admin.id,
-          invites: [{ email: "faculty@college.edu", schedule_send: "true" }],
-        )
-
-        invite = Invite.find_by(email: "faculty@college.edu")
-        expect(invite.schedule_send).to eq(true)
-        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:drafting])
-        expect(Jobs::InviteEmail.jobs).to be_empty
-        expect(Jobs::GenerateInvitePersonalization.jobs.size).to eq(1)
-        expect(
-          Jobs::GenerateInvitePersonalization.jobs.first["args"].first["invite_ids"],
-        ).to contain_exactly(invite.id)
-      end
-
-      it "routes straight through bulk_pending when true but ai_personalization is false" do
+      it "is persisted on the invite but never affects routing -- every row lands at review regardless" do
         described_class.new.execute(
           current_user_id: admin.id,
           invites: [
-            { email: "faculty@college.edu", schedule_send: "true", ai_personalization: "false" },
+            { email: "a@college.edu", schedule_send: "true" },
+            { email: "b@college.edu", schedule_send: "false" },
+            { email: "c@college.edu", schedule_send: "true", ai_personalization: "false" },
           ],
         )
 
-        invite = Invite.find_by(email: "faculty@college.edu")
-        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+        expect(Invite.find_by(email: "a@college.edu").schedule_send).to eq(true)
+        expect(Invite.find_by(email: "b@college.edu").schedule_send).to eq(false)
+        expect(Invite.find_by(email: "c@college.edu").schedule_send).to eq(true)
+
+        %w[a@college.edu b@college.edu c@college.edu].each do |email|
+          expect(Invite.find_by(email: email).emailed_status).to eq(
+            Invite.emailed_status_types[:review],
+          )
+        end
+
         expect(Jobs::InviteEmail.jobs).to be_empty
         expect(Jobs::GenerateInvitePersonalization.jobs).to be_empty
+        expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
       end
 
-      it "sends immediately when false, regardless of ai_personalization" do
-        described_class.new.execute(
-          current_user_id: admin.id,
-          invites: [{ email: "faculty2@college.edu", schedule_send: "false" }],
-        )
-
-        invite = Invite.find_by(email: "faculty2@college.edu")
-        expect(invite.schedule_send).to eq(false)
-        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:sending])
-        expect(Jobs::InviteEmail.jobs.size).to eq(1)
-      end
-
-      it "defaults to true (paced) when the column is absent, same as ai_personalization" do
+      it "defaults to true when the column is absent" do
         described_class.new.execute(
           current_user_id: admin.id,
           invites: [{ email: "student@college.edu" }],
@@ -364,7 +329,7 @@ RSpec.describe Jobs::BulkInvite do
 
         invite = Invite.find_by(email: "student@college.edu")
         expect(invite.schedule_send).to eq(true)
-        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:drafting])
+        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:review])
       end
 
       it "only treats an explicit falsy spelling as false, failing closed to paced" do
@@ -392,32 +357,7 @@ RSpec.describe Jobs::BulkInvite do
         expect(post.raw).to include("0 warning")
       end
 
-      it "combines with ai_personalization to decide the final routing" do
-        described_class.new.execute(
-          current_user_id: admin.id,
-          invites: [
-            { email: "d@college.edu", schedule_send: "false", ai_personalization: "false" },
-            { email: "e@college.edu", schedule_send: "true", ai_personalization: "false" },
-            { email: "f@college.edu", schedule_send: "true", ai_personalization: "true" },
-          ],
-        )
-
-        # schedule_send: false always sends immediately, regardless of ai_personalization --
-        # personalization only applies in the paced paths.
-        expect(Invite.find_by(email: "d@college.edu").emailed_status).to eq(
-          Invite.emailed_status_types[:sending],
-        )
-        # Paced, but nothing to generate -- ready for Jobs::ProcessBulkInviteEmails as-is.
-        expect(Invite.find_by(email: "e@college.edu").emailed_status).to eq(
-          Invite.emailed_status_types[:bulk_pending],
-        )
-        # Paced and needs content generated first.
-        expect(Invite.find_by(email: "f@college.edu").emailed_status).to eq(
-          Invite.emailed_status_types[:drafting],
-        )
-      end
-
-      it "does not affect allow_any_email rows, which keep their own immediate-send branch" do
+      it "does not exempt allow_any_email rows -- they land at review too, regardless of schedule_send" do
         described_class.new.execute(
           current_user_id: admin.id,
           invites: [
@@ -425,11 +365,12 @@ RSpec.describe Jobs::BulkInvite do
           ],
         )
 
-        expect(Invite.last.emailed_status).not_to eq(Invite.emailed_status_types[:bulk_pending])
+        expect(Invite.last.emailed_status).to eq(Invite.emailed_status_types[:review])
+        expect(Jobs::InviteEmail.jobs).to be_empty
       end
     end
 
-    it "shares one throttle chain between overlapping uploads" do
+    it "never enqueues the paced send chain -- every row waits at review for an explicit dispatch" do
       2.times do |i|
         described_class.new.execute(
           current_user_id: admin.id,
@@ -437,7 +378,7 @@ RSpec.describe Jobs::BulkInvite do
         )
       end
 
-      expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
+      expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
     end
 
     it "does not send an invite email when skip_email_bulk_invites is true" do
@@ -481,7 +422,7 @@ RSpec.describe Jobs::BulkInvite do
           invites: [{ email: "student@college.edu", allow_any_email: "true" }],
         )
 
-        expect(Invite.last.emailed_status).not_to eq(Invite.emailed_status_types[:not_required])
+        expect(Invite.last.emailed_status).to eq(Invite.emailed_status_types[:review])
       end
 
       it "keeps the invite bound when absent or false" do
@@ -516,28 +457,16 @@ RSpec.describe Jobs::BulkInvite do
           .find_each { |invite| expect(invite.email).to be_present }
       end
 
-      it "delivers the invite to the CSV address" do
+      it "does not deliver anything itself -- the invite is held at review until an explicit dispatch" do
         Jobs.run_immediately!
-        mailer = Mail::Message.new(to: "student@college.edu")
-        Email::Sender.any_instance.expects(:send)
-        InviteMailer
-          .expects(:send_invite)
-          .with(anything, has_entries(to: "student@college.edu"))
-          .returns(mailer)
+        InviteMailer.expects(:send_invite).never
 
         described_class.new.execute(
           current_user_id: admin.id,
           invites: [{ email: "student@college.edu", allow_any_email: "true" }],
         )
-      end
 
-      it "does not route a small allow_any_email batch through bulk_pending" do
-        described_class.new.execute(
-          current_user_id: admin.id,
-          invites: [{ email: "student@college.edu", allow_any_email: "true" }],
-        )
-
-        expect(Invite.last.emailed_status).not_to eq(Invite.emailed_status_types[:bulk_pending])
+        expect(Invite.last.emailed_status).to eq(Invite.emailed_status_types[:review])
       end
 
       it "does not enqueue delivery when skip_email_bulk_invites is true" do
@@ -632,65 +561,31 @@ RSpec.describe Jobs::BulkInvite do
         expect(post.raw).to include("1 error(s)")
       end
 
-      it "does not immediately enqueue delivery for a bulk_pending batch" do
+      it "holds every row of an allow_any_email batch at review, regardless of its own schedule_send/ai_personalization" do
         bulk_invites =
           3.times.map do |i|
             {
               email: "student#{i}@college.edu",
               allow_any_email: "true",
-              ai_personalization: "false",
+              schedule_send: "true",
+              ai_personalization: "true",
             }
           end
 
         described_class.new.execute(current_user_id: admin.id, invites: bulk_invites)
 
-        invite = Invite.last
-        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+        Invite
+          .where(description: %w[student0@college.edu student1@college.edu student2@college.edu])
+          .find_each do |invite|
+            expect(invite.emailed_status).to eq(Invite.emailed_status_types[:review])
+          end
+
         expect(Jobs::InviteEmail.jobs).to be_empty
-        expect(Jobs::ProcessBulkInviteEmails.jobs.size).to eq(1)
+        expect(Jobs::ProcessBulkInviteEmails.jobs).to be_empty
         expect(Jobs::GenerateInvitePersonalization.jobs).to be_empty
       end
 
-      it "routes a small allow_any_email batch through drafting too, when ai_personalization is true (the default) -- without this, a personalized allow_any_email batch would silently never get personalized at all, since Jobs::ProcessBulkInviteEmails no longer calls the generator itself" do
-        bulk_invites =
-          3.times.map { |i| { email: "student#{i}@college.edu", allow_any_email: "true" } }
-
-        described_class.new.execute(current_user_id: admin.id, invites: bulk_invites)
-
-        invite = Invite.last
-        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:drafting])
-        expect(Jobs::InviteEmail.jobs).to be_empty
-        expect(Jobs::GenerateInvitePersonalization.jobs.size).to eq(1)
-        expect(
-          Jobs::GenerateInvitePersonalization.jobs.first["args"].first["invite_ids"].size,
-        ).to eq(3)
-      end
-
-      # Regression test for a real production incident: a small (well under
-      # 100 rows) allow_any_email CSV with schedule_send/ai_personalization
-      # explicitly set to true on every row was still sent immediately,
-      # unpaced and unpersonalized -- allow_any_email rows used to only honor
-      # those per-row flags once the batch exceeded a since-removed 200-row
-      # threshold (Invite::BULK_INVITE_EMAIL_LIMIT).
-      it "honors explicit schedule_send/ai_personalization on an allow_any_email row regardless of batch size" do
-        bulk_invites = [
-          {
-            email: "student@college.edu",
-            allow_any_email: "true",
-            schedule_send: "true",
-            ai_personalization: "true",
-          },
-        ]
-
-        described_class.new.execute(current_user_id: admin.id, invites: bulk_invites)
-
-        invite = Invite.last
-        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:drafting])
-        expect(Jobs::InviteEmail.jobs).to be_empty
-        expect(Jobs::GenerateInvitePersonalization.jobs.size).to eq(1)
-      end
-
-      it "still sends an allow_any_email row immediately when schedule_send is explicitly false, regardless of batch size" do
+      it "does not send an allow_any_email row immediately even when schedule_send is explicitly false" do
         bulk_invites = [
           { email: "student@college.edu", allow_any_email: "true", schedule_send: "false" },
         ]
@@ -699,9 +594,8 @@ RSpec.describe Jobs::BulkInvite do
 
         invite = Invite.last
         expect(invite.schedule_send).to eq(false)
-        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:sending])
-        expect(Jobs::InviteEmail.jobs.size).to eq(1)
-        expect(Jobs::GenerateInvitePersonalization.jobs).to be_empty
+        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:review])
+        expect(Jobs::InviteEmail.jobs).to be_empty
       end
     end
 
@@ -724,7 +618,7 @@ RSpec.describe Jobs::BulkInvite do
         expect(invite.allow_any_email).to eq(false)
 
         post = Post.last
-        expect(post.raw).to include("1 invites mailed")
+        expect(post.raw).to include("1 invites created and awaiting your review")
         expect(post.raw).not_to include("error")
       end
     end
