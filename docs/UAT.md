@@ -120,7 +120,11 @@ If the snapshot, key pair, or static IP are ever lost and need to be redone:
    - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — a dedicated IAM user scoped to the Lightsail
      actions the workflow needs (`CreateInstancesFromSnapshot`, `DeleteInstance`, `GetInstance`,
      `GetInstanceState`, `AttachStaticIp`, `DetachStaticIp`, `GetInstanceSnapshot`, `CreateDisk`,
-     `GetDisk`, `AttachDisk`, `DetachDisk`). Lightsail's IAM support for resource-ARN scoping is
+     `GetDisk`, `AttachDisk`, `DetachDisk`, `OpenInstancePublicPorts`, `PutInstancePublicPorts`,
+     `GetInstancePortStates`, `StopInstance`). The last four are needed for opening port 443 on a
+     freshly-created instance and for stopping the instance before `DetachDisk` (AWS requires the
+     instance to be stopped before its disk can be detached). Lightsail's IAM support for
+     resource-ARN scoping is
      limited, so this will likely be action-scoped rather than restricted to just this one
      instance/disk — an accepted tradeoff.
    - `UAT_SSH_PRIVATE_KEY` — from step 1.
