@@ -326,6 +326,9 @@ class UserHistory < ActiveRecord::Base
       admin_onboarding_dismissed
       removed_avatar
       create_group
+      add_access_control_list_owner
+      remove_access_control_list_owner
+      assume_access_control_ownership
     ]
   end
 
