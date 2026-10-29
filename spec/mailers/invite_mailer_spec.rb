@@ -373,6 +373,61 @@ RSpec.describe InviteMailer do
           )
         end
       end
+
+      context "with an AI-personalized custom message" do
+        let(:invite) { Invite.generate(topic.user, email: "name@example.com", topic_id: topic.id) }
+
+        before do
+          SiteSetting.bulk_invite_ai_personalization_enabled = true
+          # Same real-pipeline shape as the non-topic AI context above: the
+          # real link is already embedded in custom_message by
+          # ResponseValidator before the mailer ever sees it.
+          invite.update!(
+            custom_message:
+              "A few of us from your college network hang out here, worth a look? #{invite.link}",
+            custom_subject: "Quick hello from campus",
+          )
+        end
+
+        let(:ai_invite_mail) { InviteMailer.send_invite(invite, invite_to_topic: true) }
+
+        it "uses custom_subject verbatim as the subject, not the topic-derived one" do
+          expect(ai_invite_mail.subject).to eq("Quick hello from campus")
+        end
+
+        it "renders custom_message as the whole body, with no topic-quote wrapper" do
+          body = ai_invite_mail.body.encoded
+          expect(body).to match("A few of us from your college network hang out here")
+          expect(body).not_to match("With this note")
+          expect(body).not_to match(topic.title)
+        end
+
+        it "renders the real invite link exactly once, not duplicated by a template footer" do
+          body = ai_invite_mail.body.encoded
+          link_count = body.scan("#{Discourse.base_url}/invites/#{invite.invite_key}").count
+          expect(link_count).to eq(1)
+        end
+
+        it "falls back to the wrapped topic-invite template when ai_personalization is disabled on this row" do
+          invite.update!(ai_personalization: false)
+
+          mail = InviteMailer.send_invite(invite, invite_to_topic: true)
+
+          expect(mail.subject).not_to eq("Quick hello from campus")
+          expect(mail.body.encoded).to match("With this note")
+          expect(mail.body.encoded).to match("A few of us from your college network hang out here")
+        end
+
+        it "falls back to the wrapped topic-invite template, rather than the subject-less AI one, when custom_subject is blank" do
+          invite.update!(custom_subject: nil)
+
+          mail = InviteMailer.send_invite(invite, invite_to_topic: true)
+
+          expect(mail.subject).not_to include("translation missing")
+          expect(mail.subject).not_to eq("Quick hello from campus")
+          expect(mail.body.encoded).to match("With this note")
+        end
+      end
     end
   end
 end
