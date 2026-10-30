@@ -119,7 +119,6 @@ https://example.edu/alumni"
                       "user.invited.bulk_invite.url_extraction.rules_label"
                     }}
                     @type="textarea"
-                    @validation="required"
                     as |field|
                   >
                     <field.Control @height={{120}} />
@@ -184,9 +183,23 @@ https://example.edu/alumni"
                 />
               {{else}}
                 <DButton
+                  class="btn-default"
+                  @action={{extractor.saveDraft}}
+                  @disabled={{or extractor.extracting extractor.savingDraft}}
+                  @translatedLabel={{if
+                    extractor.savingDraft
+                    (i18n
+                      "user.invited.bulk_invite.url_extraction.saving_draft"
+                    )
+                    (i18n
+                      "user.invited.bulk_invite.url_extraction.save_draft_button"
+                    )
+                  }}
+                />
+                <DButton
                   class="btn-primary"
                   @action={{extractor.submit}}
-                  @disabled={{extractor.extracting}}
+                  @disabled={{or extractor.extracting extractor.savingDraft}}
                   @translatedLabel={{if
                     extractor.extracting
                     (i18n "user.invited.bulk_invite.url_extraction.extracting")

@@ -562,6 +562,17 @@ class InvitesController < ApplicationController
       end
     raise Discourse::InvalidParameters.new(:email) if invite.blank?
 
+    if Invite.truthy_param?(params[:shareable])
+      max_users, shareable_domain = shareable_params_or_error
+      return if max_users.nil? # error already rendered
+
+      begin
+        invite.make_shareable!(max_users, domain: shareable_domain)
+      rescue ActiveRecord::RecordInvalid => e
+        return render_json_error(e.record.errors.full_messages.to_sentence)
+      end
+    end
+
     perform_resend(invite, resend_overrides_from_params)
     render json: success_json
   rescue RateLimiter::LimitExceeded => e
@@ -699,6 +710,29 @@ class InvitesController < ApplicationController
           .pluck(:"invites.id", :"invites.updated_at")
           .map(&:first)
       invites_to_resend = Invite.where(id: capped_ids)
+    end
+
+    if Invite.truthy_param?(params[:shareable])
+      max_users, shareable_domain = shareable_params_or_error
+      return if max_users.nil? # error already rendered
+
+      # Materialize ids before mutating -- make_shareable! nils out `email`
+      # (and may set `domain`), and invites_to_resend's own WHERE clause
+      # depends on both (Invite.pending's domain filter, and the
+      # "email IS NOT NULL OR emailed_status != ..." clause above) -- so
+      # re-querying this relation afterward (dispatch_bulk_resend does, via
+      # pluck/find_each) could silently drop rows that just lost their
+      # matching email.
+      ids = invites_to_resend.reorder(nil).pluck(:id)
+      ids.each do |id|
+        Invite.find(id).make_shareable!(max_users, domain: shareable_domain)
+      rescue ActiveRecord::RecordInvalid => e
+        # Rare (e.g. an admin/moderator-granting invite can't take a count
+        # other than 1) -- skip that one row rather than failing the whole
+        # batch, same resilience pattern as Jobs::BulkInvite's per-row rescue.
+        Discourse.warn_exception(e, message: "Could not make invite #{id} shareable")
+      end
+      invites_to_resend = Invite.where(id: ids)
     end
 
     keywords = params[:keywords].presence
@@ -871,13 +905,20 @@ class InvitesController < ApplicationController
   # itself: the admin reviews/edits each request's own extracted CSV
   # client-side (one CSV per URL), which then gets submitted as draft
   # invites through #create_drafts.
+  #
+  # draft: true saves the urls at :draft status with no rules required yet
+  # (see UrlExtractionRequest's :draft status) -- lets an admin queue up
+  # URLs now and come back to write rules later via UrlExtractionRetryModal,
+  # which already resubmits a request's url+edited rules through this same
+  # action to actually run it.
   def extract_from_url
     guardian.ensure_can_bulk_invite_to_forum!
 
     urls = Array(params[:urls]).map { |url| url.to_s.strip }.reject(&:blank?).uniq
     rules = params[:rules].to_s.strip
+    draft = Invite.truthy_param?(params[:draft])
 
-    if urls.blank? || rules.blank?
+    if urls.blank? || (rules.blank? && !draft)
       return(
         render json:
                  failed_json.merge(errors: [I18n.t("bulk_invite.url_extraction.missing_fields")]),
@@ -887,7 +928,9 @@ class InvitesController < ApplicationController
 
     # Consumed up front, one slot per URL, before creating anything -- a
     # submission that would exceed the hourly limit creates none of its
-    # requests, rather than queuing part of the batch.
+    # requests, rather than queuing part of the batch. Applies to drafts
+    # too -- the site setting governs requests submitted, not pages
+    # actually scraped.
     limiter =
       RateLimiter.new(
         current_user,
@@ -903,7 +946,9 @@ class InvitesController < ApplicationController
       raise
     end
 
-    PluginStore.set("bulk_invite_url_extraction", "last_rules", rules)
+    # Skipped when blank (a draft with no rules yet) -- would otherwise
+    # clobber the previously remembered rules this prefills next time.
+    PluginStore.set("bulk_invite_url_extraction", "last_rules", rules) if rules.present?
 
     requests =
       urls.map do |url|
@@ -912,9 +957,18 @@ class InvitesController < ApplicationController
             created_by: current_user,
             url: url,
             rules: rules,
-            status: UrlExtractionRequest.statuses[:queued],
+            status:
+              (
+                if draft
+                  UrlExtractionRequest.statuses[:draft]
+                else
+                  UrlExtractionRequest.statuses[:queued]
+                end
+              ),
           )
-        Jobs.enqueue(:process_url_extraction_request, request_id: request.id)
+        # A draft has no rules yet -- nothing to extract until the admin
+        # writes them and resubmits, so this never gets enqueued for one.
+        Jobs.enqueue(:process_url_extraction_request, request_id: request.id) unless draft
         request
       end
 
@@ -1129,6 +1183,24 @@ class InvitesController < ApplicationController
 
   def skip_email_param
     !SiteSetting.allow_email_invites || params[:skip_email]
+  end
+
+  # Returns [max_users, shareable_domain] after validating, or renders an
+  # error and returns [nil, nil]. Shared by #resend_invite and
+  # #resend_all_invites. shareable_domain is deliberately a different param
+  # name from the pre-existing `domain` (which both of those actions already
+  # use for a different meaning: which domain-bucket of invites to act on).
+  def shareable_params_or_error
+    max_users = params[:max_users].presence&.to_i
+    if max_users.blank? || max_users < 1
+      render_json_error(I18n.t("invite.invalid_max_users"))
+      return nil, nil
+    end
+
+    shareable_domain = params[:shareable_domain].presence if params[:shareable_domain].to_s.match?(
+      Invite::DOMAIN_REGEX,
+    )
+    [max_users, shareable_domain]
   end
 
   # Bulk personalize/schedule_send dispatch for a backgrounded batch of

@@ -673,6 +673,7 @@ en:
     ai_personalization_failed: "Couldn't generate a personalized email for this invite right now. Nothing was sent -- try resending again shortly."
     send_now_not_scheduled: "This invite is no longer scheduled -- it may have already been sent."
     invalid_send_count: "Number of invites to send must be at least 1."
+    invalid_max_users: "Number of users allowed to join must be at least 1."
 
   bulk_invite:
     file_should_be_csv: "The uploaded file should be of csv format."

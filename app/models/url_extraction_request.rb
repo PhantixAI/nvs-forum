@@ -11,7 +11,7 @@ class UrlExtractionRequest < ActiveRecord::Base
   belongs_to :created_by, class_name: "User"
 
   validates :url, presence: true
-  validates :rules, presence: true
+  validates :rules, presence: true, unless: -> { status == self.class.statuses[:draft] }
 
   # Matches Jobs::ProcessUrlExtractionRequest::CHANNEL -- shared here so
   # both that job and InvitesController#create_drafts (which flips a
@@ -24,7 +24,14 @@ class UrlExtractionRequest < ActiveRecord::Base
     # Extracted tab can show at a glance which requests still need review
     # vs. which have already been acted on, even if every row in that CSV
     # ended up skipped as a duplicate.
-    @statuses ||= Enum.new(queued: 0, processing: 1, ready: 2, failed: 3, closed: 4)
+    #
+    # :draft -- saved by InvitesController#extract_from_url with no rules
+    # yet, so an admin can come back and write them later (see
+    # UrlExtractionRetryModal, reused unchanged for this). Never enqueued
+    # into Jobs::ProcessUrlExtractionRequest -- see that enqueue call's own
+    # comment -- and excluded from .remove_old below, since it has no
+    # csv_text (nothing extracted yet) to age out.
+    @statuses ||= Enum.new(queued: 0, processing: 1, ready: 2, failed: 3, closed: 4, draft: 5)
   end
 
   def broadcast_progress!
@@ -41,7 +48,12 @@ class UrlExtractionRequest < ActiveRecord::Base
   # window (see Jobs::CleanUpUrlExtractionRequests).
   DESTROY_CREATED_BEFORE = 2.days
 
+  # :draft is exempt -- it's deliberately long-lived (an admin may take
+  # well over 2 days to get around to writing its rules) and carries no
+  # PII of its own: nothing has been extracted from it yet.
   def self.remove_old
-    where("created_at < ?", DESTROY_CREATED_BEFORE.ago).delete_all
+    where("created_at < ?", DESTROY_CREATED_BEFORE.ago)
+      .where.not(status: statuses[:draft])
+      .delete_all
   end
 end

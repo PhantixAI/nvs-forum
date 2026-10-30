@@ -23,7 +23,10 @@ import { i18n } from "discourse-i18n";
 // burst, so it isn't a user choice here). The form's seeded default (true)
 // is what gets submitted either way the field is hidden. sendAll/sendCount
 // (bulk only) let the admin cap a dispatch to the oldest N invites in the
-// matched batch instead of all of them.
+// matched batch instead of all of them. shareable/maxUsers/shareableDomain
+// (both single and bulk) convert the invite(s) being sent into a
+// multi-redemption link -- see Invite#make_shareable! -- for a group
+// mailing-list address that forwards to many real recipients.
 export default class ResendInviteModal extends Component {
   #formApi = null;
 
@@ -57,6 +60,9 @@ export default class ResendInviteModal extends Component {
     allowAnyEmail,
     sendAll,
     sendCount,
+    shareable,
+    maxUsers,
+    shareableDomain,
   }) {
     try {
       const payload = { keywords, aiPersonalization, scheduleSend };
@@ -65,6 +71,11 @@ export default class ResendInviteModal extends Component {
       }
       if (this.args.model.bulk) {
         payload.sendCount = sendAll ? null : sendCount;
+      }
+      payload.shareable = shareable;
+      if (shareable) {
+        payload.maxUsers = maxUsers;
+        payload.shareableDomain = shareableDomain;
       }
       await this.args.model.onResend(payload);
       this.args.closeModal();
@@ -92,6 +103,9 @@ export default class ResendInviteModal extends Component {
             allowAnyEmail=true
             sendAll=true
             sendCount=null
+            shareable=false
+            maxUsers=null
+            shareableDomain=""
           }}
           @onRegisterApi={{this.registerFormApi}}
           @onSubmit={{this.resend}}
@@ -122,6 +136,42 @@ export default class ResendInviteModal extends Component {
           >
             <field.Control />
           </form.Field>
+
+          <form.Field
+            @name="shareable"
+            @title={{i18n "user.invited.resend_invite.modal.shareable_label"}}
+            @type="toggle"
+            as |field|
+          >
+            <field.Control />
+          </form.Field>
+
+          {{#if transientData.shareable}}
+            <form.Field
+              @name="maxUsers"
+              @title={{i18n "user.invited.resend_invite.modal.max_users_label"}}
+              @type="input-number"
+              @validation="required|integer"
+              as |field|
+            >
+              <field.Control min="1" />
+            </form.Field>
+
+            <form.Field
+              @name="shareableDomain"
+              @title={{i18n
+                "user.invited.resend_invite.modal.shareable_domain_label"
+              }}
+              @type="input"
+              as |field|
+            >
+              <field.Control
+                placeholder={{i18n
+                  "user.invited.resend_invite.modal.shareable_domain_placeholder"
+                }}
+              />
+            </form.Field>
+          {{/if}}
 
           {{#if @model.bulk}}
             <form.Field

@@ -2563,6 +2563,64 @@ RSpec.describe InvitesController do
         Jobs::InviteEmail.new.execute(invite_id: draft.id)
         expect(draft.reload.emailed_status).to eq(Invite.emailed_status_types[:sent])
       end
+
+      it "converts the invite into a shareable multi-redemption link when shareable is true" do
+        post "/invites/reinvite.json",
+             params: {
+               email: invite.email,
+               shareable: "true",
+               max_users: "5",
+               shareable_domain: "invitetest.com",
+             }
+
+        expect(response.status).to eq(200)
+        invite.reload
+        expect(invite.email).to eq(nil)
+        expect(invite.allow_any_email).to eq(true)
+        expect(invite.max_redemptions_allowed).to eq(5)
+        expect(invite.domain).to eq("invitetest.com")
+      end
+
+      it "leaves the invite's binding untouched when shareable is not given" do
+        post "/invites/reinvite.json", params: { email: invite.email }
+
+        expect(response.status).to eq(200)
+        invite.reload
+        expect(invite.email).to be_present
+        expect(invite.max_redemptions_allowed).to eq(1)
+      end
+
+      it "errors when shareable is true but max_users is missing" do
+        post "/invites/reinvite.json", params: { email: invite.email, shareable: "true" }
+
+        expect(response.status).to eq(422)
+        expect(response.parsed_body["errors"]).to include(I18n.t("invite.invalid_max_users"))
+      end
+
+      it "errors when shareable is true but max_users is less than 1" do
+        post "/invites/reinvite.json",
+             params: {
+               email: invite.email,
+               shareable: "true",
+               max_users: "0",
+             }
+
+        expect(response.status).to eq(422)
+        expect(response.parsed_body["errors"]).to include(I18n.t("invite.invalid_max_users"))
+      end
+
+      it "errors when the requested max_users exceeds the inviter's redemption limit" do
+        SiteSetting.invite_link_max_redemptions_limit_users = 3
+
+        post "/invites/reinvite.json",
+             params: {
+               email: invite.email,
+               shareable: "true",
+               max_users: "4",
+             }
+
+        expect(response.status).to eq(422)
+      end
     end
   end
 
@@ -2899,6 +2957,79 @@ RSpec.describe InvitesController do
 
       expect(response.status).to eq(422)
       expect(response.parsed_body["errors"]).to include(I18n.t("invite.invalid_send_count"))
+      expect(invite.reload.expires_at).to eq_time(5.days.from_now)
+    end
+
+    it "converts every matched invite into a shareable multi-redemption link and still dispatches them -- regression guard for the id-materialization fix (shareable mutates email, which the domain/email-based WHERE clause this relation was built from would otherwise re-evaluate on re-query)" do
+      freeze_time
+
+      nit_invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      nit_invite.update!(expires_at: 5.days.from_now)
+      iitb_invite = Fabricate(:invite, invited_by: admin, email: "student@iitb.ac.in")
+      iitb_invite.update!(expires_at: 5.days.from_now)
+
+      sign_in(admin)
+      post "/invites/reinvite-all",
+           params: {
+             domain: "nit.ac.in",
+             ai_personalization: "false",
+             shareable: "true",
+             max_users: "10",
+             shareable_domain: "nit.ac.in",
+           }
+
+      expect(response.status).to eq(200)
+      nit_invite.reload
+      expect(nit_invite.email).to eq(nil)
+      expect(nit_invite.description).to eq("student@nit.ac.in")
+      expect(nit_invite.allow_any_email).to eq(true)
+      expect(nit_invite.max_redemptions_allowed).to eq(10)
+      expect(nit_invite.domain).to eq("nit.ac.in")
+      expect(nit_invite.expires_at).to eq_time(30.days.from_now)
+
+      # Outside the matched domain -- untouched.
+      iitb_invite.reload
+      expect(iitb_invite.email).to eq("student@iitb.ac.in")
+      expect(iitb_invite.expires_at).to eq_time(5.days.from_now)
+    end
+
+    it "skips an admin-granting invite in the batch (can't take a non-1 count) without failing the whole request" do
+      freeze_time
+
+      ordinary_invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      ordinary_invite.update!(expires_at: 5.days.from_now)
+      admin_invite =
+        Invite.generate(admin, email: "will-be-admin@nit.ac.in", admin: true, skip_email: true)
+      admin_invite.update!(expires_at: 5.days.from_now)
+
+      sign_in(admin)
+      post "/invites/reinvite-all",
+           params: {
+             domain: "nit.ac.in",
+             ai_personalization: "false",
+             shareable: "true",
+             max_users: "10",
+           }
+
+      expect(response.status).to eq(200)
+      expect(ordinary_invite.reload.email).to eq(nil)
+      expect(ordinary_invite.max_redemptions_allowed).to eq(10)
+      # Left exactly as it was -- make_shareable! raised for this row and was rescued.
+      expect(admin_invite.reload.email).to eq("will-be-admin@nit.ac.in")
+      expect(admin_invite.max_redemptions_allowed).to eq(1)
+    end
+
+    it "errors when shareable is true but max_users is missing, without dispatching anything" do
+      freeze_time
+      invite = Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      invite.update!(expires_at: 5.days.from_now)
+
+      sign_in(admin)
+      post "/invites/reinvite-all", params: { ai_personalization: "false", shareable: "true" }
+
+      expect(response.status).to eq(422)
+      expect(response.parsed_body["errors"]).to include(I18n.t("invite.invalid_max_users"))
+      expect(invite.reload.email).to be_present
       expect(invite.reload.expires_at).to eq_time(5.days.from_now)
     end
 
@@ -3703,6 +3834,66 @@ RSpec.describe InvitesController do
           expect(e).to be_a(RateLimiter::LimitExceeded)
           expect(message).to include("action=extract_from_url")
         end
+      end
+
+      it "saves a draft without requiring rules, and never enqueues extraction for it" do
+        sign_in(admin)
+
+        post "/invites/extract-from-url.json",
+             params: {
+               urls: ["https://example.com"],
+               draft: "true",
+             }
+
+        expect(response.status).to eq(201)
+        request = UrlExtractionRequest.last
+        expect(request.url).to eq("https://example.com")
+        expect(request.rules).to eq("")
+        expect(request.status).to eq(UrlExtractionRequest.statuses[:draft])
+        expect(response.parsed_body["requests"].first["status"]).to eq("draft")
+        expect(Jobs::ProcessUrlExtractionRequest.jobs).to be_empty
+      end
+
+      it "still requires at least one url when saving a draft" do
+        sign_in(admin)
+
+        post "/invites/extract-from-url.json", params: { urls: [], draft: "true" }
+
+        expect(response.status).to eq(422)
+        expect(UrlExtractionRequest.count).to eq(0)
+      end
+
+      it "saves whatever rules are given with a draft, without requiring them" do
+        sign_in(admin)
+
+        post "/invites/extract-from-url.json",
+             params: {
+               urls: ["https://example.com"],
+               rules: "Append RollNo to @example.edu",
+               draft: "true",
+             }
+
+        expect(response.status).to eq(201)
+        expect(UrlExtractionRequest.last.rules).to eq("Append RollNo to @example.edu")
+      end
+
+      it "does not clobber the remembered last_rules prefill with a draft's blank rules" do
+        sign_in(admin)
+
+        post "/invites/extract-from-url.json",
+             params: {
+               urls: ["https://example.com"],
+               rules: "Append RollNo to @example.edu",
+             }
+        post "/invites/extract-from-url.json",
+             params: {
+               urls: ["https://example.com/2"],
+               draft: "true",
+             }
+
+        expect(PluginStore.get("bulk_invite_url_extraction", "last_rules")).to eq(
+          "Append RollNo to @example.edu",
+        )
       end
     end
   end
