@@ -21,10 +21,13 @@ import { i18n } from "discourse-i18n";
 // hidden for a plain single resend (where changing it rarely makes sense)
 // and for drafts (sending a batch of drafts should always be paced, never a
 // burst, so it isn't a user choice here). The form's seeded default (true)
-// is what gets submitted either way the field is hidden. sendAll/sendCount
-// (bulk only) let the admin cap a dispatch to the oldest N invites in the
-// matched batch instead of all of them. shareable/maxUsers/shareableDomain
-// (both single and bulk) convert the invite(s) being sent into a
+// is what gets submitted either way the field is hidden. sendCount (bulk
+// only, optional -- blank means "send all") lets the admin cap a dispatch
+// to the oldest N invites in the matched batch instead of all of them; this
+// is the single source of truth for the cap, deliberately not gated behind
+// a separate "send all" toggle the count could silently disagree with.
+// shareable/maxUsers/shareableDomain (both single and bulk) convert the
+// invite(s) being sent into a
 // multi-redemption link -- see Invite#make_shareable! -- for a group
 // mailing-list address that forwards to many real recipients.
 export default class ResendInviteModal extends Component {
@@ -58,7 +61,6 @@ export default class ResendInviteModal extends Component {
     aiPersonalization,
     scheduleSend,
     allowAnyEmail,
-    sendAll,
     sendCount,
     shareable,
     maxUsers,
@@ -70,7 +72,7 @@ export default class ResendInviteModal extends Component {
         payload.allowAnyEmail = allowAnyEmail;
       }
       if (this.args.model.bulk) {
-        payload.sendCount = sendAll ? null : sendCount;
+        payload.sendCount = sendCount;
       }
       payload.shareable = shareable;
       if (shareable) {
@@ -101,7 +103,6 @@ export default class ResendInviteModal extends Component {
             aiPersonalization=true
             scheduleSend=true
             allowAnyEmail=true
-            sendAll=true
             sendCount=null
             shareable=false
             maxUsers=null
@@ -186,27 +187,21 @@ export default class ResendInviteModal extends Component {
             </form.Field>
 
             <form.Field
-              @name="sendAll"
-              @title={{i18n "user.invited.resend_invite.modal.send_all_label"}}
-              @type="toggle"
+              @name="sendCount"
+              @title={{i18n
+                "user.invited.resend_invite.modal.send_count_label"
+              }}
+              @type="input-number"
+              @validation="integer"
               as |field|
             >
-              <field.Control />
-            </form.Field>
-
-            {{#unless transientData.sendAll}}
-              <form.Field
-                @name="sendCount"
-                @title={{i18n
-                  "user.invited.resend_invite.modal.send_count_label"
+              <field.Control
+                min="1"
+                placeholder={{i18n
+                  "user.invited.resend_invite.modal.send_count_placeholder"
                 }}
-                @type="input-number"
-                @validation="required|integer"
-                as |field|
-              >
-                <field.Control min="1" />
-              </form.Field>
-            {{/unless}}
+              />
+            </form.Field>
           {{/if}}
 
           {{#if @model.drafts}}
