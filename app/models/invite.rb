@@ -194,6 +194,22 @@ class Invite < ActiveRecord::Base
     email.downcase == self.email.downcase
   end
 
+  # Converts this invite into a multi-redemption link, whether it started
+  # bound to one email or was already an allow_any_email link (idempotent
+  # either way). The original address is preserved in `description` for
+  # the admin list (frontend/discourse/app/templates/user-invited/show.gjs)
+  # even though it's no longer what controls redemption -- see
+  # Jobs::BulkInvite's own allow_any_email comment for the same pattern.
+  def make_shareable!(max_redemptions_allowed, domain: nil)
+    update!(
+      description: description.presence || email,
+      email: nil,
+      allow_any_email: true,
+      max_redemptions_allowed: max_redemptions_allowed,
+      domain: domain.presence,
+    )
+  end
+
   def domain_matches?(email)
     _, domain = email.split("@")
     self.domain == domain

@@ -4509,6 +4509,9 @@ uncategorized:
     default: true
     area: "posts_and_topics"
 
+  concord_in_wizard:
+    default: false
+    hidden: true
   enable_site_owner_onboarding:
     client: true
     default: true
@@ -5022,6 +5025,7 @@ experimental:
       status: "stable"
       impact: "feature,all_members"
       learn_more_url: "https://meta.discourse.org/t/-/413006"
+      permanent_warning: false
       allow_enabled_for:
         - everyone
   enable_generated_llms_txt:
@@ -5251,7 +5255,7 @@ experimental:
     hidden: true
     client: true
     upcoming_change:
-      status: "stable"
+      status: "permanent"
       impact: "feature,admins"
       learn_more_url: "https://meta.discourse.org/t/-/404528"
   improved_crawler_detection:

@@ -21,6 +21,7 @@ bg:
     access_control:
       manage:
         access_permission_editor: "Редактор"
+        access_permission_owner: "Собественик"
         access_permission_remove: "Премахване"
     number:
       format:
@@ -4383,6 +4384,9 @@ bg:
           suspended: "Отстранени"
           staged: "Поставен"
         approved: "Одобрен?"
+        bots:
+          name: "Име"
+          username: "Потребителско име"
         titles:
           pending: "Потребители, изискващи преглед"
           newuser: "Потребители с Ниво на доверие 0 (нов)"

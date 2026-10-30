@@ -229,10 +229,25 @@ require_relative "lib/discourse_events/livestream/allowed_hosts_validator"
 require_relative "lib/discourse_events/livestream/topic_extension"
 require_relative "lib/discourse_events/livestream/chat_channel_extension"
 require_relative "lib/discourse_events/livestream/zoom_url_parser"
-
 Dir
   .glob(File.expand_path("../lib/discourse_events/configuration/*.rb", __FILE__))
   .each { |f| require(f) }
+
+event_schema_markup =
+  lambda do |controller|
+    topic_view = controller.instance_variable_get(:@topic_view)
+    result =
+      DiscourseEvents::Events::BuildSchemaMarkup.call(
+        params: {
+          topic_id: topic_view&.topic&.id,
+        },
+        guardian: controller.guardian,
+      )
+    result[:html] if result.success?
+  end
+
+register_html_builder("server:before-head-close", &event_schema_markup)
+register_html_builder("server:before-head-close-crawler", &event_schema_markup)
 
 after_initialize do
   UserOption.prepend DiscourseEvents::UserOptionExtension
@@ -297,7 +312,10 @@ after_initialize do
   require_relative "app/jobs/regular/discourse_post_event_bulk_invite"
   require_relative "jobs/regular/discourse_post_event/bump_topic"
   require_relative "jobs/regular/discourse_post_event/send_reminder"
+  require_relative "jobs/regular/discourse_post_event/warm_event_onebox"
   require_relative "jobs/regular/discourse_post_event/warm_livestream_onebox"
+  require_relative "jobs/regular/discourse_post_event/warm_recording_onebox"
+  require_relative "jobs/regular/discourse_post_event/publish_livestream_chat_transcript"
   require_relative "lib/discourse_events/events/chat_channel_sync"
   require_relative "lib/discourse_events/events/email_renderer"
   require_relative "lib/discourse_events/events/excerpt"
@@ -310,9 +328,12 @@ after_initialize do
   require_relative "lib/discourse_events/events/guardian_extensions"
   require_relative "lib/discourse_events/events/post_extension"
   require_relative "lib/discourse_events/events/topic_extension"
+  require_relative "lib/discourse_events/events/topics_filter"
   require_relative "lib/discourse_events/events/rrule_generator"
   require_relative "lib/discourse_events/events/rrule_configurator"
   require_relative "lib/discourse_events/events/web_hook_extension"
+
+  DiscourseEvents::Events::TopicsFilter.register(self)
 
   ::ActionController::Base.prepend_view_path File.expand_path("../app/views", __FILE__)
 

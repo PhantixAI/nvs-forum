@@ -27,6 +27,7 @@ export default class UrlInviteExtractor extends Component {
 
   @tracked error = null;
   @tracked extracting = false;
+  @tracked savingDraft = false;
   @tracked rules = "";
 
   #formApi = null;
@@ -35,14 +36,18 @@ export default class UrlInviteExtractor extends Component {
   async extract({ urls, rules }) {
     this.error = null;
 
-    const parsedUrls = urls
-      .split("\n")
-      .map((url) => url.trim())
-      .filter(Boolean);
+    const parsedUrls = this.#parseUrls(urls);
 
     if (!parsedUrls.length) {
       this.error = i18n(
         "user.invited.bulk_invite.url_extraction.urls_required"
+      );
+      return;
+    }
+
+    if (!rules?.trim()) {
+      this.error = i18n(
+        "user.invited.bulk_invite.url_extraction.rules_required"
       );
       return;
     }
@@ -62,6 +67,41 @@ export default class UrlInviteExtractor extends Component {
       this.error = extractError(err);
     } finally {
       this.extracting = false;
+    }
+  }
+
+  // Bypasses the Form's own submit/validation pipeline (reading current
+  // values straight off the registered formApi instead) since a draft
+  // doesn't need rules -- only #extract's path requires them.
+  @action
+  async saveDraft() {
+    this.error = null;
+
+    const parsedUrls = this.#parseUrls(this.#formApi.get("urls") || "");
+
+    if (!parsedUrls.length) {
+      this.error = i18n(
+        "user.invited.bulk_invite.url_extraction.urls_required"
+      );
+      return;
+    }
+
+    const rules = this.#formApi.get("rules") || "";
+    this.savingDraft = true;
+
+    try {
+      await Invite.submitUrlExtraction(parsedUrls, rules, { draft: true });
+      this.toasts.success({
+        data: {
+          message: i18n("user.invited.bulk_invite.url_extraction.draft_saved", {
+            count: parsedUrls.length,
+          }),
+        },
+      });
+    } catch (err) {
+      this.error = extractError(err);
+    } finally {
+      this.savingDraft = false;
     }
   }
 
@@ -86,6 +126,13 @@ export default class UrlInviteExtractor extends Component {
     this.#formApi.submit();
   }
 
+  #parseUrls(rawUrls) {
+    return rawUrls
+      .split("\n")
+      .map((url) => url.trim())
+      .filter(Boolean);
+  }
+
   <template>
     <div {{didInsert this.loadLastRules}}>
       {{yield
@@ -95,6 +142,8 @@ export default class UrlInviteExtractor extends Component {
           extracting=this.extracting
           registerFormApi=this.registerFormApi
           rules=this.rules
+          saveDraft=this.saveDraft
+          savingDraft=this.savingDraft
           submit=this.submit
         )
       }}

@@ -356,7 +356,11 @@ export default <template>
                                     request
                                   }}
                                   @icon="arrows-rotate"
-                                  @label="user.invited.bulk_invite.url_extraction.retry_button"
+                                  @label={{if
+                                    (eq request.status "draft")
+                                    "user.invited.bulk_invite.url_extraction.write_rules_button"
+                                    "user.invited.bulk_invite.url_extraction.retry_button"
+                                  }}
                                 />
                               </dropdown.item>
                               <dropdown.item>

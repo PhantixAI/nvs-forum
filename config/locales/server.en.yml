@@ -673,6 +673,7 @@ en:
     ai_personalization_failed: "Couldn't generate a personalized email for this invite right now. Nothing was sent -- try resending again shortly."
     send_now_not_scheduled: "This invite is no longer scheduled -- it may have already been sent."
     invalid_send_count: "Number of invites to send must be at least 1."
+    invalid_max_users: "Number of users allowed to join must be at least 1."
 
   bulk_invite:
     file_should_be_csv: "The uploaded file should be of csv format."
@@ -6447,6 +6448,9 @@ en:
     enable_rack_mini_profiler: "Enable Rack Mini Profiler to persist across session changes for 1 hour"
     enter: "Enter Developer Mode"
   design_wizard:
+    themes:
+      concord:
+        description: "Replaces the sidebar with a single channel list made of categories, chat channels and live audio/video rooms."
     errors:
       palette_unavailable: "One of the selected color palettes is not available for the selected theme."
       site_settings_update_failed: "The site settings could not be updated."
@@ -6497,6 +6501,7 @@ en:
 
   onebox:
     discourse:
+      event_all_day: "All day"
       user_joined_community: "Joined %{date}"
     google_meet:
       title: "Google Meet meeting"

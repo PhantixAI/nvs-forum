@@ -335,8 +335,22 @@ export default class UserInvitedShowController extends Controller {
     this.modal.show(ResendInviteModal, {
       model: {
         bulk: false,
-        onResend: ({ keywords, aiPersonalization, scheduleSend }) =>
-          invite.reinvite({ keywords, aiPersonalization, scheduleSend }),
+        onResend: ({
+          keywords,
+          aiPersonalization,
+          scheduleSend,
+          shareable,
+          maxUsers,
+          shareableDomain,
+        }) =>
+          invite.reinvite({
+            keywords,
+            aiPersonalization,
+            scheduleSend,
+            shareable,
+            maxUsers,
+            shareableDomain,
+          }),
       },
     });
   }
@@ -421,12 +435,18 @@ export default class UserInvitedShowController extends Controller {
           aiPersonalization,
           scheduleSend,
           sendCount,
+          shareable,
+          maxUsers,
+          shareableDomain,
         }) => {
           await Invite.reinviteAll(domain, status, search, {
             keywords,
             aiPersonalization,
             scheduleSend,
             sendCount,
+            shareable,
+            maxUsers,
+            shareableDomain,
           });
           this.set("reinvitedAll", true);
         },

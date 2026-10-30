@@ -22,6 +22,7 @@ sq:
     access_control:
       manage:
         access_permission_editor: "Redaktor"
+        access_permission_owner: "Pronar"
         access_permission_remove: "Hiq"
     number:
       format:
@@ -4838,6 +4839,9 @@ sq:
           suspended: "Të pezulluar"
           staged: "Staged"
         approved: "Aprovuar?"
+        bots:
+          name: "Emri"
+          username: "Emri i përdoruesit"
         titles:
           active: "Përdoruesit aktivë"
           pending: "Përdorues në pritje"
