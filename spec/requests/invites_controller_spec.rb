@@ -2960,6 +2960,39 @@ RSpec.describe InvitesController do
       expect(invite.reload.expires_at).to eq_time(5.days.from_now)
     end
 
+    it "honors send_count under the default personalize+schedule_send request shape the resend modal actually submits -- regression guard for the frontend's now-removed 'send all' toggle, which used to null out a typed send_count whenever it stayed on" do
+      freeze_time
+
+      review_invites =
+        5.times.map do |i|
+          invite = Fabricate(:invite, invited_by: admin, email: "review#{i}@nit.ac.in")
+          invite.update!(
+            expires_at: 5.days.from_now,
+            emailed_status: Invite.emailed_status_types[:review],
+          )
+          invite.update_column(:updated_at, (5 - i).days.ago)
+          invite
+        end
+
+      sign_in(admin)
+      post "/invites/reinvite-all",
+           params: {
+             status: "review",
+             send_count: "2",
+             ai_personalization: "true",
+             schedule_send: "true",
+           }
+
+      expect(response.status).to eq(200)
+      drafting_ids =
+        review_invites.select do |i|
+          i.reload.emailed_status == Invite.emailed_status_types[:drafting]
+        end
+      expect(drafting_ids.size).to eq(2)
+      # Oldest-first: the two invites with the earliest updated_at are the ones claimed.
+      expect(drafting_ids.map(&:id)).to contain_exactly(review_invites[0].id, review_invites[1].id)
+    end
+
     it "converts every matched invite into a shareable multi-redemption link and still dispatches them -- regression guard for the id-materialization fix (shareable mutates email, which the domain/email-based WHERE clause this relation was built from would otherwise re-evaluate on re-query)" do
       freeze_time
 
