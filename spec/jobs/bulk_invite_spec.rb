@@ -403,6 +403,17 @@ RSpec.describe Jobs::BulkInvite do
         expect(invite.description).to eq("student@college.edu")
       end
 
+      it "reuses the existing invite instead of duplicating it when the same CSV is uploaded again" do
+        2.times do
+          described_class.new.execute(
+            current_user_id: admin.id,
+            invites: [{ email: "cse@iitb.ac.in", allow_any_email: "true" }],
+          )
+        end
+
+        expect(Invite.where(description: "cse@iitb.ac.in").count).to eq(1)
+      end
+
       it "persists allow_any_email on the invite itself" do
         described_class.new.execute(
           current_user_id: admin.id,
@@ -536,7 +547,11 @@ RSpec.describe Jobs::BulkInvite do
           )
         end
 
-        expect(Invite.where(description: "student@college.edu", email: nil).count).to eq(3)
+        # Invite.generate dedupes allow_any_email rows by description, so the
+        # first 3 (rate-limit-allowed) runs all reuse the same invite rather
+        # than creating 3 separate ones -- the 4th run is what the rate
+        # limiter blocks, confirmed by the "1 error(s)" below.
+        expect(Invite.where(description: "student@college.edu", email: nil).count).to eq(1)
 
         post = Post.last
         expect(post.raw).to include("1 error(s)")
@@ -555,7 +570,11 @@ RSpec.describe Jobs::BulkInvite do
           ],
         )
 
-        expect(Invite.where(email: nil).count).to eq(3)
+        # Invite.generate's dedupe also downcases before matching, so the 3
+        # differently-cased rows that get past the rate limiter all collapse
+        # onto the one invite created by the first row, rather than each
+        # creating their own.
+        expect(Invite.where(email: nil).count).to eq(1)
 
         post = Post.last
         expect(post.raw).to include("1 error(s)")
