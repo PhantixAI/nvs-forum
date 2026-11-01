@@ -243,6 +243,13 @@ class Invite < ActiveRecord::Base
     opts ||= {}
     time_zone = Time.find_zone(invited_by&.user_option&.timezone) || Time.zone
     email = Email.downcase(opts[:email]) if opts[:email].present?
+    # allow_any_email invites (e.g. CSV bulk-invite rows for a mailing list)
+    # store the real recipient address in `description` instead of `email` --
+    # dedupe on that too, the same way the email.present? branch below does,
+    # so re-uploading the same CSV row updates the existing invite rather
+    # than creating a duplicate for every upload.
+    unbound_description = Email.downcase(opts[:description]) if opts[:allow_any_email] &&
+      opts[:description].present?
 
     raise UserExists.new(new.user_exists_error_msg(email)) if find_user_by_email(email)
 
@@ -265,6 +272,22 @@ class Invite < ActiveRecord::Base
         SiteSetting.invite_reinvite_rate_limit_per_day,
         1.day.to_i,
       ).performed!
+    elsif unbound_description.present?
+      invite =
+        Invite
+          .with_deleted
+          .where(
+            description: unbound_description,
+            invited_by_id: invited_by.id,
+            allow_any_email: true,
+          )
+          .order("created_at DESC")
+          .first
+
+      if invite && (invite.expired? || invite.deleted_at)
+        invite.destroy
+        invite = nil
+      end
     end
 
     emailed_status =

@@ -431,6 +431,53 @@ RSpec.describe Invite do
       end
     end
 
+    context "when sending an allow_any_email invite to the same description" do
+      fab!(:invite) do
+        Invite.generate(
+          user,
+          allow_any_email: true,
+          description: "cse@iitb.ac.in",
+          max_redemptions_allowed: 5,
+        )
+      end
+
+      it "returns the original invite instead of creating a duplicate" do
+        %w[cse@IITB.ac.in CSE@iitb.ac.in].each do |description|
+          resend_invite = Invite.generate(user, allow_any_email: true, description: description)
+          expect(resend_invite).to eq(invite)
+        end
+
+        expect(Invite.where(description: "cse@iitb.ac.in").count).to eq(1)
+      end
+
+      it "updates timestamp of existing invite" do
+        freeze_time
+        invite.update!(created_at: 10.days.ago)
+
+        resend_invite = Invite.generate(user, allow_any_email: true, description: "cse@iitb.ac.in")
+
+        expect(resend_invite).to eq(invite)
+        expect(resend_invite.created_at).to eq_time(Time.zone.now)
+      end
+
+      it "returns a new invite if the other has expired" do
+        SiteSetting.invite_expiry_days = 1
+        invite.update!(expires_at: 2.days.ago)
+
+        new_invite = Invite.generate(user, allow_any_email: true, description: "cse@iitb.ac.in")
+
+        expect(new_invite).not_to eq(invite)
+        expect(new_invite).not_to be_expired
+      end
+
+      it "does not match a bound invite with the same email, or vice versa" do
+        bound_invite = Invite.generate(user, email: "cse@iitb.ac.in")
+
+        expect(bound_invite).not_to eq(invite)
+        expect(Invite.where(invited_by_id: user.id).count).to eq(2)
+      end
+    end
+
     context "when inviting to a topic" do
       fab!(:topic)
       let(:invite) { Invite.generate(topic.user, email: "test@example.com", topic: topic) }
