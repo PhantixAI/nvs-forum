@@ -163,14 +163,16 @@ RSpec.describe BulkInvitePersonalization::Generator do
           )
         end
 
-        it "raises GenerationFailed, rather than returning nil, when the response can't be parsed into subject/body" do
+        it "raises GenerationFailed, rather than returning nil, when every attempt's response can't be parsed into subject/body" do
           # With AI personalization on, an admin wants a properly personalized
           # email or nothing sent at all (held back to retry) -- never a
           # silent fallback to the plain template or a stale previous body.
+          # Two copies -- one per Generator::MAX_ATTEMPTS -- since a single
+          # bad roll is now retried once before giving up (see MAX_ATTEMPTS).
           malformed = "Check this out NOW at https://example.com!"
 
           expect {
-            DiscourseAi::Completions::Llm.with_prepared_responses([malformed]) do
+            DiscourseAi::Completions::Llm.with_prepared_responses([malformed, malformed]) do
               described_class.personalize(invite)
             end
           }.to raise_error(described_class::GenerationFailed, %r{parseable SUBJECT:/BODY})
@@ -209,23 +211,23 @@ RSpec.describe BulkInvitePersonalization::Generator do
           expect(result[:body]).to include("Given your work with WSAI and IDDD, worth a look?")
         end
 
-        it "still raises GenerationFailed for an ALL-CAPS word that isn't in recipient_keywords, the domain, or the allowlist" do
+        it "still raises GenerationFailed for an ALL-CAPS word that isn't in recipient_keywords, the domain, or the allowlist, across every retry attempt" do
           invite.update!(recipient_keywords: "WSAI")
           non_compliant = "SUBJECT: Hey\nBODY:\nThis is AMAZING, worth a look?"
 
           expect {
-            DiscourseAi::Completions::Llm.with_prepared_responses([non_compliant]) do
+            DiscourseAi::Completions::Llm.with_prepared_responses([non_compliant, non_compliant]) do
               described_class.personalize(invite)
             end
           }.to raise_error(described_class::GenerationFailed, /body failed validation/)
         end
 
-        it "raises GenerationFailed, rather than returning nil, when the body fails the anti-spam rules" do
+        it "raises GenerationFailed, rather than returning nil, when the body fails the anti-spam rules on every retry attempt" do
           non_compliant =
             "SUBJECT: Hey\nBODY:\nCheck this out NOW at https://spam.example.com! #{invite_link}"
 
           expect {
-            DiscourseAi::Completions::Llm.with_prepared_responses([non_compliant]) do
+            DiscourseAi::Completions::Llm.with_prepared_responses([non_compliant, non_compliant]) do
               described_class.personalize(invite)
             end
           }.to raise_error(described_class::GenerationFailed, /body failed validation/)
@@ -244,27 +246,51 @@ RSpec.describe BulkInvitePersonalization::Generator do
           expect(result[:body]).to include(invite_link)
         end
 
-        it "raises GenerationFailed, rather than returning the body with a blank subject, when only the subject fails validation" do
+        it "raises GenerationFailed, rather than returning the body with a blank subject, when only the subject fails validation on every retry attempt" do
           bad_subject = "SUBJECT: Check this out https://example.com\nBODY:\nWorth a look?"
 
           expect {
-            DiscourseAi::Completions::Llm.with_prepared_responses([bad_subject]) do
+            DiscourseAi::Completions::Llm.with_prepared_responses([bad_subject, bad_subject]) do
               described_class.personalize(invite)
             end
           }.to raise_error(described_class::GenerationFailed, /subject failed validation/)
         end
 
-        it "raises GenerationFailed, rather than appending the link, when the model writes its own link in the body" do
+        it "raises GenerationFailed, rather than appending the link, when the model writes its own link in the body on every retry attempt" do
           # The model is told not to write the link itself -- any link-shaped
           # text in the body (even the correct one) means it ignored that,
           # and is rejected rather than trusted or silently stripped.
           wrote_own_link = "SUBJECT: Hey\nBODY:\nWorth a look? #{invite_link}"
 
           expect {
-            DiscourseAi::Completions::Llm.with_prepared_responses([wrote_own_link]) do
-              described_class.personalize(invite)
-            end
+            DiscourseAi::Completions::Llm.with_prepared_responses(
+              [wrote_own_link, wrote_own_link],
+            ) { described_class.personalize(invite) }
           }.to raise_error(described_class::GenerationFailed, /body failed validation/)
+        end
+
+        it "retries once after a rejected response, and returns the next attempt's result if it's compliant" do
+          non_compliant = "SUBJECT: Hey\nBODY:\nThis is AMAZING, worth a look?"
+          compliant = "SUBJECT: Quick hello\nBODY:\nWorth a look?"
+
+          result = nil
+          DiscourseAi::Completions::Llm.with_prepared_responses([non_compliant, compliant]) do
+            result = described_class.personalize(invite)
+          end
+
+          expect(result[:subject]).to eq("Quick hello")
+          expect(result[:body]).to include("Worth a look?")
+        end
+
+        it "does not retry at all once a compliant response is returned on the first attempt" do
+          compliant = "SUBJECT: Quick hello\nBODY:\nWorth a look?"
+
+          result = nil
+          DiscourseAi::Completions::Llm.with_prepared_responses([compliant]) do
+            result = described_class.personalize(invite)
+          end
+
+          expect(result[:subject]).to eq("Quick hello")
         end
 
         it "raises GenerationFailed with the underlying error when the LLM call errors" do

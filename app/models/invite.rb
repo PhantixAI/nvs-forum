@@ -20,16 +20,28 @@ class Invite < ActiveRecord::Base
   # view, not just a literal "ac.in" address.
   AC_IN_UMBRELLA_DOMAIN = "ac.in"
   # Every value Invite#delivery_status can return, in pipeline order -- except
-  # nil (for not_required), which isn't a filterable status. "review" only
-  # ever matches on the Pending tab (see .pending/.with_delivery_status) --
-  # Expired has no meaningful "review" state, so the frontend hides that
-  # option there; selecting it anyway just returns no rows. Covers both the
-  # :review and :drafting emailed_status values -- the latter is deliberately
-  # not its own filterable status, since it's a transient (seconds-to-low-
-  # minutes) in-progress state, not something an admin filters for. Named
-  # "review" rather than "draft" specifically to stay visually/verbally
-  # distinct from :drafting (the system is drafting; the admin reviews).
-  DELIVERY_STATUSES = %w[scheduled pending skipped sent delivered bounced complained review].freeze
+  # nil (for not_required), which isn't a filterable status. "review" and
+  # "drafting" only ever match on the Pending tab (see
+  # .pending/.with_delivery_status) -- Expired has no meaningful review/draft
+  # state, so the frontend hides those options there; selecting one anyway
+  # just returns no rows. Kept as two distinct statuses (confirmed in
+  # production: a large batch can sit in :drafting for minutes, not the brief
+  # transient blip originally assumed, long enough that an admin filtering
+  # "Review" to see what's awaiting dispatch was also seeing everything
+  # already mid-personalization, with no way to tell the two apart) --
+  # :review is what the admin reviews, :drafting is what the system is
+  # actively drafting.
+  DELIVERY_STATUSES = %w[
+    scheduled
+    pending
+    skipped
+    sent
+    delivered
+    bounced
+    complained
+    review
+    drafting
+  ].freeze
   DESCRIPTION_MAX_LENGTH = 100
   RECIPIENT_NAME_MAX_LENGTH = 100
   RECIPIENT_KEYWORDS_MAX_LENGTH = 100_000
@@ -676,8 +688,10 @@ class Invite < ActiveRecord::Base
   # EmailLog query per invite.
   def delivery_status(email_log = latest_sent_email_log)
     case emailed_status
-    when Invite.emailed_status_types[:review], Invite.emailed_status_types[:drafting]
+    when Invite.emailed_status_types[:review]
       "review"
+    when Invite.emailed_status_types[:drafting]
+      "drafting"
     when Invite.emailed_status_types[:not_required]
       nil
     when Invite.emailed_status_types[:pending], Invite.emailed_status_types[:bulk_pending]
@@ -709,7 +723,9 @@ class Invite < ActiveRecord::Base
     when "skipped"
       relation.where(emailed_status: types[:skipped])
     when "review"
-      relation.where(emailed_status: types.values_at(:review, :drafting))
+      relation.where(emailed_status: types[:review])
+    when "drafting"
+      relation.where(emailed_status: types[:drafting])
     when "sent", "delivered", "bounced", "complained"
       outcome =
         case status.to_s

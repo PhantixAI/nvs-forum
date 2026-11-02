@@ -277,34 +277,4 @@ RSpec.describe InviteSerializer do
       expect(json).not_to include(:draft_preview_available)
     end
   end
-
-  describe "#drafting" do
-    fab!(:user)
-    fab!(:invite) do
-      Fabricate(:invite, invited_by: user, emailed_status: Invite.emailed_status_types[:drafting])
-    end
-
-    it "is true for a :drafting invite, even though #delivery_status itself still reads \"review\" for it" do
-      json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
-
-      expect(json[:drafting]).to eq(true)
-      expect(json[:delivery_status]).to eq("review")
-    end
-
-    it "is false for a plain :review invite" do
-      invite.update_column(:emailed_status, Invite.emailed_status_types[:review])
-
-      json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
-
-      expect(json[:drafting]).to eq(false)
-    end
-
-    it "is false once the invite moves past drafting (e.g. :bulk_pending)" do
-      invite.update_column(:emailed_status, Invite.emailed_status_types[:bulk_pending])
-
-      json = InviteSerializer.new(invite, scope: Guardian.new(user), root: false).as_json
-
-      expect(json[:drafting]).to eq(false)
-    end
-  end
 end

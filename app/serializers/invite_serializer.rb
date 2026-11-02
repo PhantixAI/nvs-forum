@@ -10,7 +10,6 @@ class InviteSerializer < ApplicationSerializer
              :emailed,
              :draft_preview_available,
              :delivery_status,
-             :drafting,
              :can_delete_invite,
              :max_redemptions_allowed,
              :redemption_count,
@@ -75,25 +74,6 @@ class InviteSerializer < ApplicationSerializer
 
   def include_delivery_status?
     has_recipient? && can_see_invite_details?
-  end
-
-  # Invite#delivery_status deliberately folds :review and :drafting into the
-  # same "review" string (the two must stay interchangeable for filtering --
-  # see Invite.with_delivery_status's own comment), but that means two rows
-  # with very different real states render an identical badge, with no way
-  # to tell a batch that's actively being personalized apart from one that
-  # hasn't been dispatched at all -- for a large batch, :drafting isn't the
-  # brief transient state it was originally assumed to be, so that gap is
-  # worth closing without touching the filter/search invariant above.
-  # Carried as its own attribute rather than changing what delivery_status
-  # itself returns; the template picks between them (see
-  # user-invited/show.gjs).
-  def include_drafting?
-    has_recipient? && can_see_invite_details?
-  end
-
-  def drafting
-    object.emailed_status == Invite.emailed_status_types[:drafting]
   end
 
   def delivery_status

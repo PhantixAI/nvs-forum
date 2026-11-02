@@ -1241,10 +1241,10 @@ RSpec.describe Invite do
       expect(invite.delivery_status).to eq("review")
     end
 
-    it "returns review, ignoring any earlier EmailLog, for an invite currently drafting" do
+    it "returns drafting, ignoring any earlier EmailLog, for an invite currently drafting" do
       Fabricate(:email_log, invite_id: invite.id, email_type: "invite", delivered_at: Time.current)
       invite.update!(emailed_status: Invite.emailed_status_types[:drafting])
-      expect(invite.delivery_status).to eq("review")
+      expect(invite.delivery_status).to eq("drafting")
     end
 
     context "when emailed_status is sent" do
@@ -1378,13 +1378,13 @@ RSpec.describe Invite do
       end
     end
 
-    it "matches a drafting invite only against the \"review\" status, never any other -- including \"sent\", which it would wrongly match without the drafting exclusion since it has no EmailLog yet" do
+    it "matches a drafting invite only against the \"drafting\" status, never any other -- including \"sent\", which it would wrongly match without the drafting exclusion since it has no EmailLog yet" do
       drafting = invite_with(:drafting)
-      expect(drafting.delivery_status).to eq("review")
+      expect(drafting.delivery_status).to eq("drafting")
 
-      expect(Invite.with_delivery_status(Invite.all, "review")).to include(drafting)
+      expect(Invite.with_delivery_status(Invite.all, "drafting")).to include(drafting)
 
-      (Invite::DELIVERY_STATUSES - ["review"]).each do |status|
+      (Invite::DELIVERY_STATUSES - ["drafting"]).each do |status|
         expect(Invite.with_delivery_status(Invite.all, status)).not_to include(drafting)
       end
     end
@@ -1419,11 +1419,12 @@ RSpec.describe Invite do
       expect(Invite.pending(inviter)).not_to include(drafting_invite)
     end
 
-    it "returns only review/drafting invites from .pending when explicitly filtered to the \"review\" status" do
-      expect(Invite.pending(inviter, status: "review")).to contain_exactly(
-        review_invite,
-        drafting_invite,
-      )
+    it "returns only review invites from .pending when explicitly filtered to the \"review\" status" do
+      expect(Invite.pending(inviter, status: "review")).to contain_exactly(review_invite)
+    end
+
+    it "returns only drafting invites from .pending when explicitly filtered to the \"drafting\" status" do
+      expect(Invite.pending(inviter, status: "drafting")).to contain_exactly(drafting_invite)
     end
 
     it "excludes review invites from .expired even if they happen to be past expiry" do
