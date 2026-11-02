@@ -470,11 +470,32 @@ RSpec.describe Invite do
         expect(new_invite).not_to be_expired
       end
 
-      it "does not match a bound invite with the same email, or vice versa" do
+      it "converts the existing shareable link into a bound invite instead of creating a duplicate" do
+        # Invite.generate's two dedupe forms (bound by email, unbound by
+        # description) used to never cross-check each other -- a plain
+        # (non-allow_any_email) row for the same recipient would silently
+        # create a second, parallel invite instead of finding this one. See
+        # find_duplicate_for.
         bound_invite = Invite.generate(user, email: "cse@iitb.ac.in")
 
-        expect(bound_invite).not_to eq(invite)
-        expect(Invite.where(invited_by_id: user.id).count).to eq(2)
+        expect(bound_invite).to eq(invite)
+        expect(bound_invite.reload.email).to eq("cse@iitb.ac.in")
+        expect(bound_invite.allow_any_email?).to eq(false)
+        expect(Invite.where(invited_by_id: user.id).count).to eq(1)
+      end
+    end
+
+    context "when an invite is bound to an email that later arrives as an allow_any_email row" do
+      fab!(:invite) { Invite.generate(user, email: "cse@iitb.ac.in") }
+
+      it "converts the existing bound invite into a shareable link instead of creating a duplicate" do
+        link_invite = Invite.generate(user, allow_any_email: true, description: "cse@iitb.ac.in")
+
+        expect(link_invite).to eq(invite)
+        expect(link_invite.reload.email).to eq(nil)
+        expect(link_invite.description).to eq("cse@iitb.ac.in")
+        expect(link_invite.allow_any_email?).to eq(true)
+        expect(Invite.where(invited_by_id: user.id).count).to eq(1)
       end
     end
 
@@ -1582,6 +1603,67 @@ RSpec.describe Invite do
       admin_invite =
         Invite.generate(Fabricate(:admin), email: "grants-admin@invitetest.com", admin: true)
       expect { admin_invite.make_shareable!(5) }.to raise_error(ActiveRecord::RecordInvalid)
+    end
+
+    context "when another invite already exists for the same recipient" do
+      fab!(:inviter, :user)
+
+      it "merges away a duplicate bound invite for the same email" do
+        bound_invite = Fabricate(:invite, invited_by: inviter, email: "dup@invitetest.com")
+        other_bound_invite = Fabricate(:invite, invited_by: inviter, email: "dup@invitetest.com")
+
+        other_bound_invite.make_shareable!(5)
+
+        expect(bound_invite.reload).to be_trashed
+        expect(other_bound_invite.reload).not_to be_trashed
+        expect(other_bound_invite.description).to eq("dup@invitetest.com")
+      end
+
+      it "merges away a duplicate that's already a shareable link with the same description" do
+        existing_link =
+          Fabricate(
+            :invite,
+            invited_by: inviter,
+            email: nil,
+            description: "dup@invitetest.com",
+            allow_any_email: true,
+          )
+        bound_invite = Fabricate(:invite, invited_by: inviter, email: "dup@invitetest.com")
+
+        bound_invite.make_shareable!(5)
+
+        expect(existing_link.reload).to be_trashed
+        expect(bound_invite.reload).not_to be_trashed
+        expect(bound_invite.description).to eq("dup@invitetest.com")
+      end
+
+      it "does not merge a duplicate that already has real redemptions on it" do
+        existing_link =
+          Fabricate(
+            :invite,
+            invited_by: inviter,
+            email: nil,
+            description: "dup@invitetest.com",
+            allow_any_email: true,
+            max_redemptions_allowed: 5,
+            redemption_count: 1,
+          )
+        bound_invite = Fabricate(:invite, invited_by: inviter, email: "dup@invitetest.com")
+
+        bound_invite.make_shareable!(5)
+
+        expect(existing_link.reload).not_to be_trashed
+        expect(Invite.where(invited_by: inviter, description: "dup@invitetest.com").count).to eq(2)
+      end
+
+      it "does not touch a same-email duplicate belonging to a different inviter" do
+        other_inviters_invite = Fabricate(:invite, email: "dup@invitetest.com")
+        bound_invite = Fabricate(:invite, invited_by: inviter, email: "dup@invitetest.com")
+
+        bound_invite.make_shareable!(5)
+
+        expect(other_inviters_invite.reload).not_to be_trashed
+      end
     end
   end
 
