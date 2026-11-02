@@ -486,9 +486,7 @@ export default <template>
                       <div class="d-table__mobile-label">
                         {{i18n "user.invited.delivery_status"}}
                       </div>
-                      {{inviteDeliveryStatus
-                        (if invite.drafting "drafting" invite.delivery_status)
-                      }}
+                      {{inviteDeliveryStatus invite.delivery_status}}
                     </td>
 
                     {{#if invite.can_delete_invite}}

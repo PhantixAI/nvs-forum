@@ -298,6 +298,71 @@ acceptance("User invited - delivery status filter", function (needs) {
   });
 });
 
+acceptance("User invited - review vs drafting status filter", function (needs) {
+  needs.user();
+
+  const STATUSES_WITH_REVIEW_AND_DRAFTING = [...STATUSES, "review", "drafting"];
+
+  needs.pretender((server, helper) => {
+    server.get("/u/eviltrout/invited.json", (request) => {
+      const status = request.queryParams.status;
+      const all = [
+        invite(1, "review@nit.ac.in", "review"),
+        invite(2, "drafting@nit.ac.in", "drafting"),
+      ];
+
+      return helper.response({
+        invites: status ? all.filter((i) => i.delivery_status === status) : all,
+        can_see_invite_details: true,
+        counts: { pending: 2, expired: 0, redeemed: 0, total: 2 },
+        available_domains: [],
+        available_statuses: STATUSES_WITH_REVIEW_AND_DRAFTING,
+      });
+    });
+  });
+
+  test("offers Review and Drafting as separate status filters on the Pending tab, each showing only its own invites", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    const statusFilter = selectKit(".invite-status-filter");
+    await statusFilter.expand();
+
+    assert.true(
+      statusFilter.rowByValue("review").exists(),
+      "Review is offered"
+    );
+    assert.true(
+      statusFilter.rowByValue("drafting").exists(),
+      "Drafting is offered as its own option"
+    );
+
+    await statusFilter.selectRowByValue("review");
+    assert.dom(".delivery-status-pill.--review").hasText("Review");
+    assert.dom(".delivery-status-pill.--drafting").doesNotExist();
+
+    await statusFilter.expand();
+    await statusFilter.selectRowByValue("drafting");
+    assert.dom(".delivery-status-pill.--drafting").hasText("Drafting");
+    assert.dom(".delivery-status-pill.--review").doesNotExist();
+  });
+
+  test("hides both Review and Drafting status filter options on the Expired tab", async function (assert) {
+    await visit("/u/eviltrout/invited/expired");
+
+    const statusFilter = selectKit(".invite-status-filter");
+    await statusFilter.expand();
+
+    assert.false(
+      statusFilter.rowByValue("review").exists(),
+      "Review is not offered on Expired"
+    );
+    assert.false(
+      statusFilter.rowByValue("drafting").exists(),
+      "Drafting is not offered on Expired"
+    );
+  });
+});
+
 acceptance(
   "User invited - allow_any_email (unbound) invite row",
   function (needs) {

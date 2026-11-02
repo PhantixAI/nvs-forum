@@ -118,9 +118,9 @@ export default class UserInvitedShowController extends Controller {
 
   // No longer a separate tab -- "review" is just another value of the
   // Pending tab's own status filter (see statusOptions), reusing its table
-  // (and that table's Edit/kebab actions) instead of a dedicated one. Named
-  // "review" rather than "draft" to stay distinct from the :drafting
-  // emailed_status (the system is drafting; the admin reviews).
+  // (and that table's Edit/kebab actions) instead of a dedicated one. Kept
+  // distinct from the "drafting" status value (its own filter option, see
+  // statusOptions) -- the system is drafting, the admin reviews.
   @dependentKeyCompat
   get inviteReview() {
     return this.filter === "pending" && this.selectedStatus === "review";
@@ -216,12 +216,16 @@ export default class UserInvitedShowController extends Controller {
       }));
     }
 
-    // "review" is only a meaningful filter on the Pending tab -- Expired has
-    // no real review state (see Invite.expired, which never returns one
-    // regardless of status), so offering it there would just be a filter
-    // option that always empties the list.
+    // "review"/"drafting" are only meaningful filters on the Pending tab --
+    // Expired has no real review/draft state (see Invite.expired, which
+    // never returns one regardless of status), so offering them there would
+    // just be filter options that always empty the list.
     return (this.model?.available_statuses || [])
-      .filter((status) => status !== "review" || this.filter === "pending")
+      .filter(
+        (status) =>
+          (status !== "review" && status !== "drafting") ||
+          this.filter === "pending"
+      )
       .map((status) => ({
         id: status,
         name: i18n(`user.invited.delivery_status_${status}`),
