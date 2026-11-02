@@ -315,6 +315,7 @@ class Invite < ActiveRecord::Base
 
     invite = nil
     was_admin = nil
+    emailed_status = nil
 
     # Serializes the whole lookup-then-create-or-update decision below
     # against any other Invite.generate (or #make_shareable!) call for the
@@ -346,7 +347,16 @@ class Invite < ActiveRecord::Base
         # otherwise create a second, parallel invite instead of converting
         # the one that's already there. See find_duplicate_for.
         if invite.nil? && (invite = find_duplicate_for(invited_by, email))
-          invite.update!(email: email, description: nil, allow_any_email: false)
+          # A bound invite is only ever valid with max_redemptions_allowed: 1
+          # (see ensure_max_redemptions_allowed) -- the found invite may
+          # still be carrying a higher count left over from being a
+          # shareable link.
+          invite.update!(
+            email: email,
+            description: nil,
+            allow_any_email: false,
+            max_redemptions_allowed: 1,
+          )
         end
 
         email_digest = Digest::SHA256.hexdigest(email)
