@@ -1,6 +1,7 @@
 import { concat, fn, hash } from "@ember/helper";
 import { LinkTo } from "@ember/routing";
 import { trustHTML } from "@ember/template";
+import InviteDomainChooser from "discourse/components/invite-domain-chooser";
 import SvgEnvelopeZero from "discourse/components/svg/envelope-zero";
 import DMenu from "discourse/float-kit/components/d-menu";
 import bodyClass from "discourse/helpers/body-class";
@@ -68,7 +69,7 @@ export default <template>
             {{/if}}
           {{/if}}
           {{#if @controller.showDomainFilter}}
-            <ComboBox
+            <InviteDomainChooser
               class="invite-domain-filter"
               @content={{@controller.domainOptions}}
               @onChange={{@controller.domainChanged}}

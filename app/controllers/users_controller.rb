@@ -652,15 +652,35 @@ class UsersController < ApplicationController
       # see this inviter's invite details (e.g. a TL2 user viewing someone else's invited
       # page) could still learn every domain the inviter has invited to, via a field that
       # isn't visibility-checked itself.
+      #
+      # Scoped to the current tab (not domain-filtered, to avoid the list
+      # filtering itself down to just the already-selected domain; not
+      # status-filtered, so "All domains" still offers every domain under an
+      # active status filter) -- without this, a domain whose invites have
+      # all since expired or been fully redeemed kept showing up here as a
+      # dead-end option that always emptied whichever tab it was picked on.
       available_domains =
         if can_see_invite_details
+          domains_relation =
+            case filter
+            when "pending"
+              Invite.pending(inviter)
+            when "expired"
+              Invite.expired(inviter)
+            when "redeemed"
+              Invite.redeemed_users(inviter)
+            end
           domains =
-            Invite
-              .where(invited_by_id: inviter.id)
-              .where.not(email_domain: nil)
-              .distinct
-              .order(:email_domain)
-              .pluck(:email_domain)
+            if domains_relation
+              domains_relation
+                .reorder(nil)
+                .where.not("invites.email_domain" => nil)
+                .distinct
+                .pluck("invites.email_domain")
+                .sort
+            else
+              []
+            end
           # "ac.in" is an umbrella option (see Invite.domain_filter_condition)
           # that never appears verbatim as its own email_domain row -- only
           # offer it when the inviter actually has a matching *.ac.in invite.

@@ -3045,6 +3045,29 @@ RSpec.describe UsersController do
       )
     end
 
+    it "scopes available_domains to the current tab, excluding a domain whose invites don't belong there" do
+      inviter = Fabricate(:user, trust_level: TrustLevel[2])
+      sign_in(inviter)
+
+      Fabricate(:invite, email: "student@nit.ac.in", invited_by: inviter)
+      expired = Fabricate(:invite, email: "old@college.edu", invited_by: inviter)
+      expired.update_column(:expires_at, 1.day.ago)
+      redeemed_invite = Fabricate(:invite, email: "grad@alumni.edu", invited_by: inviter)
+      Fabricate(:invited_user, invite: redeemed_invite, user: Fabricate(:user))
+      redeemed_invite.update!(redemption_count: 1)
+
+      get "/u/#{inviter.username}/invited.json", params: { filter: "pending" }
+      # "ac.in" is the umbrella option (see Invite::AC_IN_UMBRELLA_DOMAIN),
+      # included because nit.ac.in matches it.
+      expect(response.parsed_body["available_domains"]).to contain_exactly("ac.in", "nit.ac.in")
+
+      get "/u/#{inviter.username}/invited.json", params: { filter: "expired" }
+      expect(response.parsed_body["available_domains"]).to contain_exactly("college.edu")
+
+      get "/u/#{inviter.username}/invited.json", params: { filter: "redeemed" }
+      expect(response.parsed_body["available_domains"]).to contain_exactly("alumni.edu")
+    end
+
     it "treats ac.in as an umbrella domain filter across every *.ac.in invite" do
       inviter = Fabricate(:user, trust_level: TrustLevel[2])
       sign_in(inviter)
