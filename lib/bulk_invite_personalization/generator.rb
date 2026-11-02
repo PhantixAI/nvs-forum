@@ -28,7 +28,9 @@ module BulkInvitePersonalization
   # the invite sends with the plain template as always. Once an LLM call is
   # actually attempted, though, every failure past that point -- a blank or
   # unparseable response, a subject or body the validator rejects, or an
-  # error from the provider itself -- raises GenerationFailed instead of
+  # error from the provider itself -- is retried up to MAX_ATTEMPTS times
+  # (a single bad roll at TEMPERATURE 0.9 is usually not a persistent
+  # problem with that invite) before raising GenerationFailed instead of
   # falling back. With AI personalization turned on, an admin wants either a
   # properly personalized email or nothing sent at all to retry later, never
   # a silently-degraded one (a generic subject, a generic body, or worse, a
@@ -50,6 +52,17 @@ module BulkInvitePersonalization
     # depends on the model and rules in use at a given site.
     TEMPERATURE = 0.9
 
+    # Confirmed in production (AiApiAuditLog, replayed through
+    # ResponseValidator): ~16% of calls get rejected for "unexpected link or
+    # domain" alone, because the model invents a plausible-looking URL for
+    # whatever the admin's base template calls the community (e.g. "APEX"),
+    # despite being told never to write one -- a single bad roll of the same
+    # temperature-0.9 prompt, not a persistent problem with that invite.
+    # Before this, any one rejection (of any kind) permanently skipped the
+    # invite with no retry. One retry is cheap relative to that outcome, and
+    # the vast majority of rejections clear on a second attempt.
+    MAX_ATTEMPTS = 2
+
     def self.personalize(invite, extra_keywords: nil)
       return nil unless invite.ai_personalization?
       return nil unless enabled?
@@ -66,6 +79,24 @@ module BulkInvitePersonalization
       # context to write a note; the real link is appended afterward by
       # ResponseValidator regardless of what the model writes.
       base_text_without_link = base_text.gsub(link, "")
+
+      last_error = nil
+      MAX_ATTEMPTS.times do |attempt|
+        return attempt_personalize(llm, invite, base_text_without_link, link, extra_keywords:)
+      rescue GenerationFailed => e
+        last_error = e
+        if attempt + 1 < MAX_ATTEMPTS
+          Rails.logger.info(
+            "[BulkInvitePersonalization] invite #{invite.id}: attempt #{attempt + 1}/#{MAX_ATTEMPTS} " \
+              "failed (#{e.message}) -- retrying",
+          )
+        end
+      end
+
+      raise last_error
+    end
+
+    def self.attempt_personalize(llm, invite, base_text_without_link, link, extra_keywords: nil)
       response = call_llm(llm, invite, base_text_without_link, extra_keywords: extra_keywords)
       if response.blank?
         raise GenerationFailed,
@@ -115,6 +146,7 @@ module BulkInvitePersonalization
       )
       raise GenerationFailed, "#{e.class}: #{e.message}"
     end
+    private_class_method :attempt_personalize
 
     def self.enabled?
       defined?(DiscourseAi) && SiteSetting.discourse_ai_enabled &&
