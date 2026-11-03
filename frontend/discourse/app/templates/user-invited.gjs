@@ -23,13 +23,6 @@ export default <template>
           @route="userInvited.show"
           @routeParam="redeemed"
         />
-        {{#if @controller.showExtractedTab}}
-          <DNavItem
-            @i18nLabel={{@controller.extractedLabel}}
-            @route="userInvited.show"
-            @routeParam="extracted"
-          />
-        {{/if}}
       </DHorizontalOverflowNav>
     </div>
   {{/if}}

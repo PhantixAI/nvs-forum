@@ -3,6 +3,7 @@ import { cached, tracked } from "@glimmer/tracking";
 import { hash } from "@ember/helper";
 import { action } from "@ember/object";
 import { trackedArray, trackedSet } from "@ember/reactive/collections";
+import willDestroy from "@ember/render-modifiers/modifiers/will-destroy";
 import { service } from "@ember/service";
 import SiteSetting from "discourse/admin/models/site-setting";
 import PredefinedTopicsOptionsModal from "discourse/components/admin-onboarding/modal/predefined-topics-options";
@@ -16,6 +17,7 @@ import { applyValueTransformer } from "discourse/lib/transformer";
 import { defaultHomepage } from "discourse/lib/utilities";
 import DButton from "discourse/ui-kit/d-button";
 import dIcon from "discourse/ui-kit/helpers/d-icon";
+import dOnResize from "discourse/ui-kit/modifiers/d-on-resize";
 import { i18n } from "discourse-i18n";
 
 const DEFAULT_LOCATION = "above_main_container";
@@ -157,6 +159,8 @@ export default class AdminOnboardingBanner extends Component {
       .map((Step) => Step.name)
   );
 
+  #heightContainer;
+
   constructor() {
     super(...arguments);
     this.appEvents.on(
@@ -250,6 +254,24 @@ export default class AdminOnboardingBanner extends Component {
   }
 
   @action
+  updateHeight(entries) {
+    const element = entries[0].target;
+    this.#heightContainer = element.parentElement;
+    this.#heightContainer.style.setProperty(
+      "--admin-onboarding-banner-height",
+      `${element.getBoundingClientRect().height}px`
+    );
+  }
+
+  @action
+  clearHeight() {
+    this.#heightContainer?.style.removeProperty(
+      "--admin-onboarding-banner-height"
+    );
+    this.#heightContainer = undefined;
+  }
+
+  @action
   async endOnboarding({ skipped = true } = {}) {
     await SiteSetting.update("enable_site_owner_onboarding", false);
     await logOnboardingEvent(skipped ? "dismissed" : "completed");
@@ -270,7 +292,11 @@ export default class AdminOnboardingBanner extends Component {
 
   <template>
     {{#if this.shouldDisplay}}
-      <div class="admin-onboarding-banner">
+      <div
+        class="admin-onboarding-banner"
+        {{dOnResize this.updateHeight}}
+        {{willDestroy this.clearHeight}}
+      >
         <div class="admin-onboarding-banner__wrap">
           <div class="admin-onboarding-banner__header">
             <div class="admin-onboarding-banner__header-text">

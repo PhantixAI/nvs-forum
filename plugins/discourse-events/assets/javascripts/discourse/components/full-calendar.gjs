@@ -43,9 +43,9 @@ export default class FullCalendar extends Component {
 
   @tracked isRendered = false;
   @tracked toolbarExtraAnchor = null;
+  element = null;
 
   calendar = null;
-  element = null;
 
   // TODO: remove this workaround when updating to fullcalendar v7
   forceUpdateSize = modifierFn((element) => {

@@ -1,4 +1,5 @@
 import { service } from "@ember/service";
+import { Promise } from "rsvp";
 import { ajax } from "discourse/lib/ajax";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import DiscourseRoute from "discourse/routes/discourse";
@@ -14,8 +15,7 @@ export default class Users extends DiscourseRoute {
     order: { refreshModel: true },
     asc: { refreshModel: true },
     name: { refreshModel: false, replace: true },
-    filters: { refreshModel: true },
-    staff_only: { refreshModel: true },
+    group: { refreshModel: true },
     exclude_groups: { refreshModel: true },
     exclude_usernames: { refreshModel: true },
   };
@@ -31,11 +31,11 @@ export default class Users extends DiscourseRoute {
         order: "likes_received",
         asc: null,
         name: "",
-        filters: null,
-        staff_only: false,
+        group: null,
         exclude_usernames: null,
         exclude_groups: null,
         lastUpdatedAt: null,
+        groupOptions: null,
       });
     }
   }
@@ -63,6 +63,13 @@ export default class Users extends DiscourseRoute {
 
   setupController(controller, { columns, params }) {
     controller.set("columns", columns);
-    return controller.loadUsers(params);
+    const promises = [controller.loadUsers(params)];
+
+    // Only load groups on first load, not on every refresh
+    if (!controller.groupOptions) {
+      promises.push(controller.loadGroups());
+    }
+
+    return Promise.all(promises);
   }
 }

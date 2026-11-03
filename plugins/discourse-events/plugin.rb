@@ -321,6 +321,7 @@ after_initialize do
   require_relative "lib/discourse_events/events/excerpt"
   require_relative "lib/discourse_events/events/finder"
   require_relative "lib/discourse_events/events/onebox_data"
+  require_relative "lib/discourse_events/events/onebox_occurrence"
   require_relative "lib/discourse_events/events/parser"
   require_relative "lib/discourse_events/events/validator"
   require_relative "lib/discourse_events/events/export_csv_controller_extension"
@@ -478,6 +479,17 @@ after_initialize do
           {}
         end
       end
+  end
+
+  add_to_serializer(
+    :post,
+    :event_onebox_occurrences,
+    include_condition: -> do
+      SiteSetting.discourse_post_event_enabled && event_onebox_occurrences.present?
+    end,
+  ) do
+    @event_onebox_occurrences ||=
+      DiscourseEvents::Events::OneboxOccurrence.for_cooked(object.cooked)
   end
 
   sync_event_from_post = ->(post) do
@@ -855,6 +867,10 @@ after_initialize do
   on(:reduce_cooked) do |fragment, post|
     if SiteSetting.discourse_post_event_enabled
       fragment
+        .css(".discourse-event-onebox")
+        .each { |node| DiscourseEvents::Events::OneboxOccurrence.new(node).apply! }
+
+      fragment
         .css(".discourse-post-event")
         .each do |event_node|
           event_node.replace(DiscourseEvents::Events::EmailRenderer.render(event_node, post))
@@ -1027,6 +1043,25 @@ after_initialize do
   ) { object.topic.topic_chat_channel.chat_channel_id }
 
   add_to_serializer(:topic_view, :has_livestream) { object.topic.first_post&.event&.livestream? }
+
+  add_to_serializer(:topic_view, :livestream_chat_active) do
+    !!object.topic.first_post&.event&.livestream_chat_active?
+  end
+
+  on(:discourse_post_event_event_ended) do |event, event_date|
+    if event.livestream?
+      Jobs.enqueue(:publish_livestream_chat_transcript, event_date_id: event_date.id)
+    end
+  end
+
+  # Any status set since the event closed the chat is deliberate, so a resumed
+  # event leaves it be.
+  on(:chat_channel_status_change) do |channel:, **|
+    DiscourseEvents::Livestream::TopicChatChannel.where(
+      chat_channel_id: channel.id,
+      closed_on_event_end: true,
+    ).update_all(closed_on_event_end: false)
+  end
 
   add_to_serializer(
     :topic_view,

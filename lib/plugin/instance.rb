@@ -987,6 +987,10 @@ class Plugin::Instance
   #
   # This is a very rough initial implementation
   def gem(name, version, opts = {})
+    if metadata.gemfile
+      raise "Plugin #{directory_name} declares its gems in a Gemfile, `gem` can't be mixed with that"
+    end
+
     PluginGem.load(path, name, version, opts)
   end
 
@@ -1446,9 +1450,8 @@ class Plugin::Instance
     DiscoursePluginRegistry.register_stat(stat, self)
   end
 
-  # Registers a KPI tile in the admin dashboard "Highlights" section
-  # (gated by the dashboard_improvements upcoming change). The KPI is rendered
-  # as a tile linking to /admin/reports/:report.
+  # Registers a KPI tile in the admin dashboard "Highlights" section. The KPI
+  # is rendered as a tile linking to /admin/reports/:report.
   #
   # @param type [Symbol] unique identifier for the KPI. Used as the i18n key
   #   (admin.dashboard.highlights.kpi.<type>.label / .tooltip) and to
@@ -1463,9 +1466,9 @@ class Plugin::Instance
     )
   end
 
-  # Registers a whole section in the redesigned admin dashboard (gated by the
-  # dashboard_improvements upcoming change). The matching client-side section
-  # component must be registered via the JS `api.registerAdminDashboardSection`.
+  # Registers a whole section in the admin dashboard. The matching client-side
+  # section component must be registered via the JS
+  # `api.registerAdminDashboardSection`.
   #
   # @param id [String] unique section id. Matched against the persisted
   #   configuration and the client-side component registry.

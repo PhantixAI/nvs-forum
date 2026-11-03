@@ -48,8 +48,7 @@ module Jobs
       end
 
       PushNotificationPusher.push(user, payload.deep_dup) if user.push_subscriptions.exists?
-      FcmPushNotificationPusher.push(user, payload.deep_dup)
-      ApnsPushNotificationPusher.push(user, payload.deep_dup)
+      HubPushNotificationPusher.push(user, payload.deep_dup)
     end
 
     # Translations are usually stored seconds after the post, so a push sent right

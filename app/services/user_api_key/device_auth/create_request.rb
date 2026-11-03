@@ -10,7 +10,6 @@ class UserApiKey::DeviceAuth::CreateRequest
     attribute :application_name, :string
     attribute :public_key, :string
     attribute :push_url, :string
-    attribute :platform, :string
     attribute :padding, :string
     attribute :expires_in_seconds, :string
 

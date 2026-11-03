@@ -1,6 +1,7 @@
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
+SET transaction_timeout = 0;
 SET client_encoding = 'UTF8';
 SET standard_conforming_strings = on;
 SELECT pg_catalog.set_config('search_path', '', false);
@@ -187,12 +188,13 @@ CREATE TABLE public.access_control_lists (
     id bigint NOT NULL,
     target_type character varying(255) NOT NULL,
     target_id bigint NOT NULL,
-    owner character varying(100) NOT NULL,
+    owner character varying(100),
     permission character varying(100) NOT NULL,
     allowed_user_ids bigint[] DEFAULT '{}'::bigint[] NOT NULL,
     allowed_group_ids bigint[] DEFAULT '{}'::bigint[] NOT NULL,
     created_at timestamp(6) without time zone NOT NULL,
-    updated_at timestamp(6) without time zone NOT NULL
+    updated_at timestamp(6) without time zone NOT NULL,
+    source character varying(100) NOT NULL
 );
 
 
@@ -796,7 +798,7 @@ ALTER SEQUENCE public.ai_artifacts_id_seq OWNED BY public.ai_artifacts.id;
 --
 
 CREATE TABLE public.ai_document_fragments_embeddings (
-    rag_document_fragment_id bigint NOT NULL,
+    rag_document_fragment_id bigint CONSTRAINT ai_document_fragments_embeddi_rag_document_fragment_id_not_null NOT NULL,
     model_id bigint NOT NULL,
     model_version integer NOT NULL,
     strategy_id integer NOT NULL,
@@ -885,7 +887,7 @@ CREATE TABLE public.ai_mcp_servers (
     oauth_authorization_params jsonb DEFAULT '{}'::jsonb NOT NULL,
     oauth_token_params jsonb DEFAULT '{}'::jsonb NOT NULL,
     oauth_require_refresh_token boolean DEFAULT false NOT NULL,
-    oauth_token_endpoint_auth_methods_supported jsonb DEFAULT '[]'::jsonb NOT NULL
+    oauth_token_endpoint_auth_methods_supported jsonb DEFAULT '[]'::jsonb CONSTRAINT ai_mcp_servers_oauth_token_endpoint_auth_methods_suppo_not_null NOT NULL
 );
 
 
@@ -1455,7 +1457,16 @@ CREATE TABLE public.ask_ai_logs (
     ask_tab_switched_after_ms integer DEFAULT 0 NOT NULL,
     ask_scope character varying DEFAULT ''::character varying NOT NULL,
     ask_scope_model character varying DEFAULT ''::character varying NOT NULL,
-    ask_scope_probability double precision DEFAULT 0.0 NOT NULL
+    ask_scope_probability double precision DEFAULT 0.0 NOT NULL,
+    ai_agent_id bigint,
+    llm_id bigint,
+    no_answer_reason integer,
+    time_to_outcome_ms integer,
+    answer_requested_at timestamp(6) without time zone,
+    ask_tab_opened_after_ms integer DEFAULT 0 NOT NULL,
+    ask_answer_seen_after_ms integer,
+    ask_result_clicked_tab character varying DEFAULT ''::character varying NOT NULL,
+    ask_result_clicked_after_ms integer DEFAULT 0 NOT NULL
 );
 
 
@@ -2166,6 +2177,197 @@ ALTER SEQUENCE public.badges_id_seq OWNED BY public.badges.id;
 
 
 --
+-- Name: blog_paths; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.blog_paths (
+    id bigint NOT NULL,
+    publication_id bigint NOT NULL,
+    path character varying NOT NULL,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+
+--
+-- Name: blog_paths_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.blog_paths_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: blog_paths_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.blog_paths_id_seq OWNED BY public.blog_paths.id;
+
+
+--
+-- Name: blog_publications; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.blog_publications (
+    id bigint NOT NULL,
+    topic_id bigint NOT NULL,
+    publisher_id bigint,
+    path character varying NOT NULL,
+    excerpt character varying DEFAULT ''::character varying NOT NULL,
+    featured boolean DEFAULT false NOT NULL,
+    published boolean DEFAULT false NOT NULL,
+    published_at timestamp(6) without time zone,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL,
+    draft_topic_id bigint,
+    discussion_topic_id bigint,
+    published_revision_id bigint,
+    submitted_revision_id bigint,
+    approved_revision_id bigint,
+    scheduled_revision_id bigint,
+    scheduler_id bigint,
+    scheduled_at timestamp(6) without time zone,
+    last_published_at timestamp(6) without time zone,
+    schedule_token character varying,
+    schedule_error text DEFAULT ''::text NOT NULL,
+    draft_metadata jsonb DEFAULT '{}'::jsonb NOT NULL
+);
+
+
+--
+-- Name: blog_publications_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.blog_publications_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: blog_publications_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.blog_publications_id_seq OWNED BY public.blog_publications.id;
+
+
+--
+-- Name: blog_review_feedback; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.blog_review_feedback (
+    id bigint NOT NULL,
+    review_id bigint NOT NULL,
+    name character varying(100) DEFAULT ''::character varying NOT NULL,
+    email character varying(254) DEFAULT ''::character varying NOT NULL,
+    message text NOT NULL,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+
+--
+-- Name: blog_review_feedback_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.blog_review_feedback_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: blog_review_feedback_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.blog_review_feedback_id_seq OWNED BY public.blog_review_feedback.id;
+
+
+--
+-- Name: blog_reviews; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.blog_reviews (
+    id bigint NOT NULL,
+    topic_id bigint NOT NULL,
+    creator_id bigint NOT NULL,
+    label character varying(100) DEFAULT ''::character varying NOT NULL,
+    title character varying NOT NULL,
+    cooked text NOT NULL,
+    post_version integer NOT NULL,
+    expires_at timestamp(6) without time zone NOT NULL,
+    revoked_at timestamp(6) without time zone,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL,
+    token character varying(64),
+    revoked_by_publish boolean DEFAULT false NOT NULL
+);
+
+
+--
+-- Name: blog_reviews_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.blog_reviews_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: blog_reviews_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.blog_reviews_id_seq OWNED BY public.blog_reviews.id;
+
+
+--
+-- Name: blog_revisions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.blog_revisions (
+    id bigint NOT NULL,
+    publication_id bigint NOT NULL,
+    source_topic_id bigint NOT NULL,
+    creator_id bigint NOT NULL,
+    data jsonb DEFAULT '{}'::jsonb NOT NULL,
+    approver_id bigint,
+    approved_at timestamp(6) without time zone,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+
+--
+-- Name: blog_revisions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.blog_revisions_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: blog_revisions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.blog_revisions_id_seq OWNED BY public.blog_revisions.id;
+
+
+--
 -- Name: bookmarks; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2214,8 +2416,8 @@ CREATE TABLE public.browser_pageview_country_daily_rollups (
     country_code character varying(2),
     count bigint NOT NULL,
     logged_in_count bigint NOT NULL,
-    likely_crawler_count bigint DEFAULT 0 NOT NULL,
-    likely_crawler_logged_in_count bigint DEFAULT 0 NOT NULL
+    likely_crawler_count bigint DEFAULT 0 CONSTRAINT browser_pageview_country_daily_ro_likely_crawler_count_not_null NOT NULL,
+    likely_crawler_logged_in_count bigint DEFAULT 0 CONSTRAINT browser_pageview_country_da_likely_crawler_logged_in_c_not_null NOT NULL
 );
 
 
@@ -2278,9 +2480,9 @@ CREATE TABLE public.browser_pageview_entry_url_daily_rollups (
     date date NOT NULL,
     entry_url character varying(2000) NOT NULL,
     count bigint NOT NULL,
-    logged_in_count bigint NOT NULL,
-    likely_crawler_count bigint DEFAULT 0 NOT NULL,
-    likely_crawler_logged_in_count bigint DEFAULT 0 NOT NULL
+    logged_in_count bigint CONSTRAINT browser_pageview_entry_url_daily_rollu_logged_in_count_not_null NOT NULL,
+    likely_crawler_count bigint DEFAULT 0 CONSTRAINT browser_pageview_entry_url_daily__likely_crawler_count_not_null NOT NULL,
+    likely_crawler_logged_in_count bigint DEFAULT 0 CONSTRAINT browser_pageview_entry_url__likely_crawler_logged_in_c_not_null NOT NULL
 );
 
 
@@ -2319,7 +2521,7 @@ CREATE TABLE public.browser_pageview_event_scores (
     engagement_score smallint DEFAULT 0 NOT NULL,
     ip_rotation_score smallint DEFAULT 0 NOT NULL,
     datacenter_asn_score smallint DEFAULT 0 NOT NULL,
-    single_request_no_referrer_score smallint DEFAULT 0 NOT NULL,
+    single_request_no_referrer_score smallint DEFAULT 0 CONSTRAINT browser_pageview_event_scor_single_request_no_referrer_not_null NOT NULL,
     stale_browser_score smallint DEFAULT 0 NOT NULL
 );
 
@@ -2331,7 +2533,7 @@ CREATE TABLE public.browser_pageview_event_scores (
 CREATE TABLE public.browser_pageview_event_scores_backup (
     id bigint NOT NULL,
     event_id bigint NOT NULL,
-    automation_ua_score smallint NOT NULL,
+    automation_ua_score smallint CONSTRAINT browser_pageview_event_scores_back_automation_ua_score_not_null NOT NULL,
     known_asn_score smallint NOT NULL,
     velocity_score smallint NOT NULL,
     churn_score smallint NOT NULL,
@@ -2339,9 +2541,9 @@ CREATE TABLE public.browser_pageview_event_scores_backup (
     referrer_score smallint NOT NULL,
     engagement_score smallint NOT NULL,
     ip_rotation_score smallint NOT NULL,
-    datacenter_asn_score smallint NOT NULL,
-    single_request_no_referrer_score smallint NOT NULL,
-    stale_browser_score smallint NOT NULL
+    datacenter_asn_score smallint CONSTRAINT browser_pageview_event_scores_bac_datacenter_asn_score_not_null NOT NULL,
+    single_request_no_referrer_score smallint CONSTRAINT browser_pageview_event_sco_single_request_no_referrer_not_null1 NOT NULL,
+    stale_browser_score smallint CONSTRAINT browser_pageview_event_scores_back_stale_browser_score_not_null NOT NULL
 );
 
 
@@ -2448,9 +2650,9 @@ CREATE TABLE public.browser_pageview_referrer_daily_rollups (
     date date NOT NULL,
     normalized_referrer character varying(2000),
     count bigint NOT NULL,
-    logged_in_count bigint NOT NULL,
-    likely_crawler_count bigint DEFAULT 0 NOT NULL,
-    likely_crawler_logged_in_count bigint DEFAULT 0 NOT NULL
+    logged_in_count bigint CONSTRAINT browser_pageview_referrer_daily_rollup_logged_in_count_not_null NOT NULL,
+    likely_crawler_count bigint DEFAULT 0 CONSTRAINT browser_pageview_referrer_daily_r_likely_crawler_count_not_null NOT NULL,
+    likely_crawler_logged_in_count bigint DEFAULT 0 CONSTRAINT browser_pageview_referrer_d_likely_crawler_logged_in_c_not_null NOT NULL
 );
 
 
@@ -2480,13 +2682,13 @@ ALTER SEQUENCE public.browser_pageview_referrer_daily_rollups_id_seq OWNED BY pu
 CREATE TABLE public.browser_pageview_session_engagement_daily_rollups (
     id bigint NOT NULL,
     date date NOT NULL,
-    logged_in boolean NOT NULL,
-    sessions bigint NOT NULL,
-    bounced bigint NOT NULL,
-    engaged_seconds_total bigint NOT NULL,
-    likely_crawler_sessions bigint DEFAULT 0 NOT NULL,
-    likely_crawler_bounced bigint DEFAULT 0 NOT NULL,
-    likely_crawler_engaged_seconds_total bigint DEFAULT 0 NOT NULL
+    logged_in boolean CONSTRAINT browser_pageview_session_engagement_daily_ro_logged_in_not_null NOT NULL,
+    sessions bigint CONSTRAINT browser_pageview_session_engagement_daily_rol_sessions_not_null NOT NULL,
+    bounced bigint CONSTRAINT browser_pageview_session_engagement_daily_roll_bounced_not_null NOT NULL,
+    engaged_seconds_total bigint CONSTRAINT browser_pageview_session_engagem_engaged_seconds_total_not_null NOT NULL,
+    likely_crawler_sessions bigint DEFAULT 0 CONSTRAINT browser_pageview_session_engag_likely_crawler_sessions_not_null NOT NULL,
+    likely_crawler_bounced bigint DEFAULT 0 CONSTRAINT browser_pageview_session_engage_likely_crawler_bounced_not_null NOT NULL,
+    likely_crawler_engaged_seconds_total bigint DEFAULT 0 CONSTRAINT browser_pageview_session_en_likely_crawler_engaged_sec_not_null NOT NULL
 );
 
 
@@ -2521,7 +2723,7 @@ CREATE TABLE public.browser_pageview_session_engagements (
     key_events integer DEFAULT 0 NOT NULL,
     scroll_events integer DEFAULT 0 NOT NULL,
     touch_events integer DEFAULT 0 NOT NULL,
-    back_forward_events integer DEFAULT 0 NOT NULL,
+    back_forward_events integer DEFAULT 0 CONSTRAINT browser_pageview_session_engagemen_back_forward_events_not_null NOT NULL,
     engaged_seconds integer DEFAULT 0 NOT NULL,
     time_to_first_interaction_ms integer,
     created_at timestamp(6) without time zone NOT NULL,
@@ -2630,7 +2832,7 @@ CREATE TABLE public.category_activity_daily_rollups (
     topics integer DEFAULT 0 NOT NULL,
     posts integer DEFAULT 0 NOT NULL,
     page_views bigint DEFAULT 0 NOT NULL,
-    likely_crawler_page_views bigint DEFAULT 0 NOT NULL
+    likely_crawler_page_views bigint DEFAULT 0 CONSTRAINT category_activity_daily_roll_likely_crawler_page_views_not_null NOT NULL
 );
 
 
@@ -4121,7 +4323,7 @@ CREATE TABLE public.decision_model_credit_allocations (
     id bigint NOT NULL,
     decision_model_id bigint NOT NULL,
     daily_credits bigint NOT NULL,
-    soft_limit_percentage integer DEFAULT 80 NOT NULL,
+    soft_limit_percentage integer DEFAULT 80 CONSTRAINT decision_model_credit_allocation_soft_limit_percentage_not_null NOT NULL,
     created_at timestamp(6) without time zone NOT NULL,
     updated_at timestamp(6) without time zone NOT NULL
 );
@@ -4963,7 +5165,8 @@ CREATE TABLE public.discourse_post_event_events (
     max_attendees integer,
     all_day boolean DEFAULT false NOT NULL,
     image_upload_id bigint,
-    livestream boolean DEFAULT false NOT NULL
+    livestream boolean DEFAULT false NOT NULL,
+    recording_url character varying(1000)
 );
 
 
@@ -5435,8 +5638,8 @@ CREATE TABLE public.discourse_workflows_ai_authoring_sessions (
     status character varying(40) DEFAULT 'drafting'::character varying NOT NULL,
     messages jsonb DEFAULT '[]'::jsonb NOT NULL,
     latest_request text,
-    latest_response jsonb DEFAULT '{}'::jsonb NOT NULL,
-    proposed_patch jsonb DEFAULT '{}'::jsonb NOT NULL,
+    latest_response jsonb DEFAULT '{}'::jsonb CONSTRAINT discourse_workflows_ai_authoring_sessi_latest_response_not_null NOT NULL,
+    proposed_patch jsonb DEFAULT '{}'::jsonb CONSTRAINT discourse_workflows_ai_authoring_sessio_proposed_patch_not_null NOT NULL,
     base_workflow_version_id character varying(36),
     base_graph_digest character varying(64),
     risk_level character varying(20),
@@ -5766,12 +5969,12 @@ ALTER SEQUENCE public.discourse_workflows_webhooks_id_seq OWNED BY public.discou
 
 CREATE TABLE public.discourse_workflows_workflow_call_runs (
     id bigint NOT NULL,
-    parent_execution_id bigint NOT NULL,
+    parent_execution_id bigint CONSTRAINT discourse_workflows_workflow_call__parent_execution_id_not_null NOT NULL,
     parent_node_id character varying(100) NOT NULL,
-    parent_resume_token character varying(64) NOT NULL,
+    parent_resume_token character varying(64) CONSTRAINT discourse_workflows_workflow_call__parent_resume_token_not_null NOT NULL,
     child_execution_id bigint,
-    target_workflow_id bigint NOT NULL,
-    target_workflow_version_id character varying(36) NOT NULL,
+    target_workflow_id bigint CONSTRAINT discourse_workflows_workflow_call_r_target_workflow_id_not_null NOT NULL,
+    target_workflow_version_id character varying(36) CONSTRAINT discourse_workflows_workflo_target_workflow_version_id_not_null NOT NULL,
     user_id bigint,
     trigger_data jsonb DEFAULT '{}'::jsonb NOT NULL,
     status integer DEFAULT 0 NOT NULL,
@@ -5807,8 +6010,8 @@ ALTER SEQUENCE public.discourse_workflows_workflow_call_runs_id_seq OWNED BY pub
 CREATE TABLE public.discourse_workflows_workflow_dependencies (
     id bigint NOT NULL,
     workflow_id bigint NOT NULL,
-    dependency_type character varying(50) NOT NULL,
-    dependency_key character varying(500) NOT NULL,
+    dependency_type character varying(50) CONSTRAINT discourse_workflows_workflow_dependenc_dependency_type_not_null NOT NULL,
+    dependency_key character varying(500) CONSTRAINT discourse_workflows_workflow_dependenci_dependency_key_not_null NOT NULL,
     node_id character varying(100),
     workflow_version_id character varying(36),
     created_at timestamp(6) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
@@ -5840,11 +6043,11 @@ ALTER SEQUENCE public.discourse_workflows_workflow_dependencies_id_seq OWNED BY 
 
 CREATE TABLE public.discourse_workflows_workflow_publish_history (
     id bigint NOT NULL,
-    workflow_id bigint NOT NULL,
+    workflow_id bigint CONSTRAINT discourse_workflows_workflow_publish_histo_workflow_id_not_null NOT NULL,
     version_id character varying(36),
     event character varying(32) NOT NULL,
     user_id integer,
-    created_at timestamp(6) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+    created_at timestamp(6) without time zone DEFAULT CURRENT_TIMESTAMP CONSTRAINT discourse_workflows_workflow_publish_histor_created_at_not_null NOT NULL
 );
 
 
@@ -6823,7 +7026,7 @@ CREATE TABLE public.group_category_notification_defaults (
     id bigint NOT NULL,
     group_id integer NOT NULL,
     category_id integer NOT NULL,
-    notification_level integer NOT NULL
+    notification_level integer CONSTRAINT group_category_notification_default_notification_level_not_null NOT NULL
 );
 
 
@@ -7506,10 +7709,12 @@ CREATE TABLE public.invites (
     admin boolean DEFAULT false NOT NULL,
     recipient_name character varying(100),
     recipient_keywords text,
-    skip_personalization boolean DEFAULT false NOT NULL,
     email_domain character varying,
     allow_any_email boolean DEFAULT false NOT NULL,
-    schedule_send boolean DEFAULT true NOT NULL
+    schedule_send boolean DEFAULT true NOT NULL,
+    custom_subject character varying,
+    ai_personalization boolean DEFAULT true NOT NULL,
+    source_url character varying(2048)
 );
 
 
@@ -7838,7 +8043,9 @@ CREATE TABLE public.livestream_topic_chat_channels (
     chat_channel_id bigint NOT NULL,
     created_at timestamp(6) without time zone NOT NULL,
     updated_at timestamp(6) without time zone NOT NULL,
-    reference_message_id bigint
+    reference_message_id bigint,
+    last_transcribed_message_id bigint,
+    closed_on_event_end boolean DEFAULT false NOT NULL
 );
 
 
@@ -8206,7 +8413,7 @@ ALTER SEQUENCE public.mcp_oauth_access_tokens_id_seq OWNED BY public.mcp_oauth_a
 CREATE TABLE public.mcp_oauth_authorization_codes (
     id bigint NOT NULL,
     code_hash character varying NOT NULL,
-    mcp_oauth_authorization_id bigint NOT NULL,
+    mcp_oauth_authorization_id bigint CONSTRAINT mcp_oauth_authorization_cod_mcp_oauth_authorization_id_not_null NOT NULL,
     redirect_uri character varying NOT NULL,
     resource character varying NOT NULL,
     code_challenge character varying NOT NULL,
@@ -8245,7 +8452,7 @@ ALTER SEQUENCE public.mcp_oauth_authorization_codes_id_seq OWNED BY public.mcp_o
 
 CREATE TABLE public.mcp_oauth_authorization_scopes (
     id bigint NOT NULL,
-    mcp_oauth_authorization_id bigint NOT NULL,
+    mcp_oauth_authorization_id bigint CONSTRAINT mcp_oauth_authorization_sco_mcp_oauth_authorization_id_not_null NOT NULL,
     name character varying NOT NULL,
     created_at timestamp(6) without time zone NOT NULL,
     updated_at timestamp(6) without time zone NOT NULL
@@ -9422,7 +9629,9 @@ CREATE TABLE public.post_revisions (
     number integer,
     created_at timestamp without time zone NOT NULL,
     updated_at timestamp without time zone NOT NULL,
-    hidden boolean DEFAULT false NOT NULL
+    hidden boolean DEFAULT false NOT NULL,
+    unlisted boolean DEFAULT false NOT NULL,
+    CONSTRAINT post_revisions_hidden_unlisted_exclusive CHECK ((NOT (hidden AND unlisted)))
 );
 
 
@@ -9516,7 +9725,7 @@ CREATE TABLE public.post_timings (
 
 CREATE TABLE public.post_voting_comment_custom_fields (
     id bigint NOT NULL,
-    post_voting_comment_id bigint NOT NULL,
+    post_voting_comment_id bigint CONSTRAINT post_voting_comment_custom_fiel_post_voting_comment_id_not_null NOT NULL,
     name character varying(256) NOT NULL,
     value text,
     created_at timestamp(6) without time zone NOT NULL,
@@ -11284,7 +11493,7 @@ CREATE TABLE public.theme_settings (
     theme_id integer NOT NULL,
     created_at timestamp without time zone NOT NULL,
     updated_at timestamp without time zone NOT NULL,
-    json_value jsonb
+    "json_value" jsonb
 );
 
 
@@ -12440,6 +12649,44 @@ ALTER SEQUENCE public.uploads_id_seq OWNED BY public.uploads.id;
 
 
 --
+-- Name: url_extraction_requests; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.url_extraction_requests (
+    id bigint NOT NULL,
+    created_by_id bigint NOT NULL,
+    url character varying NOT NULL,
+    rules text NOT NULL,
+    status integer DEFAULT 0 NOT NULL,
+    csv_text text,
+    warnings jsonb DEFAULT '[]'::jsonb NOT NULL,
+    error_message text,
+    rows_count integer,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+
+--
+-- Name: url_extraction_requests_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.url_extraction_requests_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: url_extraction_requests_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.url_extraction_requests_id_seq OWNED BY public.url_extraction_requests.id;
+
+
+--
 -- Name: user_actions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -12883,8 +13130,8 @@ CREATE TABLE public.user_chat_channel_memberships (
     last_read_message_id bigint,
     following boolean DEFAULT false NOT NULL,
     muted boolean DEFAULT false NOT NULL,
-    desktop_notification_level integer DEFAULT 1 NOT NULL,
-    mobile_notification_level integer DEFAULT 1 NOT NULL,
+    desktop_notification_level integer DEFAULT 1 CONSTRAINT user_chat_channel_membershi_desktop_notification_level_not_null NOT NULL,
+    mobile_notification_level integer DEFAULT 1 CONSTRAINT user_chat_channel_membership_mobile_notification_level_not_null NOT NULL,
     created_at timestamp(6) without time zone NOT NULL,
     updated_at timestamp(6) without time zone NOT NULL,
     last_unread_mention_when_emailed_id bigint,
@@ -13366,7 +13613,7 @@ CREATE TABLE public.user_options (
     discourse_rewind_enabled boolean DEFAULT true NOT NULL,
     notify_on_solved boolean DEFAULT true NOT NULL,
     show_original_content boolean DEFAULT false NOT NULL,
-    enable_upcoming_change_available_notifications boolean DEFAULT true NOT NULL,
+    enable_upcoming_change_available_notifications boolean DEFAULT true CONSTRAINT user_options_enable_upcoming_change_available_notifica_not_null NOT NULL,
     chat_announce_new_messages boolean DEFAULT true NOT NULL,
     chat_new_message_sound boolean DEFAULT false NOT NULL,
     push_notification_level integer DEFAULT 1 NOT NULL,
@@ -14394,6 +14641,41 @@ ALTER TABLE ONLY public.badge_types ALTER COLUMN id SET DEFAULT nextval('public.
 --
 
 ALTER TABLE ONLY public.badges ALTER COLUMN id SET DEFAULT nextval('public.badges_id_seq'::regclass);
+
+
+--
+-- Name: blog_paths id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.blog_paths ALTER COLUMN id SET DEFAULT nextval('public.blog_paths_id_seq'::regclass);
+
+
+--
+-- Name: blog_publications id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.blog_publications ALTER COLUMN id SET DEFAULT nextval('public.blog_publications_id_seq'::regclass);
+
+
+--
+-- Name: blog_review_feedback id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.blog_review_feedback ALTER COLUMN id SET DEFAULT nextval('public.blog_review_feedback_id_seq'::regclass);
+
+
+--
+-- Name: blog_reviews id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.blog_reviews ALTER COLUMN id SET DEFAULT nextval('public.blog_reviews_id_seq'::regclass);
+
+
+--
+-- Name: blog_revisions id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.blog_revisions ALTER COLUMN id SET DEFAULT nextval('public.blog_revisions_id_seq'::regclass);
 
 
 --
@@ -16343,6 +16625,13 @@ ALTER TABLE ONLY public.uploads ALTER COLUMN id SET DEFAULT nextval('public.uplo
 
 
 --
+-- Name: url_extraction_requests id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.url_extraction_requests ALTER COLUMN id SET DEFAULT nextval('public.url_extraction_requests_id_seq'::regclass);
+
+
+--
 -- Name: user_actions id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -16971,6 +17260,46 @@ ALTER TABLE ONLY public.badge_types
 
 ALTER TABLE ONLY public.badges
     ADD CONSTRAINT badges_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: blog_paths blog_paths_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.blog_paths
+    ADD CONSTRAINT blog_paths_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: blog_publications blog_publications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.blog_publications
+    ADD CONSTRAINT blog_publications_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: blog_review_feedback blog_review_feedback_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.blog_review_feedback
+    ADD CONSTRAINT blog_review_feedback_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: blog_reviews blog_reviews_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.blog_reviews
+    ADD CONSTRAINT blog_reviews_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: blog_revisions blog_revisions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.blog_revisions
+    ADD CONSTRAINT blog_revisions_pkey PRIMARY KEY (id);
 
 
 --
@@ -19270,6 +19599,14 @@ ALTER TABLE ONLY public.uploads
 
 
 --
+-- Name: url_extraction_requests url_extraction_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.url_extraction_requests
+    ADD CONSTRAINT url_extraction_requests_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: user_actions user_actions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -19787,6 +20124,20 @@ CREATE INDEX idx_ai_post_image_captions_reuse ON public.ai_post_image_captions U
 --
 
 CREATE UNIQUE INDEX idx_ai_summaries_on_target_type_and_locale ON public.ai_summaries USING btree (target_id, target_type, summary_type, locale) NULLS NOT DISTINCT;
+
+
+--
+-- Name: idx_blog_publications_scheduled_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_blog_publications_scheduled_at ON public.blog_publications USING btree (scheduled_at) WHERE (scheduled_at IS NOT NULL);
+
+
+--
+-- Name: idx_blog_review_feedback_review_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_blog_review_feedback_review_created ON public.blog_review_feedback USING btree (review_id, created_at);
 
 
 --
@@ -21418,6 +21769,69 @@ CREATE INDEX index_badges_on_badge_type_id ON public.badges USING btree (badge_t
 --
 
 CREATE UNIQUE INDEX index_badges_on_name ON public.badges USING btree (name);
+
+
+--
+-- Name: index_blog_paths_on_path; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_blog_paths_on_path ON public.blog_paths USING btree (path);
+
+
+--
+-- Name: index_blog_paths_on_publication_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_blog_paths_on_publication_id ON public.blog_paths USING btree (publication_id);
+
+
+--
+-- Name: index_blog_publications_on_discussion_topic_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_blog_publications_on_discussion_topic_id ON public.blog_publications USING btree (discussion_topic_id);
+
+
+--
+-- Name: index_blog_publications_on_draft_topic_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_blog_publications_on_draft_topic_id ON public.blog_publications USING btree (draft_topic_id);
+
+
+--
+-- Name: index_blog_publications_on_published_and_published_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_blog_publications_on_published_and_published_at ON public.blog_publications USING btree (published, published_at);
+
+
+--
+-- Name: index_blog_publications_on_topic_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_blog_publications_on_topic_id ON public.blog_publications USING btree (topic_id);
+
+
+--
+-- Name: index_blog_reviews_on_token; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_blog_reviews_on_token ON public.blog_reviews USING btree (token);
+
+
+--
+-- Name: index_blog_reviews_on_topic_id_and_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_blog_reviews_on_topic_id_and_created_at ON public.blog_reviews USING btree (topic_id, created_at);
+
+
+--
+-- Name: index_blog_revisions_on_publication_id_and_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_blog_revisions_on_publication_id_and_id ON public.blog_revisions USING btree (publication_id, id);
 
 
 --
@@ -25110,6 +25524,13 @@ CREATE INDEX index_uploads_on_user_id ON public.uploads USING btree (user_id);
 
 
 --
+-- Name: index_url_extraction_requests_on_created_by_id_and_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_url_extraction_requests_on_created_by_id_and_created_at ON public.url_extraction_requests USING btree (created_by_id, created_at);
+
+
+--
 -- Name: index_user_actions_on_acting_user_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -26212,6 +26633,24 @@ ALTER TABLE ONLY public.ad_plugin_house_ads_groups
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20261102194941'),
+('20261102174233'),
+('20261030215104'),
+('20261030180958'),
+('20261029021723'),
+('20261028093149'),
+('20261028093146'),
+('20261025200909'),
+('20261025200904'),
+('20261022101849'),
+('20261022101556'),
+('20261021180718'),
+('20261021180714'),
+('20261021063131'),
+('20261021063122'),
+('20261021061850'),
+('20261021060627'),
+('20261021060617'),
 ('20261020161054'),
 ('20261020160221'),
 ('20261019232249'),
@@ -26224,6 +26663,7 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20261015175355'),
 ('20261015175340'),
 ('20261015121116'),
+('20261014231432'),
 ('20261014224810'),
 ('20261014145458'),
 ('20261014065735'),
@@ -26239,6 +26679,9 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20261009130230'),
 ('20261009121104'),
 ('20261009113440'),
+('20261008205400'),
+('20261008184751'),
+('20261008173326'),
 ('20261008005940'),
 ('20261007082151'),
 ('20261006115238'),
@@ -26246,7 +26689,9 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20261006083655'),
 ('20261005091527'),
 ('20261005091447'),
+('20261003160021'),
 ('20261002200029'),
+('20261001153631'),
 ('20261001073226'),
 ('20260930114733'),
 ('20260928103925'),
@@ -26284,10 +26729,15 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20260916051233'),
 ('20260915204557'),
 ('20260915191328'),
+('20260915075802'),
+('20260915075800'),
+('20260915045302'),
 ('20260914213908'),
 ('20260914172801'),
 ('20260914172757'),
 ('20260914140746'),
+('20260914051629'),
+('20260914042438'),
 ('20260914032737'),
 ('20260913105655'),
 ('20260912113721'),
@@ -26298,9 +26748,12 @@ INSERT INTO "schema_migrations" (version) VALUES
 ('20260910030345'),
 ('20260909181443'),
 ('20260909132955'),
+('20260909033948'),
+('20260909022122'),
 ('20260908160656'),
 ('20260908153158'),
 ('20260908112615'),
+('20260908063229'),
 ('20260905074814'),
 ('20260904171256'),
 ('20260904065041'),

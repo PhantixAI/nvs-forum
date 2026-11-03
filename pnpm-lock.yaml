@@ -194,6 +194,9 @@ importers:
         specifier: ^5.51.2
         version: 5.51.2
     devDependencies:
+      vite:
+        specifier: ^8.2.4
+        version: 8.3.5(@types/node@26.4.0)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0)
       vitest:
         specifier: ^5.0.3
         version: 5.0.5(@types/node@26.4.0)(jsdom@26.1.0)(vite@8.3.5(@types/node@26.4.0)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0))
@@ -651,7 +654,7 @@ importers:
         specifier: ^0.12.5
         version: 0.12.5
       vite:
-        specifier: ^8.2.2
+        specifier: ^8.2.4
         version: 8.3.5(@types/node@26.4.0)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0)
       xss:
         specifier: 1.0.15
@@ -681,8 +684,8 @@ importers:
         specifier: workspace:1.0.0
         version: link:../discourse-i18n
       markdown-it:
-        specifier: ^15.0.2
-        version: 15.0.2
+        specifier: ^15.0.3
+        version: 15.0.3
       pretty-text:
         specifier: workspace:1.0.0
         version: link:../pretty-text
@@ -698,6 +701,9 @@ importers:
       compare-versions:
         specifier: ^6.1.1
         version: 6.1.1
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
 
   frontend/playwright-runner:
     dependencies:
@@ -736,8 +742,8 @@ importers:
         specifier: workspace:*
         version: link:../discourse-markdown-it
       markdown-it:
-        specifier: ^15.0.2
-        version: 15.0.2
+        specifier: ^15.0.3
+        version: 15.0.3
       pretty-text:
         specifier: workspace:*
         version: link:../pretty-text
@@ -751,272 +757,278 @@ importers:
   plugins/automation:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
+
+  plugins/blog:
+    dependencies:
+      discourse:
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/boards:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/chat:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/checklist:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-adplugin:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-affiliate:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-ai:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-apple-auth:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-assign:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-cakeday:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-captcha:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-chat-integration:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-data-explorer:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-details:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-events:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-gamification:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-github:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-graphviz:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-lazy-videos:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-local-dates:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-login-with-amazon:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-lti:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-math:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-microsoft-auth:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-narrative-bot:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-oauth2-basic:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-openid-connect:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-patreon:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-policy:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-post-voting:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-presence:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-reactions:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-rss-polling:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-solved:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-subscriptions:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-templates:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-topic-voting:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-user-notes:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/discourse-zendesk-plugin:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/footnote:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/live:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/poll:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/spoiler-alert:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   plugins/styleguide:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
   themes/horizon:
     dependencies:
       discourse:
-        specifier: npm:@discourse/types@2026.9.0-cc57a7e8
-        version: '@discourse/types@2026.9.0-cc57a7e8'
+        specifier: workspace:@discourse/types@*
+        version: link:../../frontend/discourse-types
 
 packages:
 
@@ -1886,10 +1898,6 @@ packages:
 
   '@discourse/resize@2.1.1':
     resolution: {integrity: sha512-iSPfgyCWTXsLcYoUN7/TxTbCSMlSqCI2v9/dCmg5dQdr/qi0TtRKjMzmSy7+8+Ns2v076IQDtdyfvBT8CQPd3g==}
-
-  '@discourse/types@2026.9.0-cc57a7e8':
-    resolution: {integrity: sha512-yxR72bEx7BWZZgyehZfu6GTbDFlyJFI9PHH9KBYmiftC9PSWjUAckraWBHN55DjKZuEVQW0HCDi/2PtXxTVlnA==}
-    engines: {node: '>= 20', npm: please-use-pnpm, pnpm: ^10, yarn: please-use-pnpm}
 
   '@discourse/webp@1.5.0':
     resolution: {integrity: sha512-2dXuEED+ISG26RbWij3NvdQmgHCD8ssnPoHMd0LnLKJc/dtd2lqg1dhrrA/WYDxfFoJaoGepoxFOsqe0d2/wqw==}
@@ -3324,9 +3332,6 @@ packages:
 
   argparse@2.0.1:
     resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
-
-  argparse@3.0.2:
-    resolution: {integrity: sha512-mFdDM6WqWKraGLsVb+C9CahPnzTXOefAOLq3jYcca2YZ8bEWpr++Tzj+zSaKW9+X9L5uSxcm1AZ3Y6aZJ09OhQ==}
 
   argparse@3.0.3:
     resolution: {integrity: sha512-Sn98ftV3KfsO8xfLPHG6oT8y+b0yvbrLgZjgPDXsharNY15tTAjqIsIju4S32nl6/iEUNNE4v+yL2Zhm8ooP3w==}
@@ -6036,8 +6041,8 @@ packages:
     resolution: {integrity: sha512-sHHjZ5fJKlgrG4qns2YwVcdNep35h5fERrfkD2YNsb9UFk0UIHarbiTaHKVMlPuWAoiilyK8Fv/jAm11slsY7Q==}
     hasBin: true
 
-  markdown-it@15.0.2:
-    resolution: {integrity: sha512-q4IGxMv56jCqT4OCRCADBoDP3LO4MhmTXjFbphHPXs4g3j9Xg5RDnxqN8IF/3vIWEU+VCnUq+7JUg/cfy2E6Qw==}
+  markdown-it@15.0.3:
+    resolution: {integrity: sha512-+Az7Ojz3iRGu8KYMvJ6xVhvrxP3eE+vEtJX75Ow88XBpcQNV/0lGX5ZynIIBftREo4DC2jsveAMDaeltmm8QvQ==}
     hasBin: true
 
   marked@4.3.0:
@@ -9358,8 +9363,6 @@ snapshots:
 
   '@discourse/resize@2.1.1': {}
 
-  '@discourse/types@2026.9.0-cc57a7e8': {}
-
   '@discourse/webp@1.5.0':
     dependencies:
       wasm-feature-detect: 1.8.0
@@ -11016,8 +11019,6 @@ snapshots:
       picomatch: 2.3.2
 
   argparse@2.0.1: {}
-
-  argparse@3.0.2: {}
 
   argparse@3.0.3: {}
 
@@ -14335,9 +14336,9 @@ snapshots:
       punycode.js: 2.3.1
       uc.micro: 2.1.0
 
-  markdown-it@15.0.2:
+  markdown-it@15.0.3:
     dependencies:
-      argparse: 3.0.2
+      argparse: 3.0.3
       entities: 8.1.0
       linkify-it: 6.1.0
       mdurl: 2.1.0
