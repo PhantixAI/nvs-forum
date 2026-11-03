@@ -212,14 +212,62 @@ class Invite < ActiveRecord::Base
   # the admin list (frontend/discourse/app/templates/user-invited/show.gjs)
   # even though it's no longer what controls redemption -- see
   # Jobs::BulkInvite's own allow_any_email comment for the same pattern.
+  #
+  # A previous CSV upload or an earlier Resend may already have created a
+  # separate invite -- bound or already shareable -- for this exact
+  # recipient under this inviter (Invite.generate's own dedupe only ever
+  # compares within its own form, see find_duplicate_for). The bulk "Send
+  # Invites"/"Resend Invites" action calls this once per matched invite
+  # with no cross-row check, so converting without deduping here would
+  # silently leave two parallel invites for the same person side by side --
+  # this is what produced the duplicate "link" rows on the admin invite
+  # list. DistributedMutex closes the window between two concurrent calls
+  # (e.g. two overlapping bulk actions) racing past the same check.
   def make_shareable!(max_redemptions_allowed, domain: nil)
-    update!(
-      description: description.presence || email,
-      email: nil,
-      allow_any_email: true,
-      max_redemptions_allowed: max_redemptions_allowed,
-      domain: domain.presence,
-    )
+    target = description.presence || email
+
+    DistributedMutex.synchronize(
+      "invite_make_shareable_#{invited_by_id}_#{Email.downcase(target)}",
+    ) do
+      duplicate = Invite.find_duplicate_for(invited_by, target, excluding: self)
+      # Only merge away a duplicate nobody has actually redeemed yet --
+      # folding away one with real redemptions on it isn't safe to do
+      # automatically.
+      duplicate.trash!(invited_by) if duplicate && duplicate.redemption_count.zero?
+
+      update!(
+        description: target,
+        email: nil,
+        allow_any_email: true,
+        max_redemptions_allowed: max_redemptions_allowed,
+        domain: domain.presence,
+      )
+    end
+  end
+
+  # Finds another live invite from the same inviter that's effectively "for"
+  # the same recipient, whether that other invite is currently bound (its
+  # own `email` column) or unbound/shareable (the real recipient kept in
+  # `description` -- see allow_any_email). #make_shareable! and
+  # Invite.generate's two dedupe branches each only compare within their
+  # own form, so converting one invite into the other (or creating one
+  # while the other already exists) would otherwise silently create a
+  # second, parallel invite for the same person.
+  def self.find_duplicate_for(invited_by, target_email, excluding: nil)
+    return if target_email.blank?
+
+    normalized = Email.downcase(target_email)
+    scope = where(invited_by_id: invited_by.id)
+    scope = scope.where.not(id: excluding.id) if excluding
+
+    scope
+      .where(
+        "(NOT allow_any_email AND lower(email) = :email) OR " \
+          "(allow_any_email AND lower(description) = :email)",
+        email: normalized,
+      )
+      .order(created_at: :desc)
+      .first
   end
 
   def domain_matches?(email)
@@ -265,103 +313,142 @@ class Invite < ActiveRecord::Base
 
     raise UserExists.new(new.user_exists_error_msg(email)) if find_user_by_email(email)
 
-    if email.present?
-      invite =
-        Invite
-          .with_deleted
-          .where(email: email, invited_by_id: invited_by.id)
-          .order("created_at DESC")
-          .first
+    invite = nil
+    was_admin = nil
+    emailed_status = nil
 
-      if invite && (invite.expired? || invite.deleted_at)
-        invite.destroy
-        invite = nil
-      end
-      email_digest = Digest::SHA256.hexdigest(email)
-      RateLimiter.new(
-        invited_by,
-        "reinvites-per-day-#{email_digest}",
-        SiteSetting.invite_reinvite_rate_limit_per_day,
-        1.day.to_i,
-      ).performed!
-    elsif unbound_description.present?
-      invite =
-        Invite
-          .with_deleted
-          .where(
-            description: unbound_description,
-            invited_by_id: invited_by.id,
-            allow_any_email: true,
+    # Serializes the whole lookup-then-create-or-update decision below
+    # against any other Invite.generate (or #make_shareable!) call for the
+    # same inviter+recipient -- e.g. two overlapping CSV uploads, or a
+    # double-submitted form. Without this, two concurrent calls could both
+    # see "no existing invite" and both create one, since nothing below is
+    # otherwise atomic across the SELECT and the INSERT/UPDATE.
+    lock_target = email || unbound_description
+    DistributedMutex.synchronize(
+      "invite_generate_#{invited_by&.id}_#{lock_target && Email.downcase(lock_target)}",
+    ) do
+      if email.present?
+        invite =
+          Invite
+            .with_deleted
+            .where(email: email, invited_by_id: invited_by.id)
+            .order("created_at DESC")
+            .first
+
+        if invite && (invite.expired? || invite.deleted_at)
+          invite.destroy
+          invite = nil
+        end
+
+        # Invite.generate's two dedupe forms (bound by email, here; unbound
+        # by description, below) never cross-check each other -- a CSV row
+        # that flips this recipient from one form to the other (or an
+        # earlier Resend that already did, via #make_shareable!) would
+        # otherwise create a second, parallel invite instead of converting
+        # the one that's already there. See find_duplicate_for.
+        if invite.nil? && (invite = find_duplicate_for(invited_by, email))
+          # A bound invite is only ever valid with max_redemptions_allowed: 1
+          # (see ensure_max_redemptions_allowed) -- the found invite may
+          # still be carrying a higher count left over from being a
+          # shareable link.
+          invite.update!(
+            email: email,
+            description: nil,
+            allow_any_email: false,
+            max_redemptions_allowed: 1,
           )
-          .order("created_at DESC")
-          .first
+        end
 
-      if invite && (invite.expired? || invite.deleted_at)
-        invite.destroy
-        invite = nil
+        email_digest = Digest::SHA256.hexdigest(email)
+        RateLimiter.new(
+          invited_by,
+          "reinvites-per-day-#{email_digest}",
+          SiteSetting.invite_reinvite_rate_limit_per_day,
+          1.day.to_i,
+        ).performed!
+      elsif unbound_description.present?
+        invite =
+          Invite
+            .with_deleted
+            .where(
+              description: unbound_description,
+              invited_by_id: invited_by.id,
+              allow_any_email: true,
+            )
+            .order("created_at DESC")
+            .first
+
+        if invite && (invite.expired? || invite.deleted_at)
+          invite.destroy
+          invite = nil
+        end
+
+        if invite.nil? && (invite = find_duplicate_for(invited_by, unbound_description))
+          invite.update!(email: nil, description: opts[:description], allow_any_email: true)
+        end
       end
-    end
 
-    emailed_status =
-      if opts[:skip_email] || invite&.emailed_status == emailed_status_types[:not_required]
-        emailed_status_types[:not_required]
-      elsif opts[:emailed_status].present?
-        opts[:emailed_status]
-      elsif email.present?
-        emailed_status_types[:pending]
+      emailed_status =
+        if opts[:skip_email] || invite&.emailed_status == emailed_status_types[:not_required]
+          emailed_status_types[:not_required]
+        elsif opts[:emailed_status].present?
+          opts[:emailed_status]
+        elsif email.present?
+          emailed_status_types[:pending]
+        else
+          emailed_status_types[:not_required]
+        end
+
+      if invite
+        was_admin = invite.admin?
+        # A re-upload (or resend) of an existing invite must be able to change
+        # the per-row personalization context. Only keys actually passed are
+        # touched, so callers that don't know about them leave them alone.
+        context =
+          opts.slice(
+            :recipient_name,
+            :recipient_keywords,
+            :ai_personalization,
+            :schedule_send,
+            :source_url,
+          )
+        invite.update!(context) if context.present?
+        invite.update_columns(
+          created_at: Time.zone.now,
+          updated_at: Time.zone.now,
+          expires_at: opts[:expires_at] || time_zone.now + SiteSetting.invite_expiry_days.days,
+          emailed_status: emailed_status,
+          # update_columns skips validations, so the inviter checks from
+          # ensure_valid_admin_invite / ensure_valid_moderator_invite have to be
+          # re-applied here
+          admin: !!opts[:admin] && !!invited_by&.admin?,
+          moderator: !!opts[:moderator] && !!invited_by&.staff?,
+        )
       else
-        emailed_status_types[:not_required]
+        create_args =
+          opts.slice(
+            :email,
+            :description,
+            :domain,
+            :moderator,
+            :admin,
+            :custom_message,
+            :max_redemptions_allowed,
+            :recipient_name,
+            :recipient_keywords,
+            :ai_personalization,
+            :schedule_send,
+            :allow_any_email,
+            :source_url,
+          )
+        create_args[:invited_by] = invited_by
+        create_args[:email] = email
+        create_args[:emailed_status] = emailed_status
+        create_args[:expires_at] = opts[:expires_at] ||
+          time_zone.now + SiteSetting.invite_expiry_days.days
+
+        invite = Invite.create!(create_args)
       end
-
-    if invite
-      was_admin = invite.admin?
-      # A re-upload (or resend) of an existing invite must be able to change
-      # the per-row personalization context. Only keys actually passed are
-      # touched, so callers that don't know about them leave them alone.
-      context =
-        opts.slice(
-          :recipient_name,
-          :recipient_keywords,
-          :ai_personalization,
-          :schedule_send,
-          :source_url,
-        )
-      invite.update!(context) if context.present?
-      invite.update_columns(
-        created_at: Time.zone.now,
-        updated_at: Time.zone.now,
-        expires_at: opts[:expires_at] || time_zone.now + SiteSetting.invite_expiry_days.days,
-        emailed_status: emailed_status,
-        # update_columns skips validations, so the inviter checks from
-        # ensure_valid_admin_invite / ensure_valid_moderator_invite have to be
-        # re-applied here
-        admin: !!opts[:admin] && !!invited_by&.admin?,
-        moderator: !!opts[:moderator] && !!invited_by&.staff?,
-      )
-    else
-      create_args =
-        opts.slice(
-          :email,
-          :description,
-          :domain,
-          :moderator,
-          :admin,
-          :custom_message,
-          :max_redemptions_allowed,
-          :recipient_name,
-          :recipient_keywords,
-          :ai_personalization,
-          :schedule_send,
-          :allow_any_email,
-          :source_url,
-        )
-      create_args[:invited_by] = invited_by
-      create_args[:email] = email
-      create_args[:emailed_status] = emailed_status
-      create_args[:expires_at] = opts[:expires_at] ||
-        time_zone.now + SiteSetting.invite_expiry_days.days
-
-      invite = Invite.create!(create_args)
     end
 
     DiscourseEvent.trigger(:admin_invite_created, invite) if invite.admin? && !was_admin
