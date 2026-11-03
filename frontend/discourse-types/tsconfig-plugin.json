@@ -14,7 +14,10 @@
     "declaration": true,
     "outDir": "declarations",
     "composite": true,
-    "typeRoots": ["./external-types"],
+    "tsBuildInfoFile": "${configDir}/tsconfig.tsbuildinfo",
+    "typeRoots": [
+      "./external-types"
+    ],
     "types": [
       "discourse-i18n",
       "ember-modifier",
@@ -33,5 +36,14 @@
       "rsvp",
       "sinon"
     ]
-  }
+  },
+  "contentMappers": [
+    {
+      "package": "ember-content-mapper",
+      "extensions": [
+        ".gts",
+        ".gjs"
+      ]
+    }
+  ]
 }

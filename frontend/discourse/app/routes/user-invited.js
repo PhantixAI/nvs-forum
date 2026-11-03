@@ -9,7 +9,6 @@ export default class UserInvited extends DiscourseRoute {
 
     controller.setProperties({
       can_see_invite_details,
-      viewingSelf: this.modelFor("user").id === this.currentUser?.id,
     });
   }
 

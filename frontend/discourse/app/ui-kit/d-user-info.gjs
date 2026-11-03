@@ -78,33 +78,26 @@ export default class DUserInfo extends Component {
             (if this.nameFirst "--name-first")
           }}
         >
-          {{! @nameOrUsernameOnly: collapse to a single label (name if present,
-            else username) instead of the default "both, name optional second" -- opt-in
-            per caller, default behavior elsewhere is unchanged. }}
-          {{#unless (and @nameOrUsernameOnly @user.name)}}
-            <span class="username-wrapper">
-              {{#if this.includeLink}}
-                <a
-                  aria-level={{@headingLevel}}
-                  data-user-card={{@user.username}}
-                  href={{this.userPath}}
-                  role={{if @headingLevel "heading"}}
-                >
-                  <span class="username">{{formatUsername
-                      @user.username
-                    }}</span>
-                </a>
-              {{else}}
+          <span class="username-wrapper">
+            {{#if this.includeLink}}
+              <a
+                aria-level={{@headingLevel}}
+                data-user-card={{@user.username}}
+                href={{this.userPath}}
+                role={{if @headingLevel "heading"}}
+              >
                 <span class="username">{{formatUsername @user.username}}</span>
-              {{/if}}
-              {{#if (and @showStatus @user.status)}}
-                <DUserStatusMessage
-                  @showDescription={{@showStatusDescription}}
-                  @status={{@user.status}}
-                />
-              {{/if}}
-            </span>
-          {{/unless}}
+              </a>
+            {{else}}
+              <span class="username">{{formatUsername @user.username}}</span>
+            {{/if}}
+            {{#if (and @showStatus @user.status)}}
+              <DUserStatusMessage
+                @showDescription={{@showStatusDescription}}
+                @status={{@user.status}}
+              />
+            {{/if}}
+          </span>
           {{#if this.showName}}
             <span class="name-wrapper">
               {{#if this.includeLink}}

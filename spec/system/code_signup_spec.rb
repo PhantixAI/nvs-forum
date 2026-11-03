@@ -166,6 +166,23 @@ describe "Sign up via email code" do
     expect(User.find_by_email("no.random@example.com").username).to eq("no-random")
   end
 
+  it "shows username instructions when enabled" do
+    SiteSetting.show_signup_form_username_instructions = true
+
+    open_code_signup
+    submit_email("instructions@example.com")
+    fill_code(latest_emailed_code("instructions@example.com"))
+
+    expect(page).to have_css(
+      "#code-login-username-instructions",
+      text: I18n.t("js.user.username.instructions"),
+    )
+
+    fill_in("code-login-username", with: "a b")
+    expect(page).to have_css("#code-login-username-error", text: /\S/)
+    expect(page).to have_no_css("#code-login-username-instructions")
+  end
+
   it "lets the user choose their initial username when later changes are disabled" do
     SiteSetting.username_change_period = 0
 
@@ -257,7 +274,7 @@ describe "Sign up via email code" do
     SiteSetting.enable_random_usernames = true
     SiteSetting.login_required = true
     SiteSetting.must_approve_users = true
-    stub_full_name_requirement("required_at_signup")
+    SiteSetting.full_name_requirement = "required_at_signup"
     user_field = Fabricate(:user_field, name: "Occupation")
     admin = Fabricate(:admin)
     email = "approve.me@example.com"
@@ -447,7 +464,7 @@ describe "Sign up via email code" do
   end
 
   context "when a full name is required at signup" do
-    before { stub_full_name_requirement("required_at_signup") }
+    before { SiteSetting.full_name_requirement = "required_at_signup" }
 
     it "collects the name after the code is verified" do
       open_code_signup

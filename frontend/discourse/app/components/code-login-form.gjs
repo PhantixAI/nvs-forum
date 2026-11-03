@@ -289,6 +289,13 @@ export default class CodeLoginForm extends Component {
     );
   }
 
+  get usernameInstructionsVisible() {
+    return (
+      this.siteSettings.show_signup_form_username_instructions &&
+      !this.usernameError
+    );
+  }
+
   get resendLabel() {
     if (this.resendCooldown > 0) {
       return i18n("code_login.resend_countdown", {
@@ -1321,7 +1328,7 @@ export default class CodeLoginForm extends Component {
               </label>
               <div class="code-login-form__username-input">
                 <input
-                  aria-describedby="code-login-username-error"
+                  aria-describedby="code-login-username-instructions code-login-username-error"
                   aria-invalid={{if this.usernameError "true"}}
                   autocomplete="username"
                   class="code-login-form__new-account-username
@@ -1345,6 +1352,14 @@ export default class CodeLoginForm extends Component {
                   />
                 {{/if}}
               </div>
+              {{#if this.usernameInstructionsVisible}}
+                <span
+                  class="more-info code-login-form__field-instructions"
+                  id="code-login-username-instructions"
+                >
+                  {{i18n "user.username.instructions"}}
+                </span>
+              {{/if}}
               <div
                 aria-live="polite"
                 class="code-login-form__error"
@@ -1515,7 +1530,7 @@ export default class CodeLoginForm extends Component {
                 </label>
                 <div class="code-login-form__username-input">
                   <input
-                    aria-describedby="code-login-username-error"
+                    aria-describedby="code-login-username-instructions code-login-username-error"
                     aria-invalid={{if this.usernameError "true"}}
                     autocomplete="off"
                     class="code-login-form__new-account-username
@@ -1541,6 +1556,14 @@ export default class CodeLoginForm extends Component {
                     />
                   {{/if}}
                 </div>
+                {{#if this.usernameInstructionsVisible}}
+                  <span
+                    class="more-info code-login-form__field-instructions"
+                    id="code-login-username-instructions"
+                  >
+                    {{i18n "user.username.instructions"}}
+                  </span>
+                {{/if}}
                 <div
                   aria-live="polite"
                   class="code-login-form__error"

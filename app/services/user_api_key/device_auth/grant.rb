@@ -23,7 +23,6 @@ class UserApiKey::DeviceAuth::Grant
       nonce: params[:nonce],
       scopes: scopes,
       push_url: params[:push_url].presence,
-      platform: params[:platform].presence,
       padding: params[:padding].presence,
       expires_in_seconds: expires_in_seconds,
       expires_at:
@@ -51,7 +50,6 @@ class UserApiKey::DeviceAuth::Grant
               :public_key,
               :nonce,
               :push_url,
-              :platform,
               :padding,
               :expires_in_seconds,
               :payload,
@@ -70,7 +68,6 @@ class UserApiKey::DeviceAuth::Grant
     nonce: nil,
     scopes: nil,
     push_url: nil,
-    platform: nil,
     padding: nil,
     expires_in_seconds: nil,
     expires_at: nil,
@@ -94,7 +91,6 @@ class UserApiKey::DeviceAuth::Grant
     @nonce = nonce
     @scopes = scopes
     @push_url = push_url
-    @platform = platform
     @padding = padding
     @expires_in_seconds = expires_in_seconds
     @created_at = created_at
@@ -192,7 +188,6 @@ class UserApiKey::DeviceAuth::Grant
       "nonce" => nonce,
       "scopes" => scopes,
       "push_url" => push_url,
-      "platform" => platform,
       "padding" => padding,
       "expires_in_seconds" => expires_in_seconds,
       "expires_at" => @expires_at,

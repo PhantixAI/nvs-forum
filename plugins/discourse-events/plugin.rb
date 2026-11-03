@@ -1044,6 +1044,25 @@ after_initialize do
 
   add_to_serializer(:topic_view, :has_livestream) { object.topic.first_post&.event&.livestream? }
 
+  add_to_serializer(:topic_view, :livestream_chat_active) do
+    !!object.topic.first_post&.event&.livestream_chat_active?
+  end
+
+  on(:discourse_post_event_event_ended) do |event, event_date|
+    if event.livestream?
+      Jobs.enqueue(:publish_livestream_chat_transcript, event_date_id: event_date.id)
+    end
+  end
+
+  # Any status set since the event closed the chat is deliberate, so a resumed
+  # event leaves it be.
+  on(:chat_channel_status_change) do |channel:, **|
+    DiscourseEvents::Livestream::TopicChatChannel.where(
+      chat_channel_id: channel.id,
+      closed_on_event_end: true,
+    ).update_all(closed_on_event_end: false)
+  end
+
   add_to_serializer(
     :topic_view,
     :event_watching_invitee_status,

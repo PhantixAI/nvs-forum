@@ -6,7 +6,6 @@ import UppyUpload from "discourse/lib/uppy/uppy-upload";
 
 export default class CreateInviteUploader extends Component {
   @tracked uploaded = false;
-  @tracked pendingReview;
 
   uppyUpload = new UppyUpload(this, {
     id: "create-invite-uploader",
@@ -18,19 +17,13 @@ export default class CreateInviteUploader extends Component {
       bypassNewUserRestriction: true,
       csvOnly: true,
     },
-    uploadDone: (response) => {
+    uploadDone: () => {
       this.uploaded = true;
-      this.pendingReview = response?.pending_review;
     },
   });
 
   get submitDisabled() {
     return !this.uppyUpload?.filesAwaitingUpload || this.uppyUpload?.uploading;
-  }
-
-  @action
-  addFiles(files) {
-    this.uppyUpload.addFiles(files);
   }
 
   @action
@@ -46,9 +39,7 @@ export default class CreateInviteUploader extends Component {
           uploading=this.uppyUpload.uploading
           uploadProgress=this.uppyUpload.uploadProgress
           uploaded=this.uploaded
-          pendingReview=this.pendingReview
           submitDisabled=this.submitDisabled
-          addFiles=this.addFiles
           startUpload=this.startUpload
         )
         this.uppyUpload.setup

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class InvitedSerializer < ApplicationSerializer
-  attributes :invites, :can_see_invite_details, :counts, :available_domains, :available_statuses
+  attributes :invites, :can_see_invite_details, :counts
 
   def invites
     ActiveModel::ArraySerializer.new(
@@ -10,8 +10,6 @@ class InvitedSerializer < ApplicationSerializer
         (
           if object.type == "pending" || object.type == "expired"
             InviteSerializer
-          elsif object.type == "extracted"
-            UrlExtractionRequestSerializer
           else
             InvitedUserSerializer
           end
@@ -19,7 +17,6 @@ class InvitedSerializer < ApplicationSerializer
       scope: scope,
       root: false,
       show_emails: object.show_emails,
-      email_logs_by_invite_id: object.email_logs_by_invite_id,
     ).as_json
   end
 
@@ -29,13 +26,5 @@ class InvitedSerializer < ApplicationSerializer
 
   def counts
     object.counts
-  end
-
-  def available_domains
-    object.available_domains
-  end
-
-  def available_statuses
-    object.available_statuses
   end
 end
