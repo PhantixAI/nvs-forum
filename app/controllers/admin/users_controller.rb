@@ -101,6 +101,55 @@ class Admin::UsersController < Admin::StaffController
     end
   end
 
+  def new_bot
+    if request.format.json?
+      render json: {
+               default_trust_level: SiteSetting.default_trust_level,
+               name_required: SiteSetting.full_name_requirement == "required_at_signup",
+             }
+    else
+      render "default/empty"
+    end
+  end
+
+  def bot_username_suggestion
+    render json: { username: UserNameSuggester.suggest(params.require(:name)) }
+  end
+
+  def create_bot
+    bot = params.expect(bot: %i[name username trust_level])
+
+    # Request uses `key`, as `api_key` would be read as an authentication credential.
+    key = params[:key]
+    raise Discourse::InvalidParameters.new(:key) if key && !key.is_a?(ActionController::Parameters)
+
+    User::CreateBot.call(service_params.merge(params: bot.to_h.merge(api_key: key&.to_unsafe_h))) do
+      on_success do |user:, api_key: nil|
+        render json: {
+                 user: AdminUserSerializer.new(user, scope: guardian, root: false).as_json,
+                 key:
+                   api_key && ApiKeySerializer.new(api_key, scope: guardian, root: false).as_json,
+               }.compact,
+               status: :created,
+               location: admin_user_show_path(id: user.id, username: user.username)
+      end
+      on_failed_policy(:can_create_bot) { raise Discourse::InvalidAccess }
+      on_failed_policy(:site_not_archived) { raise Discourse::SiteArchived }
+      on_failed_contract { |contract| render_json_error(contract.errors.full_messages) }
+      on_model_not_found(:bot_id) { |result| raise result.exception }
+      on_model_errors(:user) { |user| render_json_error(user) }
+      on_model_not_found(:user) do |result|
+        raise result.exception if result.exception
+        raise Discourse::NotFound
+      end
+      on_model_errors(:api_key) { |invalid_key| render_json_error(invalid_key) }
+      on_model_not_found(:api_key) do |result|
+        raise result.exception if result.exception
+        raise Discourse::NotFound
+      end
+    end
+  end
+
   def show
     @user = User.find_by(id: params[:id])
     raise Discourse::NotFound unless @user
