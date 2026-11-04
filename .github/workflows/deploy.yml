@@ -137,6 +137,25 @@ jobs:
             echo "$site is up"
           done
 
+      # Captures the failed image's own logs before the rollback step below
+      # destroys that container -- `docker logs` only exists for a container
+      # that's still around, and `launcher destroy` removes it permanently.
+      # Confirmed as a real gap on 2026-11-04: a production outage was fixed
+      # by manually swapping back to the rollback image before this capture
+      # existed, which meant the actual boot failure from the broken image
+      # was never recorded anywhere.
+      - name: Capture failed deploy logs
+        if: failure() && steps.swap.outcome != 'skipped'
+        run: sudo docker logs app > /tmp/failed-deploy-${{ github.run_id }}.log 2>&1 || true
+
+      - name: Upload failed deploy logs
+        if: failure() && steps.swap.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-deploy-logs-${{ github.run_id }}
+          path: /tmp/failed-deploy-${{ github.run_id }}.log
+          retention-days: 14
+
       # Only runs once the old container is already gone (destroy succeeded,
       # whether or not start/nginx/site-verify succeeded after it) -- if
       # "Build new image" itself failed, swap's outcome is "skipped" and the
