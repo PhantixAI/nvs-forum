@@ -1,30 +1,9 @@
 # frozen_string_literal: true
 
 class InvitedUserRecordSerializer < BasicUserSerializer
-  attributes :topics_entered,
-             :posts_read_count,
-             :last_seen_at,
-             :time_read,
-             :days_visited,
-             :days_since_created
+  attributes :topics_entered, :posts_read_count, :last_seen_at, :email
 
   attr_accessor :invited_by
-
-  def time_read
-    object.user_stat.time_read
-  end
-
-  def include_time_read?
-    can_see_invite_details?
-  end
-
-  def days_visited
-    object.user_stat.days_visited
-  end
-
-  def include_days_visited?
-    can_see_invite_details?
-  end
 
   def topics_entered
     object.user_stat.topics_entered
@@ -42,16 +21,12 @@ class InvitedUserRecordSerializer < BasicUserSerializer
     can_see_invite_details?
   end
 
-  def days_since_created
-    ((Time.now - object.created_at) / 60 / 60 / 24).ceil
-  end
-
-  def include_days_since_created?
-    can_see_invite_details?
-  end
-
   def include_last_seen_at?
     can_see_profile?
+  end
+
+  def include_email?
+    options[:show_emails] && can_see_invite_details?
   end
 
   private

@@ -18,6 +18,7 @@ export default class UserInvitedShow extends DiscourseRoute {
     }
     this.controllerFor("user-invited").setProperties({
       invitesCount: model.counts,
+      domainFilterActive: false,
     });
   }
 
@@ -28,6 +29,13 @@ export default class UserInvitedShow extends DiscourseRoute {
       user: this.controllerFor("user").get("model"),
       filter: this.inviteFilter,
       searchTerm: "",
+      selectedDomain: null,
+      selectedStatus: null,
+      // A refresh (e.g. triggerRefresh after a bulk action) reuses this same
+      // controller instance -- reset these or a list already scrolled to its
+      // end on a prior visit would leave infinite scroll permanently dead.
+      canLoadMore: true,
+      invitesLoading: false,
     });
   }
 

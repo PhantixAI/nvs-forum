@@ -69,6 +69,10 @@ export default class CreateInviteWithRoles extends Component {
       this.role = isStaff ? "admin" : "member";
       this.staffRole = this.invite.grants_moderator ? "moderator" : "admin";
       this.delivery = this.invite.email ? "email" : "link";
+      // Editing an existing invite has no "simple" form -- every editable
+      // field (including description/expiry/keywords) lives behind
+      // showAdvanced, so leaving it false here left the body empty.
+      this.showAdvanced = true;
     } else {
       this.role =
         this.model.defaultRole === "admin" && this.canInviteAdmins
@@ -226,6 +230,7 @@ export default class CreateInviteWithRoles extends Component {
       domain: this.invite.domain ?? "",
       description: this.invite.description ?? "",
       customMessage: this.invite.custom_message ?? "",
+      sourceUrl: this.invite.source_url ?? "",
       // seeded from the untracked copy: reading the tracked property here would
       // give `<Form>` a new @data identity on every change, tearing the form down
       staffRole: this.initialStaffRole,
@@ -251,6 +256,8 @@ export default class CreateInviteWithRoles extends Component {
       inviteToTopic: this.model.topicId ?? this.invite.topicId,
       inviteToGroups: this.model.groupIds ?? this.invite.groupIds ?? [],
       customMessage: this.invite.custom_message ?? "",
+      keywords: this.invite.recipient_keywords ?? "",
+      sourceUrl: this.invite.source_url ?? "",
     };
 
     if (this.inviteCreated) {
@@ -332,6 +339,10 @@ export default class CreateInviteWithRoles extends Component {
 
   get isLinkCreation() {
     return !this.inviteCreated && !this.isEmailDelivery;
+  }
+
+  get emailFieldDisabled() {
+    return this.inviteCreated && !this.model.editing;
   }
 
   get emailFieldLabel() {
@@ -452,6 +463,7 @@ export default class CreateInviteWithRoles extends Component {
       group_ids: data.inviteToGroups,
       topic_id: data.inviteToTopic,
       expires_at: this.expiresAtFrom(data),
+      recipient_keywords: data.keywords,
     };
 
     let nextScreen = SUMMARY;
@@ -522,6 +534,7 @@ export default class CreateInviteWithRoles extends Component {
   @action
   editInvite() {
     this.cameFromSummary = true;
+    this.showAdvanced = true;
     this.screen = FORM;
   }
 
@@ -672,7 +685,7 @@ export default class CreateInviteWithRoles extends Component {
                       @description={{i18n
                         "user.invited.invite_roles.member_email_help"
                       }}
-                      @disabled={{this.inviteCreated}}
+                      @disabled={{this.emailFieldDisabled}}
                       @format="full"
                       @name="email"
                       @title={{this.emailFieldLabel}}
@@ -698,17 +711,47 @@ export default class CreateInviteWithRoles extends Component {
               </form.ConditionalContent>
 
               {{#if this.showAdvanced}}
-                <form.Field
-                  @description={{i18n "user.invited.invite.description_help"}}
-                  @format="full"
-                  @name="description"
-                  @title={{i18n "user.invited.invite.description"}}
-                  @type="input"
-                  @validation={{this.descriptionValidation}}
-                  as |field|
-                >
-                  <field.Control />
-                </form.Field>
+                {{#if this.invite.allow_any_email}}
+                  <form.Field
+                    @description={{i18n
+                      "user.invited.invite_roles.recipient_email_help"
+                    }}
+                    @format="full"
+                    @name="description"
+                    @title={{i18n
+                      "user.invited.invite_roles.recipient_email_label"
+                    }}
+                    @type="input-email"
+                    @validate={{this.validateEmail}}
+                    as |field|
+                  >
+                    <field.Control />
+                  </form.Field>
+                {{else}}
+                  <form.Field
+                    @description={{i18n "user.invited.invite.description_help"}}
+                    @format="full"
+                    @name="description"
+                    @title={{i18n "user.invited.invite.description"}}
+                    @type="input"
+                    @validation={{this.descriptionValidation}}
+                    as |field|
+                  >
+                    <field.Control />
+                  </form.Field>
+                {{/if}}
+
+                {{#if this.invite.source_url}}
+                  <form.Field
+                    @format="full"
+                    @name="sourceUrl"
+                    @title={{i18n "user.invited.invite_roles.source_url_label"}}
+                    @type="input"
+                    as |field|
+                  >
+                    <field.Control disabled={{true}} />
+                  </form.Field>
+                {{/if}}
 
                 <form.Field
                   @description={{i18n
@@ -800,7 +843,7 @@ export default class CreateInviteWithRoles extends Component {
                       @description={{i18n
                         "user.invited.invite_roles.member_email_help"
                       }}
-                      @disabled={{this.inviteCreated}}
+                      @disabled={{this.emailFieldDisabled}}
                       @format="full"
                       @name="email"
                       @title={{this.emailFieldLabel}}
@@ -862,16 +905,56 @@ export default class CreateInviteWithRoles extends Component {
                   </form.Field>
                 {{/if}}
 
+                {{#if this.invite.allow_any_email}}
+                  <form.Field
+                    @description={{i18n
+                      "user.invited.invite_roles.recipient_email_help"
+                    }}
+                    @format="full"
+                    @name="description"
+                    @title={{i18n
+                      "user.invited.invite_roles.recipient_email_label"
+                    }}
+                    @type="input-email"
+                    @validate={{this.validateEmail}}
+                    as |field|
+                  >
+                    <field.Control />
+                  </form.Field>
+                {{else}}
+                  <form.Field
+                    @description={{i18n "user.invited.invite.description_help"}}
+                    @format="full"
+                    @name="description"
+                    @title={{i18n "user.invited.invite.description"}}
+                    @type="input"
+                    @validation={{this.descriptionValidation}}
+                    as |field|
+                  >
+                    <field.Control />
+                  </form.Field>
+                {{/if}}
+
+                {{#if this.invite.source_url}}
+                  <form.Field
+                    @format="full"
+                    @name="sourceUrl"
+                    @title={{i18n "user.invited.invite_roles.source_url_label"}}
+                    @type="input"
+                    as |field|
+                  >
+                    <field.Control disabled={{true}} />
+                  </form.Field>
+                {{/if}}
+
                 <form.Field
-                  @description={{i18n "user.invited.invite.description_help"}}
                   @format="full"
-                  @name="description"
-                  @title={{i18n "user.invited.invite.description"}}
-                  @type="input"
-                  @validation={{this.descriptionValidation}}
+                  @name="keywords"
+                  @title={{i18n "user.invited.keywords"}}
+                  @type="textarea"
                   as |field|
                 >
-                  <field.Control />
+                  <field.Control height={{60}} />
                 </form.Field>
 
                 <ExpiryField
@@ -988,11 +1071,13 @@ export default class CreateInviteWithRoles extends Component {
             @action={{this.cancel}}
             @label="user.invited.invite.cancel"
           />
-          <AdvancedModeToggle
-            disabled={{this.submitDisabled}}
-            @active={{this.showAdvanced}}
-            @onToggle={{this.toggleAdvanced}}
-          />
+          {{#unless this.inviteCreated}}
+            <AdvancedModeToggle
+              disabled={{this.submitDisabled}}
+              @active={{this.showAdvanced}}
+              @onToggle={{this.toggleAdvanced}}
+            />
+          {{/unless}}
         {{else if (eq this.screen "summary")}}
           <DButton
             class="btn-default edit-invite"
