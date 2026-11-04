@@ -103,9 +103,9 @@ jobs:
 
       - name: Wait for nginx and apply multisite fix
         run: |
-          for attempt in $(seq 1 60); do
+          for attempt in $(seq 1 10); do
             if sudo docker exec app sv status nginx | grep -q "^run:"; then break; fi
-            echo "Waiting for nginx to start ($attempt/60)..."; sleep 5
+            echo "Waiting for nginx to start ($attempt/10)..."; sleep 5
           done
           if ! sudo docker exec app sv status nginx | grep -q "^run:"; then
             echo "nginx did not start in time"
@@ -122,12 +122,12 @@ jobs:
         run: |
           for site in navodians.com nitians.in iitians.in; do
             up=false
-            for attempt in $(seq 1 60); do
+            for attempt in $(seq 1 10); do
               if [ "$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' https://$site/)" = "200" ]; then
                 up=true
                 break
               fi
-              echo "Waiting for $site ($attempt/60)..."; sleep 5
+              echo "Waiting for $site ($attempt/10)..."; sleep 5
             done
             if [ "$up" != true ]; then
               echo "$site did not come up in time"
@@ -136,6 +136,25 @@ jobs:
             fi
             echo "$site is up"
           done
+
+      # Captures the failed image's own logs before the rollback step below
+      # destroys that container -- `docker logs` only exists for a container
+      # that's still around, and `launcher destroy` removes it permanently.
+      # Confirmed as a real gap on 2026-11-04: a production outage was fixed
+      # by manually swapping back to the rollback image before this capture
+      # existed, which meant the actual boot failure from the broken image
+      # was never recorded anywhere.
+      - name: Capture failed deploy logs
+        if: failure() && steps.swap.outcome != 'skipped'
+        run: sudo docker logs app > /tmp/failed-deploy-${{ github.run_id }}.log 2>&1 || true
+
+      - name: Upload failed deploy logs
+        if: failure() && steps.swap.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-deploy-logs-${{ github.run_id }}
+          path: /tmp/failed-deploy-${{ github.run_id }}.log
+          retention-days: 14
 
       # Only runs once the old container is already gone (destroy succeeded,
       # whether or not start/nginx/site-verify succeeded after it) -- if
@@ -155,9 +174,9 @@ jobs:
           sudo ./launcher destroy app || true
           sudo ./launcher start app
 
-          for attempt in $(seq 1 60); do
+          for attempt in $(seq 1 10); do
             if sudo docker exec app sv status nginx 2>/dev/null | grep -q "^run:"; then break; fi
-            echo "Waiting for nginx to start after rollback ($attempt/60)..."; sleep 5
+            echo "Waiting for nginx to start after rollback ($attempt/10)..."; sleep 5
           done
           if ! sudo docker exec app sv status nginx 2>/dev/null | grep -q "^run:"; then
             echo "::error::nginx did not start after rollback -- manual intervention required immediately"
