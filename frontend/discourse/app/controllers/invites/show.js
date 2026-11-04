@@ -225,6 +225,31 @@ export default class InvitesShowController extends Controller {
     return this.successMessage ? "activate" : "signup";
   }
 
+  // Mirrors signup.js's `showRightSide`: offer social login alongside the
+  // form whenever a provider is configured. externalAuthsOnly is excluded
+  // because that case already renders its own exclusive LoginButtons block
+  // above the form (see the `externalAuthsOnly` block in the template) --
+  // without this exclusion, both blocks would render at once there.
+  // DiscourseConnect is excluded because it forces its own SSO redirect
+  // flow (see the `discourseConnectEnabled` block below), which social
+  // login buttons would just be a confusing, non-functional alternative to.
+  @computed(
+    "externalAuthsEnabled",
+    "externalAuthsOnly",
+    "authOptions",
+    "discourseConnectEnabled",
+    "successMessage"
+  )
+  get showSocialLoginButtons() {
+    return (
+      this.externalAuthsEnabled &&
+      !this.externalAuthsOnly &&
+      !this.authOptions &&
+      !this.discourseConnectEnabled &&
+      !this.successMessage
+    );
+  }
+
   @computed(
     "emailValidation.failed",
     "usernameValidation.failed",
