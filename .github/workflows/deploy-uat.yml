@@ -1,13 +1,12 @@
 name: Deploy to UAT
 
 on:
-  push:
-    branches:
-      - master
-  pull_request:
-    types: [opened, synchronize]
-    branches:
-      - master
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or commit SHA to deploy to UAT"
+        required: false
+        default: master
 
 concurrency:
   group: uat-deploy
@@ -22,15 +21,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Determine version to deploy
         id: ver
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "version=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=master" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "version=${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -311,14 +307,20 @@ jobs:
             exit 1
           fi
 
-      - name: Idle-delete the instance after 30 minutes of inactivity
+      - name: Wait for 30 minutes of inactivity before tearing down
         run: |
           # If a newer trigger arrives during this wait, cancel-in-progress kills
-          # this job before it reaches the delete call below, so the instance
+          # this job before it reaches the teardown step below, so the instance
           # survives and the next run's "Ensure the UAT instance exists" step
-          # reuses it -- this is what resets the idle clock.
+          # reuses it -- this is what resets the idle clock. If a human cancels
+          # the run instead (e.g. because UAT was already reviewed and is no
+          # longer needed), the "Tear down the UAT instance (run cancelled)"
+          # step further below still runs and cleans up the AWS infra, so a
+          # manual cancel never leaves a billed instance orphaned.
           sleep 1800
 
+      - name: Tear down the UAT instance
+        run: |
           # Stop the app and unmount cleanly before detaching -- the DB disk is
           # persistent and must survive this instance's deletion untouched.
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
@@ -340,6 +342,51 @@ jobs:
           done
 
           aws lightsail detach-static-ip --static-ip-name uat-nitians-ip
+          aws lightsail delete-instance --instance-name uat-nitians
+
+      # A cancel can land at any point -- before the instance even exists, mid
+      # SSH-key setup, mid-bootstrap, or during the 30-minute idle wait above --
+      # so unlike the step above, this can't assume the instance/disk/SSH key
+      # are in any particular state. Every action here is best-effort and
+      # individually guarded so a cancel from any point safely tears down
+      # whatever actually got created, without erroring on something that was
+      # never reached.
+      - name: Tear down the UAT instance (run cancelled)
+        if: cancelled()
+        run: |
+          if ! aws lightsail get-instance --instance-name uat-nitians >/dev/null 2>&1; then
+            echo "No uat-nitians instance exists -- nothing to tear down"
+            exit 0
+          fi
+
+          if [ -f ~/.ssh/uat_key ]; then
+            ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
+              sudo bash -c "cd /var/discourse && ./launcher stop uat" 2>/dev/null || true
+              sudo umount /var/discourse/shared/uat 2>/dev/null || true
+            ' 2>/dev/null || echo "Could not gracefully stop the app over SSH -- stopping the instance directly instead"
+          fi
+
+          # The instance may still be "pending" if the job was cancelled mid-creation --
+          # wait for a stable state before asking Lightsail to stop it.
+          until state="$(aws lightsail get-instance-state --instance-name uat-nitians --query state.name --output text 2>/dev/null)" && { [ "$state" = "running" ] || [ "$state" = "stopped" ]; }; do
+            sleep 5
+          done
+
+          if [ "$state" != "stopped" ]; then
+            aws lightsail stop-instance --instance-name uat-nitians
+            until [ "$(aws lightsail get-instance-state --instance-name uat-nitians --query state.name --output text)" = "stopped" ]; do
+              sleep 5
+            done
+          fi
+
+          if [ "$(aws lightsail get-disk --disk-name uat-nitians-db-disk --query disk.isAttached --output text 2>/dev/null)" = "True" ]; then
+            aws lightsail detach-disk --disk-name uat-nitians-db-disk
+            until [ "$(aws lightsail get-disk --disk-name uat-nitians-db-disk --query disk.isAttached --output text)" = "False" ]; do
+              sleep 3
+            done
+          fi
+
+          aws lightsail detach-static-ip --static-ip-name uat-nitians-ip 2>/dev/null || true
           aws lightsail delete-instance --instance-name uat-nitians
 
       - name: Clean up SSH key
