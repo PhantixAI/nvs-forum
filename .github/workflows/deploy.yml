@@ -13,6 +13,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Tag current image as rollback target
+        run: |
+          cd /var/discourse
+          if sudo docker inspect app >/dev/null 2>&1; then
+            current_image="$(sudo docker inspect app --format '{{.Image}}')"
+            sudo docker tag "$current_image" local_discourse/app:rollback
+            echo "Tagged currently running image ($current_image) as local_discourse/app:rollback"
+          else
+            echo "No running 'app' container found -- nothing to preserve for rollback"
+          fi
+
       - name: Free up Docker disk space
         run: |
           sudo docker image prune -af
@@ -63,6 +74,7 @@ jobs:
         run: cd /var/discourse && sudo ./launcher bootstrap app
 
       - name: Swap container (brief downtime ~30s)
+        id: swap
         run: |
           cd /var/discourse
           sudo ./launcher destroy app
@@ -103,3 +115,59 @@ jobs:
             fi
             echo "$site is up"
           done
+
+      # Only runs once the old container is already gone (destroy succeeded,
+      # whether or not start/nginx/site-verify succeeded after it) -- if
+      # "Build new image" itself failed, swap's outcome is "skipped" and the
+      # old container is still up untouched, so there's nothing to roll back.
+      - name: Roll back to last known-good image on failure
+        if: failure() && steps.swap.outcome != 'skipped'
+        run: |
+          cd /var/discourse
+          if ! sudo docker image inspect local_discourse/app:rollback >/dev/null 2>&1; then
+            echo "::error::Deploy failed and no rollback image is available (local_discourse/app:rollback not found) -- production may be down, manual intervention required immediately"
+            exit 1
+          fi
+
+          echo "::error::Deploy failed after the container swap -- rolling back to the last known-good image"
+          sudo docker tag local_discourse/app:rollback local_discourse/app:latest
+          sudo ./launcher destroy app || true
+          sudo ./launcher start app
+
+          for attempt in $(seq 1 60); do
+            if sudo docker exec app sv status nginx 2>/dev/null | grep -q "^run:"; then break; fi
+            echo "Waiting for nginx to start after rollback ($attempt/60)..."; sleep 5
+          done
+          if ! sudo docker exec app sv status nginx 2>/dev/null | grep -q "^run:"; then
+            echo "::error::nginx did not start after rollback -- manual intervention required immediately"
+            sudo docker logs --tail 200 app
+            exit 1
+          fi
+          sudo docker exec app bash -c '
+            sed -i "/http_host != /,/^}/d" /usr/local/bin/configure-ssl
+            /usr/local/bin/configure-ssl
+            sv reload nginx
+          '
+
+          all_recovered=true
+          for site in navodians.com nitians.in iitians.in; do
+            up=false
+            for attempt in $(seq 1 30); do
+              if [ "$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' https://$site/)" = "200" ]; then
+                up=true
+                break
+              fi
+              sleep 5
+            done
+            if [ "$up" = true ]; then
+              echo "$site recovered via rollback"
+            else
+              echo "::error::$site is still down after rollback -- manual intervention required immediately"
+              all_recovered=false
+            fi
+          done
+
+          if [ "$all_recovered" != true ]; then
+            exit 1
+          fi
+          echo "::error::Rolled back to the last known-good image. The failed deploy above still needs investigation before retrying."
