@@ -78,6 +78,19 @@ jobs:
           sys.stdout.write(content)
           PYEOF
 
+      # `launcher bootstrap` only pulls this base image if no local copy already
+      # exists under the tag -- otherwise it silently reuses whatever's cached,
+      # which can go stale for months on a long-lived host like this runner.
+      # Confirmed as the root cause of the 2026-11-04 production outage: the
+      # exact same application code booted fine on UAT (which always builds on
+      # a brand-new instance with zero Docker cache, forcing a real pull) but
+      # crashed here with `libvips.so.42: cannot open shared object file`,
+      # because this host's cached discourse/base:release predated the version
+      # the current code's vips bindings need. Force a fresh pull every time so
+      # production never again builds against a stale base image.
+      - name: Pull latest base image
+        run: sudo docker pull discourse/base:release
+
       - name: Build new image (site stays up during this step)
         run: cd /var/discourse && sudo ./launcher bootstrap app
 
