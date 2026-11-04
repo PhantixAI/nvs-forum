@@ -631,7 +631,6 @@ sr:
         placeholder: "ovde unesite naslov poruke, link ili ID"
     dsa_statements:
       category: "Kategorija"
-      saving: "Snimanje…"
     review:
       show_more: "Pokaži više"
       show_less: "Pokaži manje"
@@ -3372,7 +3371,6 @@ sr:
           size: "Veličina"
         upload:
           label: "Učitaj"
-          error: "Dogodila se greška pri učitavanju '%{filename}': %{message}"
         settings: "Podešavanja"
         operations:
           failed: "%{operation} neuspješna. Molimo proverite logove."

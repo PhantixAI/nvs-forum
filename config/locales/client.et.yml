@@ -396,7 +396,6 @@ et:
         placeholder: "kirjuta siia teema pealkiri, URL või ID"
     dsa_statements:
       category: "Kategooriad"
-      saving: "Salvestan..."
     review:
       explain:
         total: "Kokku"
@@ -3342,7 +3341,6 @@ et:
           label: "Laadi üles"
           title: "Laadi varukoopia üles sellesse instantsi"
           uploading: "Laadin üles..."
-          error: "Faili '%{filename}' üleslaadimisel tekkis viga: %{message}"
         settings: "Sätted"
         operations:
           failed: "Toiming %{operation} ebaõnnestus. Kontrolli logisid."

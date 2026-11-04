@@ -486,7 +486,6 @@ te:
         placeholder: "సందేశ శీర్షిక, url లేదా id ను ఇక్కడ టైప్ చేయండి"
     dsa_statements:
       category: "వర్గం"
-      saving: "సేవ్ చేయబడుతోంది…"
     review:
       show_more: "మరిన్ని చూపించండి"
       show_less: "తక్కువ చూపించండి"
@@ -5139,7 +5138,6 @@ te:
           uploading: "అప్‌లోడ్ చేయబడుతోంది…"
           uploading_progress: "అప్‌లోడ్ చేస్తోంది… %{progress}%"
           success: "'%{filename}' విజయవంతంగా అప్‌లోడ్ చేయబడింది. ఫైల్ ఇప్పుడు ప్రాసెస్ చేయబడుతోంది మరియు జాబితాలో చూపబడటానికి గరిష్టంగా ఒక నిమిషం పడుతుంది."
-          error: "'%{filename}' ఎగుమతించుటలో దోషం: %{message}"
         settings: "అమరికలు"
         operations:
           is_running: "ఒక కార్యం ప్రస్తుతం నడుస్తోంది…"

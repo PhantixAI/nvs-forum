@@ -690,7 +690,6 @@ it:
     dsa_statements:
       category: "Categoria"
       category_prompt: "Scegli una categoria"
-      saving: "Salvataggio…"
     review:
       show_more: "Mostra altro"
       show_less: "Mostra meno"
@@ -6475,7 +6474,6 @@ it:
           uploading: "Caricamento…"
           uploading_progress: "Caricamento… %{progress}%"
           success: "'%{filename}' è stato caricato con successo. Il file è in via di elaborazione e potrebbe servire fino ad un minuto perché appaia nella lista."
-          error: "Si è verificato un errore durante il caricamento %{filename}': %{message}"
         settings: "Impostazioni"
         operations:
           is_running: "Un'operazione è attualmente in esecuzione…"
