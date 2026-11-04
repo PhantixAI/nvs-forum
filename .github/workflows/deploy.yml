@@ -13,6 +13,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Must run BEFORE tagging the rollback target below: `docker image prune -a`
+      # untags any reference with no container pointing at that exact tag, even
+      # when the same image ID is still in use under its primary tag -- so if
+      # this ran after tagging, it would immediately strip the brand-new
+      # `:rollback` tag we just created (confirmed in production: the prune log
+      # showed "untagged: local_discourse/app:rollback" with "0B reclaimed",
+      # i.e. the image stayed but the rollback tag was gone before the deploy
+      # even needed it).
+      - name: Free up Docker disk space
+        run: |
+          sudo docker image prune -af
+          sudo docker builder prune -af
+
       - name: Tag current image as rollback target
         run: |
           cd /var/discourse
@@ -23,11 +36,6 @@ jobs:
           else
             echo "No running 'app' container found -- nothing to preserve for rollback"
           fi
-
-      - name: Free up Docker disk space
-        run: |
-          sudo docker image prune -af
-          sudo docker builder prune -af
 
       - name: Write app.yml with secrets
         env:
