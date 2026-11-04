@@ -13,6 +13,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Must run BEFORE tagging the rollback target below: `docker image prune -a`
+      # untags any reference with no container pointing at that exact tag, even
+      # when the same image ID is still in use under its primary tag -- so if
+      # this ran after tagging, it would immediately strip the brand-new
+      # `:rollback` tag we just created (confirmed in production: the prune log
+      # showed "untagged: local_discourse/app:rollback" with "0B reclaimed",
+      # i.e. the image stayed but the rollback tag was gone before the deploy
+      # even needed it).
+      - name: Free up Docker disk space
+        run: |
+          sudo docker image prune -af
+          sudo docker builder prune -af
+
       - name: Tag current image as rollback target
         run: |
           cd /var/discourse
@@ -23,11 +36,6 @@ jobs:
           else
             echo "No running 'app' container found -- nothing to preserve for rollback"
           fi
-
-      - name: Free up Docker disk space
-        run: |
-          sudo docker image prune -af
-          sudo docker builder prune -af
 
       - name: Write app.yml with secrets
         env:
@@ -69,6 +77,19 @@ jobs:
           content = content.replace('<DISCOURSE_DB_PASSWORD>', os.environ['DISCOURSE_DB_PASSWORD'])
           sys.stdout.write(content)
           PYEOF
+
+      # `launcher bootstrap` only pulls this base image if no local copy already
+      # exists under the tag -- otherwise it silently reuses whatever's cached,
+      # which can go stale for months on a long-lived host like this runner.
+      # Confirmed as the root cause of the 2026-11-04 production outage: the
+      # exact same application code booted fine on UAT (which always builds on
+      # a brand-new instance with zero Docker cache, forcing a real pull) but
+      # crashed here with `libvips.so.42: cannot open shared object file`,
+      # because this host's cached discourse/base:release predated the version
+      # the current code's vips bindings need. Force a fresh pull every time so
+      # production never again builds against a stale base image.
+      - name: Pull latest base image
+        run: sudo docker pull discourse/base:release
 
       - name: Build new image (site stays up during this step)
         run: cd /var/discourse && sudo ./launcher bootstrap app
