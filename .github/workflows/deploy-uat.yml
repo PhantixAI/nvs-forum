@@ -113,6 +113,18 @@ jobs:
             ssh-keyscan -H uat.nitians.in >> ~/.ssh/known_hosts 2>/dev/null || true
           fi
 
+      - name: Tag current image as rollback target
+        run: |
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
+            if sudo docker inspect uat >/dev/null 2>&1; then
+              current_image="$(sudo docker inspect uat --format "{{.Image}}")"
+              sudo docker tag "$current_image" local_discourse/uat:rollback
+              echo "Tagged currently running image ($current_image) as local_discourse/uat:rollback"
+            else
+              echo "No running uat container found (fresh instance or first-ever deploy) -- nothing to preserve for rollback"
+            fi
+          '
+
       - name: Refresh discourse_docker clone and mount the persistent disk
         run: |
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
@@ -203,6 +215,7 @@ jobs:
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'sudo mv /tmp/uat.yml /var/discourse/containers/uat.yml'
 
       - name: Build and swap (over SSH)
+        id: swap
         run: |
           ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
             sudo bash -c "
@@ -249,6 +262,54 @@ jobs:
             exit 1
           fi
           echo "uat.nitians.in is up"
+
+      # Only runs once the old container is already gone (destroy succeeded) --
+      # mirrors the same rollback mechanism in deploy.yml so it gets exercised
+      # here first. If this instance was freshly created from the snapshot
+      # (no prior "uat" container), the "Tag current image" step above found
+      # nothing to preserve, so this correctly has nothing to roll back to.
+      - name: Roll back to last known-good image on failure
+        if: failure() && steps.swap.outcome != 'skipped'
+        run: |
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in '
+            set -e
+            cd /var/discourse
+            if ! sudo docker image inspect local_discourse/uat:rollback >/dev/null 2>&1; then
+              echo "No rollback image available (local_discourse/uat:rollback not found) -- leaving uat down for investigation"
+              exit 1
+            fi
+
+            echo "Deploy failed after the container swap -- rolling back to the last known-good image"
+            sudo docker tag local_discourse/uat:rollback local_discourse/uat:latest
+            sudo ./launcher destroy uat || true
+            sudo ./launcher start uat
+
+            for attempt in $(seq 1 60); do
+              if sudo docker exec uat sv status nginx | grep -q "^run:"; then break; fi
+              echo "Waiting for nginx to start after rollback ($attempt/60)..."; sleep 5
+            done
+            if ! sudo docker exec uat sv status nginx | grep -q "^run:"; then
+              echo "nginx did not start after rollback"
+              sudo docker logs --tail 200 uat
+              exit 1
+            fi
+            sudo docker exec uat sv reload nginx
+          '
+
+          up=false
+          for attempt in $(seq 1 30); do
+            if [ "$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' https://uat.nitians.in/)" = "200" ]; then
+              up=true
+              break
+            fi
+            sleep 5
+          done
+          if [ "$up" = true ]; then
+            echo "uat.nitians.in recovered via rollback"
+          else
+            echo "uat.nitians.in is still down after rollback -- manual intervention required"
+            exit 1
+          fi
 
       - name: Idle-delete the instance after 30 minutes of inactivity
         run: |
