@@ -179,6 +179,14 @@ module Jobs
       schedule_send =
         invite[:schedule_send].to_s.strip.blank? ||
           %w[true t 1 yes y].include?(invite[:schedule_send].to_s.strip.downcase)
+      # Unlike allow_any_email, blank/absent defaults true (skip) -- re-uploading
+      # a CSV that happens to include someone who already has an invite must not
+      # silently overwrite their keywords/groups/etc. just because they appear in
+      # a later batch. An explicit "false" opts into updating that existing
+      # invite with this row's new metadata (see Invite.generate).
+      skip_update =
+        invite[:skip_update].to_s.strip.blank? ||
+          %w[true t 1 yes y].include?(invite[:skip_update].to_s.strip.downcase)
       recipient_name = invite[:name].presence
       recipient_keywords = invite[:keywords].presence
       user_fields =
@@ -193,6 +201,7 @@ module Jobs
             :ai_personalization,
             :name,
             :keywords,
+            :skip_update,
           ),
           email,
         )
@@ -265,6 +274,7 @@ module Jobs
             ai_personalization: ai_personalization,
             schedule_send: schedule_send,
             allow_any_email: allow_any_email,
+            skip_update: skip_update,
           }
 
           # Every row -- bound or allow_any_email, regardless of its own

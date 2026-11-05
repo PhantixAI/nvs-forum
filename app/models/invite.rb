@@ -313,6 +313,19 @@ class Invite < ActiveRecord::Base
 
     raise UserExists.new(new.user_exists_error_msg(email)) if find_user_by_email(email)
 
+    # A CSV re-upload may intentionally ask not to touch a recipient who
+    # already has a live invite (see Jobs::BulkInvite's skip_update column) --
+    # find_duplicate_for already answers "does invited_by have a live invite
+    # for this recipient" regardless of which form (bound email or unbound
+    # description) it's currently in, so reuse it here rather than letting the
+    # lookup-then-update logic below run and then discarding its effects. An
+    # expired match is treated as not-existing, same as the lookups below, so
+    # a stale invite still gets refreshed instead of left to rot.
+    if opts[:skip_update]
+      existing = find_duplicate_for(invited_by, email || unbound_description)
+      return existing if existing && !existing.expired?
+    end
+
     invite = nil
     was_admin = nil
     emailed_status = nil

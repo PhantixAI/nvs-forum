@@ -10,8 +10,11 @@ class InvitesController < ApplicationController
   # BulkInvitePersonalization::Generator), even when the site-wide setting is on --
   # an explicit false skips personalization for that row; blank/absent defaults true.
   # name/keywords: optional per-row context passed to the AI personalization prompt
-  # when enabled; ignored otherwise. A site with a custom User Field named "name",
-  # "keywords", "schedule_send", or "ai_personalization" would have that field's
+  # when enabled; ignored otherwise. skip_update: per-row opt-out (default true) of
+  # updating an existing invite found for this recipient -- an explicit false lets a
+  # re-upload update it with this row's metadata instead of leaving it untouched (see
+  # Jobs::BulkInvite). A site with a custom User Field named "name", "keywords",
+  # "schedule_send", "ai_personalization", or "skip_update" would have that field's
   # column shadowed by these -- an accepted tradeoff shared with the other reserved
   # column names here.
   ALLOWED_BULK_INVITE_COLUMNS = %w[
@@ -24,6 +27,7 @@ class InvitesController < ApplicationController
     ai_personalization
     name
     keywords
+    skip_update
   ]
 
   # Bounds the raw file bytes persisted verbatim into ReviewableBulkInvite's
