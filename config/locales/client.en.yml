@@ -2895,9 +2895,10 @@ en:
               <li><code>schedule_send</code> – kept on the invite for reference; every row is held for review before being sent regardless. Defaults to <code>true</code> when left blank.</li>
               <li><code>ai_personalization</code> – set to <code>false</code> to send that row the plain, non-personalized invitation email. Defaults to <code>true</code> when left blank.</li>
               <li><code>name</code> and <code>keywords</code> – recipient context (e.g. their role or interests) used to personalize the invitation email, when enabled.</li>
+              <li><code>skip_update</code> – when a row's email already has an invite, leave it untouched instead of updating it with this row's data. Defaults to <code>true</code> when left blank; set to <code>false</code> to update the existing invite instead.</li>
             </ul>
-            <pre>email,groups,topic_id,locale,allow_any_email,schedule_send,ai_personalization,name,keywords</pre>
-            <pre>john@smith.com,first_group_name;second_group_name,topic_id,en,true,true,true,Jane Doe,machine learning;robotics</pre>
+            <pre>email,groups,topic_id,locale,allow_any_email,schedule_send,ai_personalization,name,keywords,skip_update</pre>
+            <pre>john@smith.com,first_group_name;second_group_name,topic_id,en,true,true,true,Jane Doe,machine learning;robotics,true</pre>
 
           progress: "Uploaded %{progress}%…"
           success: "File uploaded successfully. Invites have been created and are waiting for your review before they're sent -- see the Pending tab's Review filter."
