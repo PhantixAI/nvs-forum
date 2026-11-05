@@ -37,6 +37,28 @@ jobs:
             echo "No running 'app' container found -- nothing to preserve for rollback"
           fi
 
+      # /var/discourse is a long-lived clone of discourse_docker that only ever
+      # moves forward via manual `git pull`s, which stopped happening months ago
+      # on this host. `launcher bootstrap` reads `base_image:` straight out of
+      # this checkout's templates/web.template.yml -- not from any Docker tag --
+      # so "Pull latest base image" below pulling a fresh `discourse/base:release`
+      # tag did nothing: bootstrap still pinned the ancient
+      # discourse/base:2.0.20260209-1300 named in the stale template. Confirmed as
+      # the real root cause of the repeat 2026-11-04 outage (same libvips.so.42
+      # crash recurred even after a verified-successful base-image pull). `git
+      # reset --hard` only touches tracked files, so /var/discourse/shared
+      # (certs, logs) and the gitignored containers/app.yml are untouched -- but
+      # it also wipes the one intentional uncommitted local change, the
+      # git_url patch below, which must be reapplied every time.
+      - name: Refresh discourse_docker clone
+        run: |
+          cd /var/discourse
+          sudo git fetch origin
+          sudo git reset --hard origin/main
+          if ! sudo grep -q "git remote set-url origin" templates/web.template.yml; then
+            sudo sed -i "100a\\        - sudo -H -E -u discourse git remote set-url origin \$git_url" templates/web.template.yml
+          fi
+
       - name: Write app.yml with secrets
         env:
           NVS_GITHUB_PAT: ${{ secrets.NVS_GITHUB_PAT }}
