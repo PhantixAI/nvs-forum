@@ -560,6 +560,8 @@ class UsersController < ApplicationController
         fetch_user_from_params(
           include_inactive: current_user.staff? || SiteSetting.show_inactive_accounts,
         )
+      raise Discourse::NotFound unless guardian.can_see_profile?(inviter)
+
       can_see_invite_details = guardian.can_see_invite_details?(inviter)
       # Extracted requests can carry scraped PII still mid-review -- unlike
       # pending/expired (visible to staff-or-self via can_see_invite_details),
@@ -788,7 +790,10 @@ class UsersController < ApplicationController
 
     checker = UsernameCheckerService.new(allow_reserved_username: current_user&.admin?)
     email = target_user&.email
-    email = params[:email] if !email && !SiteSetting.hide_email_address_taken?
+    if !email && !SiteSetting.hide_email_address_taken?
+      email = params.permit(:email)[:email]
+      raise ActionController::ParameterMissing, :email if params.key?(:email) && email.nil?
+    end
     result = checker.check_username(username, email)
     result[:avatar_template] = User.default_template(username) if result[:available]
     render json: result

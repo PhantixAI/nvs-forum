@@ -1005,6 +1005,33 @@ RSpec.describe PostsController do
         expect(post.raw).to eq("edited body")
       end
 
+      it "prevents unrelated moderators from updating posts in deleted private messages" do
+        private_message_post = Fabricate(:private_message_post, raw: "private message secret")
+        private_message_reply =
+          Fabricate(
+            :post,
+            topic: private_message_post.topic,
+            user: private_message_post.user,
+            raw: "private reply secret",
+          )
+        private_message_post.topic.trash!
+
+        get "/posts/#{private_message_reply.id}.json"
+        expect(response).to be_not_found
+        expect(response.body).not_to include(private_message_reply.raw)
+
+        put "/posts/#{private_message_reply.id}.json",
+            params: {
+              post: {
+                raw: "moderator overwrite",
+              },
+            }
+
+        expect(response).to be_forbidden
+        expect(response.body).not_to include(private_message_reply.raw)
+        expect(private_message_reply.reload.raw).to eq("private reply secret")
+      end
+
       it "rolls back post changes when a first-post title edit is invalid" do
         Fabricate(:watched_word, action: WatchedWord.actions[:censor], word: "blockedword")
 
@@ -1775,6 +1802,85 @@ RSpec.describe PostsController do
         sender = Fabricate(:trust_level_4, refresh_auto_groups: true)
         recipient = Fabricate(:user)
         recipient.user_option.update!(allow_private_messages: false)
+        api_key = ApiKey.create!(user: sender).key
+
+        post "/posts.json",
+             params: {
+               raw: "this is the test content",
+               title: "this is some post",
+               archetype: Archetype.private_message,
+               target_recipients: recipient.email,
+             },
+             headers: {
+               HTTP_API_USERNAME: sender.username,
+               HTTP_API_KEY: api_key,
+             }
+
+        expect(response.status).to eq(422)
+        expect(response.parsed_body["errors"]).to include(
+          I18n.t("activerecord.errors.models.topic.attributes.base.cant_send_pm"),
+        )
+        expect(TopicAllowedUser.exists?(user: recipient)).to eq(false)
+      end
+
+      it "blocks email private message recipients that are ignoring the sender" do
+        SiteSetting.enable_staged_users = true
+        SiteSetting.personal_message_enabled_groups = Group::AUTO_GROUPS[:trust_level_4]
+        SiteSetting.send_email_messages_allowed_groups = Group::AUTO_GROUPS[:trust_level_4]
+        sender = Fabricate(:trust_level_4, refresh_auto_groups: true)
+        recipient = Fabricate(:user)
+        Fabricate(:ignored_user, user: recipient, ignored_user: sender)
+        api_key = ApiKey.create!(user: sender).key
+
+        post "/posts.json",
+             params: {
+               raw: "this is the test content",
+               title: "this is some post",
+               archetype: Archetype.private_message,
+               target_recipients: recipient.email,
+             },
+             headers: {
+               HTTP_API_USERNAME: sender.username,
+               HTTP_API_KEY: api_key,
+             }
+
+        expect(response.status).to eq(422)
+        expect(TopicAllowedUser.exists?(user: recipient)).to eq(false)
+      end
+
+      it "blocks email private message recipients that allowlist other senders" do
+        SiteSetting.enable_staged_users = true
+        SiteSetting.personal_message_enabled_groups = Group::AUTO_GROUPS[:trust_level_4]
+        SiteSetting.send_email_messages_allowed_groups = Group::AUTO_GROUPS[:trust_level_4]
+        sender = Fabricate(:trust_level_4, refresh_auto_groups: true)
+        recipient = Fabricate(:user)
+        recipient.user_option.update!(enable_allowed_pm_users: true)
+        Fabricate(:allowed_pm_user, user: recipient, allowed_pm_user: Fabricate(:user))
+        api_key = ApiKey.create!(user: sender).key
+
+        post "/posts.json",
+             params: {
+               raw: "this is the test content",
+               title: "this is some post",
+               archetype: Archetype.private_message,
+               target_recipients: recipient.email,
+             },
+             headers: {
+               HTTP_API_USERNAME: sender.username,
+               HTTP_API_KEY: api_key,
+             }
+
+        expect(response.status).to eq(422)
+        expect(TopicAllowedUser.exists?(user: recipient)).to eq(false)
+      end
+
+      it "blocks email private message recipients that muted the sender" do
+        SiteSetting.enable_staged_users = true
+        SiteSetting.personal_message_enabled_groups = Group::AUTO_GROUPS[:trust_level_4]
+        SiteSetting.send_email_messages_allowed_groups = Group::AUTO_GROUPS[:trust_level_4]
+        sender = Fabricate(:trust_level_4, refresh_auto_groups: true)
+        recipient = Fabricate(:user)
+        Fabricate(:muted_user, user: recipient, muted_user: sender)
         api_key = ApiKey.create!(user: sender).key
 
         post "/posts.json",

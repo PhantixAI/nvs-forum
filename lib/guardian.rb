@@ -169,10 +169,7 @@ class Guardian
     @user &&
       (
         Rails.env.development? || (is_admin? && Developer.user_ids.include?(@user.id)) ||
-          (
-            Rails.configuration.respond_to?(:developer_emails) &&
-              Rails.configuration.developer_emails.include?(@user.email)
-          )
+          Developer.configured_email?(@user.email)
       )
   end
 
@@ -269,7 +266,10 @@ class Guardian
           (obj.is_a?(Topic) && @user.has_trust_level?(TrustLevel[4]) && can_see_topic?(obj))
       )
   end
-  alias can_see_flags? can_moderate?
+
+  def can_see_flags?(obj)
+    is_staff? && can_moderate?(obj)
+  end
 
   def can_delete_all_posts_and_topics?
     @user.in_any_groups?(SiteSetting.delete_all_posts_and_topics_allowed_groups_map)
