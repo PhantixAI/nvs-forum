@@ -642,7 +642,6 @@ da:
         placeholder: "indtast beskeds titel, url eller id her"
     dsa_statements:
       category: "Kategori"
-      saving: "Gemmer…"
     review:
       show_more: "Vis mere"
       show_less: "Vis mindre"
@@ -5271,7 +5270,6 @@ da:
           uploading: "Overfører…"
           uploading_progress: "Overfører… %{progress}%"
           success: "'%{filename}' er blevet overført. Filen behandles nu og vil tage op til et minut for at blive vist på listen."
-          error: "Der skete en fejl da filen '%{filename}' blev forsøgt overført: %{message}"
         settings: "Indstillinger"
         operations:
           failed: "%{operation} gik galt. Kig venligst i logfilerne."

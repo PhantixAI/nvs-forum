@@ -690,7 +690,6 @@ fi:
     dsa_statements:
       category: "Luokka"
       category_prompt: "Valitse alue"
-      saving: "Tallennetaan…"
     review:
       show_more: "Näytä lisää"
       show_less: "Näytä vähemmän"
@@ -6477,7 +6476,6 @@ fi:
           uploading: "Ladataan…"
           uploading_progress: "Ladataan… %{progress}"
           success: "''%{filename}' ladattiin palvelimeen. Tiedostoa käsitellään, ja voi kestää enintään minuutti ennen kuin se näkyy luettelossa."
-          error: "Tiedoston '%{filename}' lataamisessa tapahtui virhe: %{message}"
         settings: "Asetukset"
         operations:
           is_running: "Toimintoa suoritetaan parhaillaan…"
