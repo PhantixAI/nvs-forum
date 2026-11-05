@@ -20,6 +20,10 @@ on:
         description: "Branch, tag, or commit SHA to deploy (start only)"
         required: false
         default: master
+      extra_ssh_public_key:
+        description: "Optional (start only): an SSH public key to append to ubuntu's authorized_keys on uat-nitians, for manual access without the UAT_SSH_PRIVATE_KEY deploy secret"
+        required: false
+        default: ""
 
 # Shares deploy-uat.yml's concurrency group: the two workflows operate on the
 # same single uat-nitians instance/disk, so only one of them may touch AWS at
@@ -119,6 +123,16 @@ jobs:
           if ! ssh-keygen -F uat.nitians.in >/dev/null 2>&1; then
             ssh-keyscan -H uat.nitians.in >> ~/.ssh/known_hosts 2>/dev/null || true
           fi
+
+      - name: Add an extra SSH public key for manual access
+        if: ${{ inputs.extra_ssh_public_key != '' }}
+        env:
+          EXTRA_SSH_PUBLIC_KEY: ${{ inputs.extra_ssh_public_key }}
+        run: |
+          # Piped over stdin rather than interpolated into the remote command
+          # string, so the key's own content can never be read as shell syntax.
+          printf '%s\n' "$EXTRA_SSH_PUBLIC_KEY" | ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in \
+            'mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys'
 
       - name: Refresh discourse_docker clone and mount the persistent disk
         run: |
