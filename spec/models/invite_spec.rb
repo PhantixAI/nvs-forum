@@ -499,6 +499,86 @@ RSpec.describe Invite do
       end
     end
 
+    context "when skip_update is true and an invite already exists" do
+      fab!(:invite) do
+        Invite.generate(
+          user,
+          email: "test@example.com",
+          recipient_name: "Original Name",
+          recipient_keywords: "original keywords",
+        )
+      end
+
+      it "returns the existing invite untouched instead of updating it" do
+        freeze_time
+        invite.update!(created_at: 10.days.ago)
+
+        result =
+          Invite.generate(
+            user,
+            email: "test@example.com",
+            recipient_name: "New Name",
+            recipient_keywords: "new keywords",
+            skip_update: true,
+          )
+
+        expect(result).to eq(invite)
+        expect(result.reload.recipient_name).to eq("Original Name")
+        expect(result.recipient_keywords).to eq("original keywords")
+        expect(result.created_at).to eq_time(10.days.ago)
+      end
+
+      it "does not merge away a cross-form duplicate (bound invite, new allow_any_email row)" do
+        result =
+          Invite.generate(
+            user,
+            allow_any_email: true,
+            description: "test@example.com",
+            skip_update: true,
+          )
+
+        expect(result).to eq(invite)
+        expect(result.reload.allow_any_email?).to eq(false)
+        expect(result.email).to eq("test@example.com")
+        expect(Invite.where(invited_by_id: user.id).count).to eq(1)
+      end
+
+      it "does not merge away a cross-form duplicate (allow_any_email invite, new bound row)" do
+        link_invite = Invite.generate(user, allow_any_email: true, description: "link@example.com")
+
+        result = Invite.generate(user, email: "link@example.com", skip_update: true)
+
+        expect(result).to eq(link_invite)
+        expect(result.reload.allow_any_email?).to eq(true)
+        expect(result.email).to eq(nil)
+        expect(Invite.where(invited_by_id: user.id, description: "link@example.com").count).to eq(1)
+      end
+
+      it "still replaces the invite when the existing one has expired" do
+        SiteSetting.invite_expiry_days = 1
+        invite.update!(expires_at: 2.days.ago)
+
+        result =
+          Invite.generate(
+            user,
+            email: "test@example.com",
+            recipient_name: "New Name",
+            skip_update: true,
+          )
+
+        expect(result).not_to eq(invite)
+        expect(result).not_to be_expired
+        expect(result.recipient_name).to eq("New Name")
+      end
+
+      it "creates a new invite normally when no existing invite matches" do
+        result = Invite.generate(user, email: "brand-new@example.com", skip_update: true)
+
+        expect(result).to be_persisted
+        expect(result.email).to eq("brand-new@example.com")
+      end
+    end
+
     context "when inviting to a topic" do
       fab!(:topic)
       let(:invite) { Invite.generate(topic.user, email: "test@example.com", topic: topic) }

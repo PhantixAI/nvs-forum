@@ -370,6 +370,70 @@ RSpec.describe Jobs::BulkInvite do
       end
     end
 
+    context "with a skip_update column" do
+      it "defaults to true -- re-uploading leaves an existing invite's metadata untouched" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu", keywords: "original" }],
+        )
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu", keywords: "updated" }],
+        )
+
+        invite = Invite.find_by(email: "student@college.edu")
+        expect(invite.recipient_keywords).to eq("original")
+      end
+
+      it "updates the existing invite when explicitly set to false" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu", keywords: "original" }],
+        )
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu", keywords: "updated", skip_update: "false" }],
+        )
+
+        invite = Invite.find_by(email: "student@college.edu")
+        expect(invite.recipient_keywords).to eq("updated")
+      end
+
+      it "only treats an explicit falsy spelling as false, same as schedule_send" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu", keywords: "original" }],
+        )
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "student@college.edu", keywords: "updated", skip_update: "maybe" }],
+        )
+
+        invite = Invite.find_by(email: "student@college.edu")
+        expect(invite.recipient_keywords).to eq("updated")
+      end
+
+      it "does not misinterpret it as a user field" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "faculty@college.edu", skip_update: "false" }],
+        )
+
+        post = Post.last
+        expect(post.raw).to include("0 warning")
+      end
+
+      it "does not prevent creating a brand new invite when none exists yet" do
+        described_class.new.execute(
+          current_user_id: admin.id,
+          invites: [{ email: "new-student@college.edu", keywords: "first upload" }],
+        )
+
+        invite = Invite.find_by(email: "new-student@college.edu")
+        expect(invite.recipient_keywords).to eq("first upload")
+      end
+    end
+
     it "never enqueues the paced send chain -- every row waits at review for an explicit dispatch" do
       2.times do |i|
         described_class.new.execute(
