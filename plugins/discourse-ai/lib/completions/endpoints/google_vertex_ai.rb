@@ -8,6 +8,10 @@ module DiscourseAi
           "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
         ADC_TOKEN_EXPIRY_BUFFER_SECONDS = 60
 
+        SERVICE_ACCOUNT_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
+        SERVICE_ACCOUNT_OAUTH_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+        SERVICE_ACCOUNT_TOKEN_EXPIRY_BUFFER_SECONDS = 60
+
         class << self
           def can_contact?(llm_model)
             llm_model.provider == "google_vertex_ai"
@@ -46,6 +50,38 @@ module DiscourseAi
             @adc_token_expires_at = nil
           end
 
+          # Returns the parsed service-account hash if `value` looks like one,
+          # else nil -- lets access_token tell a pasted service-account JSON
+          # key apart from a literal pre-minted bearer token without changing
+          # the credential storage/UI at all.
+          def parse_service_account_json(value)
+            parsed = JSON.parse(value)
+            parsed.is_a?(Hash) && parsed["type"] == "service_account" ? parsed : nil
+          rescue JSON::ParserError
+            nil
+          end
+
+          # Unlike adc_token, this is an explicit, admin-supplied credential
+          # rather than implicit host identity, so it's safe -- and
+          # preferable, to avoid every process minting its own -- to share
+          # the minted token across processes via Discourse.cache.
+          def service_account_token(service_account_info)
+            cache_key = service_account_token_cache_key(service_account_info)
+            cached = Discourse.cache.read(cache_key)
+            return cached if cached.present?
+
+            payload = fetch_service_account_token_payload(service_account_info)
+            token = payload&.dig("access_token")
+            expires_in =
+              payload&.dig("expires_in").to_i - SERVICE_ACCOUNT_TOKEN_EXPIRY_BUFFER_SECONDS
+
+            if token.present? && expires_in > 0
+              Discourse.cache.write(cache_key, token, expires_in: expires_in)
+            end
+
+            token
+          end
+
           private
 
           def fetch_adc_token_payload
@@ -69,6 +105,58 @@ module DiscourseAi
           rescue StandardError => e
             Rails.logger.warn(
               "DiscourseAi::GoogleVertexAi: Failed to fetch ADC token: #{e.message}",
+            )
+            nil
+          end
+
+          def service_account_token_cache_key(service_account_info)
+            "vertex-ai-service-account-token-#{Digest::SHA256.hexdigest(service_account_info["client_email"].to_s)}"
+          end
+
+          def fetch_service_account_token_payload(service_account_info)
+            now = Time.now.to_i
+            jwt_payload = {
+              iss: service_account_info["client_email"],
+              scope: SERVICE_ACCOUNT_OAUTH_SCOPE,
+              aud: SERVICE_ACCOUNT_OAUTH_TOKEN_URL,
+              iat: now,
+              exp: now + 3600,
+            }
+            assertion =
+              JWT.encode(
+                jwt_payload,
+                OpenSSL::PKey::RSA.new(service_account_info["private_key"]),
+                "RS256",
+              )
+
+            uri = URI.parse(SERVICE_ACCOUNT_OAUTH_TOKEN_URL)
+            http = FinalDestination::HTTP.new(uri.host, uri.port)
+            http.use_ssl = true
+
+            request =
+              FinalDestination::HTTP::Post.new(
+                uri.request_uri,
+                { "Content-Type" => "application/x-www-form-urlencoded" },
+              )
+            request.body =
+              URI.encode_www_form(
+                grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                assertion: assertion,
+              )
+
+            response = http.request(request)
+
+            if response.code.to_i == 200
+              JSON.parse(response.body)
+            else
+              Rails.logger.error(
+                "DiscourseAi::GoogleVertexAi: Service account token request failed with status #{response.code}",
+              )
+              nil
+            end
+          rescue StandardError => e
+            Rails.logger.error(
+              "DiscourseAi::GoogleVertexAi: Failed to fetch service account token: #{e.message}",
             )
             nil
           end
@@ -118,7 +206,16 @@ module DiscourseAi
         end
 
         def access_token
-          @access_token ||= llm_model.api_key.presence || self.class.adc_token
+          @access_token ||=
+            begin
+              key = llm_model.api_key
+              if key.present?
+                service_account_info = self.class.parse_service_account_json(key)
+                service_account_info ? self.class.service_account_token(service_account_info) : key
+              else
+                self.class.adc_token
+              end
+            end
         end
       end
     end

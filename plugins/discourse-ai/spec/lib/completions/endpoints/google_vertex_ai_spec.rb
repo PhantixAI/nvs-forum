@@ -180,5 +180,79 @@ RSpec.describe DiscourseAi::Completions::Endpoints::GoogleVertexAi do
 
       expect(endpoint.send(:access_token)).to be_nil
     end
+
+    describe "with a service account JSON key" do
+      let(:service_account_json) do
+        {
+          type: "service_account",
+          client_email: "vertex@discourse-project.iam.gserviceaccount.com",
+          private_key: OpenSSL::PKey::RSA.new(2048).to_pem,
+        }.to_json
+      end
+
+      def stub_service_account_token(token: "sa-token", expires_in: 3599, status: 200)
+        stub_request(:post, "https://oauth2.googleapis.com/token").to_return(
+          status: status,
+          body: { access_token: token, expires_in: expires_in, token_type: "Bearer" }.to_json,
+        )
+      end
+
+      after do
+        info =
+          DiscourseAi::Completions::Endpoints::GoogleVertexAi.parse_service_account_json(
+            service_account_json,
+          )
+        cache_key =
+          "vertex-ai-service-account-token-#{Digest::SHA256.hexdigest(info["client_email"])}"
+        Discourse.cache.delete(cache_key)
+      end
+
+      it "mints and returns an access token signed with the service account's private key" do
+        model.update!(api_key: service_account_json)
+        token_stub = stub_service_account_token(token: "sa-token")
+
+        expect(endpoint.send(:access_token)).to eq("sa-token")
+        expect(token_stub).to have_been_requested.once
+      end
+
+      it "caches the minted token across endpoint instances" do
+        model.update!(api_key: service_account_json)
+        token_stub = stub_service_account_token(token: "sa-token")
+
+        expect(endpoint.send(:access_token)).to eq("sa-token")
+        expect(described_class.new(model).send(:access_token)).to eq("sa-token")
+
+        expect(token_stub).to have_been_requested.once
+      end
+
+      it "mints a fresh token once the cached one is within the safety buffer of expiring" do
+        model.update!(api_key: service_account_json)
+        token_stub = stub_service_account_token(token: "sa-token", expires_in: 30)
+
+        expect(endpoint.send(:access_token)).to eq("sa-token")
+        expect(described_class.new(model).send(:access_token)).to eq("sa-token")
+
+        expect(token_stub).to have_been_requested.twice
+      end
+
+      it "returns nil when the token endpoint fails" do
+        model.update!(api_key: service_account_json)
+        stub_service_account_token(status: 401)
+
+        expect(endpoint.send(:access_token)).to be_nil
+      end
+    end
+
+    it "treats a plain (non-JSON) API key as a literal bearer token, unchanged" do
+      model.update!(api_key: "plain-bearer-token")
+
+      expect(endpoint.send(:access_token)).to eq("plain-bearer-token")
+    end
+
+    it "treats malformed JSON in the API key as a literal bearer token rather than raising" do
+      model.update!(api_key: "{not valid json")
+
+      expect(endpoint.send(:access_token)).to eq("{not valid json")
+    end
   end
 end
