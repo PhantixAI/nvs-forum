@@ -515,6 +515,25 @@ RSpec.describe Email::Sender do
       end
     end
 
+    context "with email log for an invite email with an invite id header" do
+      fab!(:invite)
+      let(:email_sender) { Email::Sender.new(message, :invite) }
+
+      before { message.header["X-Discourse-Invite-Id"] = invite.id }
+
+      let(:email_log) { EmailLog.last }
+
+      it "records the invite id in the email log, so Invite#delivery_status can find it later" do
+        email_sender.send
+        expect(email_log.invite_id).to eq(invite.id)
+      end
+
+      it "stores the raw message, since an invite's custom_message is overwritten on resend" do
+        email_sender.send
+        expect(email_log.raw).to be_present
+      end
+    end
+
     context "with email parts" do
       it "builds matching plain-text and HTML email parts" do
         email_sender.send

@@ -47,4 +47,35 @@ module("Integration | Component | Modal | sent-invite-email", function (hooks) {
       "the headers render as a <p>, not a <textarea>"
     );
   });
+
+  test("preserves line breaks in the body and headers instead of collapsing them to spaces", async function (assert) {
+    const model = {
+      subject: "You're invited",
+      body: "Hi there,\n\nPlease use the following invite link to join the forum:\nhttps://example.com/invites/abc",
+      headers: "X-Mailer: test\nMessage-ID: <abc123@example.com>",
+    };
+
+    await render(
+      <template>
+        <SentInviteEmail
+          @closeModal={{noop}}
+          @inline={{true}}
+          @model={{model}}
+        />
+      </template>
+    );
+
+    assert.strictEqual(
+      getComputedStyle(document.querySelector(".sent-invite-email-body"))
+        .whiteSpace,
+      "pre-wrap",
+      "the body preserves the AI/plain-text template's line breaks"
+    );
+    assert.strictEqual(
+      getComputedStyle(document.querySelector(".sent-invite-email-headers"))
+        .whiteSpace,
+      "pre-wrap",
+      "the headers preserve their own line breaks"
+    );
+  });
 });
