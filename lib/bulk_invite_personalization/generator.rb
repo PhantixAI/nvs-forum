@@ -118,6 +118,7 @@ module BulkInvitePersonalization
           required_link: link,
           invite_id: invite.id,
           recipient_domain: domain,
+          recipient_name: invite.recipient_name,
           exempt_keywords: keywords,
         )
       if body.nil?
@@ -130,6 +131,7 @@ module BulkInvitePersonalization
           parsed[:subject],
           invite_id: invite.id,
           recipient_domain: domain,
+          recipient_name: invite.recipient_name,
           exempt_keywords: keywords,
         )
       if subject.nil?
