@@ -34,6 +34,7 @@ module BulkInvitePersonalization
       required_link:,
       invite_id: nil,
       recipient_domain: nil,
+      recipient_name: nil,
       exempt_keywords: nil
     )
       return nil if text.blank?
@@ -66,6 +67,7 @@ module BulkInvitePersonalization
              shouting_word(
                flattened,
                recipient_domain: recipient_domain,
+               recipient_name: recipient_name,
                exempt_keywords: exempt_keywords,
              )
          )
@@ -87,7 +89,13 @@ module BulkInvitePersonalization
       "#{truncated}#{REQUIRED_LINK_LINE % { link: required_link }}"
     end
 
-    def self.clean_subject(text, invite_id: nil, recipient_domain: nil, exempt_keywords: nil)
+    def self.clean_subject(
+      text,
+      invite_id: nil,
+      recipient_domain: nil,
+      recipient_name: nil,
+      exempt_keywords: nil
+    )
       return nil if text.blank?
 
       sanitized = ActionView::Base.full_sanitizer.sanitize(text).to_s
@@ -111,6 +119,7 @@ module BulkInvitePersonalization
              shouting_word(
                flattened,
                recipient_domain: recipient_domain,
+               recipient_name: recipient_name,
                exempt_keywords: exempt_keywords,
              )
          )
@@ -180,7 +189,7 @@ module BulkInvitePersonalization
     # just that something did -- the difference between re-running this by
     # hand to find out and reading it straight off the log line.
     #
-    # Two exemptions apply on top of whatever institute_acronyms has, both
+    # Three exemptions apply on top of whatever institute_acronyms has, all
     # scoped to this one invite rather than a site-wide allowlist entry:
     #
     # - A word that appears anywhere in recipient_domain (e.g. "IITM" in
@@ -193,12 +202,23 @@ module BulkInvitePersonalization
     #   one hand-maintained allowlist entry at a time otherwise (MNNIT and
     #   AIIMS both got missed for months despite NIT/MNIT/IIT already being
     #   allow-listed).
+    # - A word that appears anywhere in recipient_name (e.g. "GANAPATHY" in
+    #   "Dr. GANAPATHY D", or "MSME" in "MSME Department, IIT BHILAI") is
+    #   exempt -- recipient_name is often sourced from an ALL-CAPS directory
+    #   export (see normalize_recipient_name's own comment in Generator,
+    #   which only cleans up what the *prompt* shows the model); the model
+    #   is still free to write the recipient's own name/department back
+    #   into its output however it saw fit, and doing so is the whole point
+    #   of personalization, not shouting. Confirmed in production: this was
+    #   permanently skipping every invite whose recipient_name happened to
+    #   be all-caps in the source data, via Generator's MAX_ATTEMPTS retry
+    #   exhausting on the same rejection both times.
     # - A word that appears in exempt_keywords (the invite's own
     #   recipient_keywords, see Generator#combined_keywords) is exempt --
     #   an admin-supplied term like a lab/program code ("WSAI") is the
     #   model following its instructions to use that context, not shouting,
     #   and will never belong on a site-wide institute allowlist.
-    def self.shouting_word(text, recipient_domain: nil, exempt_keywords: nil)
+    def self.shouting_word(text, recipient_domain: nil, recipient_name: nil, exempt_keywords: nil)
       return "!/$" if text.match?(PUNCTUATION_SHOUTING_PATTERN)
 
       allowlist = SiteSetting.institute_acronyms.split("|")
@@ -207,6 +227,7 @@ module BulkInvitePersonalization
         .scan(ALL_CAPS_WORD_PATTERN)
         .find do |word|
           next false if domain_contains_word?(recipient_domain, word)
+          next false if recipient_name_contains_word?(recipient_name, word)
           next false if keyword_words.include?(word) || keyword_words.include?(word.chomp("S"))
 
           # Confirmed in production: the model routinely writes the natural
@@ -226,6 +247,14 @@ module BulkInvitePersonalization
       domain.include?(word) || domain.include?(word.chomp("S"))
     end
     private_class_method :domain_contains_word?
+
+    def self.recipient_name_contains_word?(recipient_name, word)
+      return false if recipient_name.blank?
+
+      name = recipient_name.to_s.upcase
+      name.include?(word) || name.include?(word.chomp("S"))
+    end
+    private_class_method :recipient_name_contains_word?
 
     def self.truncate_to_word_limit(text)
       words = text.split(" ")

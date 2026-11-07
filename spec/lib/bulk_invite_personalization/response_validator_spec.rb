@@ -317,6 +317,44 @@ RSpec.describe BulkInvitePersonalization::ResponseValidator do
       ).to eq(nil)
     end
 
+    it "exempts an ALL-CAPS word that appears in the invite's own recipient_name" do
+      # Confirmed in production: recipient_name sourced from an ALL-CAPS
+      # directory export (e.g. "Dr. GANAPATHY D") -- the model echoing the
+      # recipient's own name back, in the casing it was given, is the
+      # point of personalization, not shouting. It was permanently
+      # skipping every one of these invites (both Generator retry attempts
+      # hit the same rejection).
+      text = "Hello GANAPATHY, worth a look?"
+      expect(
+        described_class.clean_body(text, required_link: link, recipient_name: "Dr. GANAPATHY D"),
+      ).to eq("#{text}#{link_line}")
+    end
+
+    it "exempts an ALL-CAPS word from a multi-word recipient_name like a department string" do
+      text = "Reaching out to the MSME team, worth a look?"
+      expect(
+        described_class.clean_body(
+          text,
+          required_link: link,
+          recipient_name: "MSME Department, IIT BHILAI",
+        ),
+      ).to eq("#{text}#{link_line}")
+    end
+
+    it "tolerates the natural plural of a recipient_name word too" do
+      text = "A note for the GANAPATHYS, worth a look?"
+      expect(
+        described_class.clean_body(text, required_link: link, recipient_name: "Dr. GANAPATHY D"),
+      ).to eq("#{text}#{link_line}")
+    end
+
+    it "still rejects an ALL-CAPS word that doesn't appear in recipient_name" do
+      text = "This is AMAZING, worth a look?"
+      expect(
+        described_class.clean_body(text, required_link: link, recipient_name: "Dr. GANAPATHY D"),
+      ).to eq(nil)
+    end
+
     it "truncates text over 100 words at the last sentence boundary, then still appends the real link after it" do
       sentence = "This is one short sentence about the community."
       long_text = ([sentence] * 15).join(" ") + " Worth a look?"
@@ -421,6 +459,12 @@ RSpec.describe BulkInvitePersonalization::ResponseValidator do
       expect(described_class.clean_subject("Note about WSAI", exempt_keywords: "WSAI")).to eq(
         "Note about WSAI",
       )
+    end
+
+    it "exempts an ALL-CAPS word from recipient_name in a subject too" do
+      expect(
+        described_class.clean_subject("Hello GANAPATHY", recipient_name: "Dr. GANAPATHY D"),
+      ).to eq("Hello GANAPATHY")
     end
 
     it "still rejects a subject link when the recipient is on a subdomain but the match is unrelated" do
