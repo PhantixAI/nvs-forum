@@ -74,10 +74,10 @@ module Jobs
         # bulk_pending either way (it just sends with whatever it already
         # had, same as Jobs::ProcessBulkInviteEmails#deliver used to handle
         # a nil result).
-        invite.update_columns(
+        invite.update_emailed_status!(
+          Invite.emailed_status_types[:bulk_pending],
           custom_subject: result&.fetch(:subject) || invite.custom_subject,
           custom_message: result&.fetch(:body) || invite.custom_message,
-          emailed_status: Invite.emailed_status_types[:bulk_pending],
         )
         true
       end
@@ -106,7 +106,7 @@ module Jobs
     def mark_skipped(invite_id, db)
       RailsMultisite::ConnectionManagement.with_connection(db) do
         Invite.where(id: invite_id).update_all(
-          emailed_status: Invite.emailed_status_types[:skipped],
+          Invite.set_emailed_status_sql(Invite.emailed_status_types[:skipped]),
         )
       end
     end

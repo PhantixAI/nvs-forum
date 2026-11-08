@@ -114,7 +114,10 @@ export default <template>
                 >
                   <combo.Button
                     @action={{@controller.reinviteAll}}
-                    @disabled={{not @controller.hasEmailInvites}}
+                    @disabled={{or
+                      (not @controller.hasEmailInvites)
+                      (not @controller.canBulkResendOrDelete)
+                    }}
                     @icon={{if
                       @controller.inviteReview
                       "paper-plane"
@@ -133,6 +136,7 @@ export default <template>
                         <DButton
                           class="btn-danger delete-all-invites"
                           @action={{@controller.deleteAllInvites}}
+                          @disabled={{not @controller.canBulkResendOrDelete}}
                           @icon="trash-can"
                           @label="user.invited.delete_all"
                         />
@@ -548,6 +552,17 @@ export default <template>
                                       @action={{fn @controller.sendNow invite}}
                                       @icon="paper-plane"
                                       @label="user.invited.invite.send_now"
+                                    />
+                                  </dropdown.item>
+                                  <dropdown.item>
+                                    <DButton
+                                      class="btn-transparent cancel-schedule-invite"
+                                      @action={{fn
+                                        @controller.cancelSchedule
+                                        invite
+                                      }}
+                                      @icon="xmark"
+                                      @label="user.invited.invite.cancel_schedule"
                                     />
                                   </dropdown.item>
                                 {{/if}}

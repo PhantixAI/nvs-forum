@@ -1778,6 +1778,7 @@ Discourse::Application.routes.draw do
     post "invites/reinvite" => "invites#resend_invite"
     post "invites/reinvite-all" => "invites#resend_all_invites"
     post "invites/send-now" => "invites#send_now_invite"
+    post "invites/cancel-schedule" => "invites#cancel_schedule"
     delete "invites" => "invites#destroy"
     put "invites/show/:id" => "invites#perform_accept_invitation", :as => "perform_accept_invite"
     get "invites/retrieve" => "invites#retrieve"

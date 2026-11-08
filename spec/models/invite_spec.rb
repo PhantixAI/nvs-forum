@@ -1209,6 +1209,88 @@ RSpec.describe Invite do
     end
   end
 
+  describe ".claim_for_schedule_cancel" do
+    fab!(:invite)
+
+    it "reverts a bulk_pending invite to whatever its last_emailed_status was" do
+      invite.update_columns(
+        emailed_status: Invite.emailed_status_types[:bulk_pending],
+        last_emailed_status: Invite.emailed_status_types[:sent],
+      )
+
+      claimed = Invite.claim_for_schedule_cancel(invite.id)
+
+      expect(claimed.id).to eq(invite.id)
+      expect(claimed.emailed_status).to eq(Invite.emailed_status_types[:sent])
+      expect(claimed.last_emailed_status).to be_nil
+    end
+
+    it "reverts a plain pending invite the same way" do
+      invite.update_columns(
+        emailed_status: Invite.emailed_status_types[:pending],
+        last_emailed_status: Invite.emailed_status_types[:review],
+      )
+
+      claimed = Invite.claim_for_schedule_cancel(invite.id)
+
+      expect(claimed.emailed_status).to eq(Invite.emailed_status_types[:review])
+    end
+
+    it "falls back to review when no last_emailed_status was ever captured" do
+      invite.update_columns(
+        emailed_status: Invite.emailed_status_types[:bulk_pending],
+        last_emailed_status: nil,
+      )
+
+      claimed = Invite.claim_for_schedule_cancel(invite.id)
+
+      expect(claimed.emailed_status).to eq(Invite.emailed_status_types[:review])
+    end
+
+    it "returns nil without changing anything for a non-claimable status" do
+      %i[sending sent skipped not_required review].each do |status|
+        invite.update_columns(
+          emailed_status: Invite.emailed_status_types[status],
+          last_emailed_status: Invite.emailed_status_types[:sent],
+        )
+
+        expect(Invite.claim_for_schedule_cancel(invite.id)).to be_nil
+        expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[status])
+      end
+    end
+
+    it "returns nil for an id that doesn't exist" do
+      expect(Invite.claim_for_schedule_cancel(-1)).to be_nil
+    end
+  end
+
+  describe "#update_emailed_status! / .set_emailed_status_sql" do
+    fab!(:invite) { Fabricate(:invite, emailed_status: Invite.emailed_status_types[:review]) }
+
+    it "carries the current emailed_status into last_emailed_status when updating an instance" do
+      invite.update_emailed_status!(Invite.emailed_status_types[:bulk_pending])
+
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+      expect(invite.last_emailed_status).to eq(Invite.emailed_status_types[:review])
+    end
+
+    it "accepts other columns to update in the same call" do
+      invite.update_emailed_status!(Invite.emailed_status_types[:skipped], custom_subject: "hi")
+
+      expect(invite.reload.custom_subject).to eq("hi")
+      expect(invite.emailed_status).to eq(Invite.emailed_status_types[:skipped])
+    end
+
+    it "carries the current emailed_status into last_emailed_status for a bulk update_all" do
+      Invite.where(id: invite.id).update_all(
+        Invite.set_emailed_status_sql(Invite.emailed_status_types[:drafting]),
+      )
+
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
+      expect(invite.last_emailed_status).to eq(Invite.emailed_status_types[:review])
+    end
+  end
+
   describe ".claim_for_drafting" do
     fab!(:invite) { Fabricate(:invite, emailed_status: Invite.emailed_status_types[:review]) }
 
@@ -1511,6 +1593,33 @@ RSpec.describe Invite do
         emailed_status: Invite.emailed_status_types[:drafting],
       )
     end
+    fab!(:bounced_invite) do
+      Fabricate(
+        :invite,
+        invited_by: inviter,
+        expires_at: 1.day.from_now,
+        emailed_status: Invite.emailed_status_types[:sent],
+      )
+    end
+    fab!(:bounced_email_log) do
+      Fabricate(:email_log, invite_id: bounced_invite.id, email_type: "invite", bounced: true)
+    end
+    fab!(:complained_invite) do
+      Fabricate(
+        :invite,
+        invited_by: inviter,
+        expires_at: 1.day.from_now,
+        emailed_status: Invite.emailed_status_types[:sent],
+      )
+    end
+    fab!(:complained_email_log) do
+      Fabricate(
+        :email_log,
+        invite_id: complained_invite.id,
+        email_type: "invite",
+        complained_at: Time.current,
+      )
+    end
 
     it "excludes drafts from .pending by default, even though they aren't expired" do
       expect(Invite.pending(inviter)).to contain_exactly(pending_invite)
@@ -1518,6 +1627,14 @@ RSpec.describe Invite do
 
     it "excludes invites currently drafting from .pending by default, even though they aren't expired" do
       expect(Invite.pending(inviter)).not_to include(drafting_invite)
+    end
+
+    it "excludes bounced invites from .pending by default, even though they aren't expired" do
+      expect(Invite.pending(inviter)).not_to include(bounced_invite)
+    end
+
+    it "excludes complained invites from .pending by default, even though they aren't expired" do
+      expect(Invite.pending(inviter)).not_to include(complained_invite)
     end
 
     it "returns only review invites from .pending when explicitly filtered to the \"review\" status" do
@@ -1528,6 +1645,14 @@ RSpec.describe Invite do
       expect(Invite.pending(inviter, status: "drafting")).to contain_exactly(drafting_invite)
     end
 
+    it "returns only bounced invites from .pending when explicitly filtered to the \"bounced\" status" do
+      expect(Invite.pending(inviter, status: "bounced")).to contain_exactly(bounced_invite)
+    end
+
+    it "returns only complained invites from .pending when explicitly filtered to the \"complained\" status" do
+      expect(Invite.pending(inviter, status: "complained")).to contain_exactly(complained_invite)
+    end
+
     it "excludes review invites from .expired even if they happen to be past expiry" do
       review_invite.update_columns(expires_at: 1.day.ago)
       expect(Invite.expired(inviter)).to contain_exactly(expired_invite)
@@ -1536,6 +1661,21 @@ RSpec.describe Invite do
     it "excludes invites currently drafting from .expired even if they happen to be past expiry" do
       drafting_invite.update_columns(expires_at: 1.day.ago)
       expect(Invite.expired(inviter)).to contain_exactly(expired_invite)
+    end
+
+    it "excludes bounced invites from .expired even if they happen to be past expiry" do
+      bounced_invite.update_columns(expires_at: 1.day.ago)
+      expect(Invite.expired(inviter)).to contain_exactly(expired_invite)
+    end
+
+    it "excludes complained invites from .expired even if they happen to be past expiry" do
+      complained_invite.update_columns(expires_at: 1.day.ago)
+      expect(Invite.expired(inviter)).to contain_exactly(expired_invite)
+    end
+
+    it "returns only bounced invites from .expired when explicitly filtered to the \"bounced\" status, even if past expiry" do
+      bounced_invite.update_columns(expires_at: 1.day.ago)
+      expect(Invite.expired(inviter, status: "bounced")).to contain_exactly(bounced_invite)
     end
   end
 

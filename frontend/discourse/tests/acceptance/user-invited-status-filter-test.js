@@ -41,6 +41,7 @@ acceptance("User invited - delivery status filter", function (needs) {
   let reinviteRequests;
   let destroyAllRequests;
   let sendNowRequests;
+  let cancelScheduleRequests;
 
   needs.hooks.beforeEach(() => {
     invitedRequests = [];
@@ -48,6 +49,7 @@ acceptance("User invited - delivery status filter", function (needs) {
     reinviteRequests = [];
     destroyAllRequests = [];
     sendNowRequests = [];
+    cancelScheduleRequests = [];
   });
 
   needs.pretender((server, helper) => {
@@ -75,6 +77,11 @@ acceptance("User invited - delivery status filter", function (needs) {
     server.post("/invites/send-now", (request) => {
       sendNowRequests.push(helper.parsePostData(request.requestBody));
       return helper.response({ success: "OK", delivery_status: "pending" });
+    });
+
+    server.post("/invites/cancel-schedule", (request) => {
+      cancelScheduleRequests.push(helper.parsePostData(request.requestBody));
+      return helper.response({ success: "OK", delivery_status: "review" });
     });
 
     server.post("/invites/reinvite-all", (request) => {
@@ -162,6 +169,11 @@ acceptance("User invited - delivery status filter", function (needs) {
     await domainFilter.expand();
     await domainFilter.selectRowByValue("nit.ac.in");
 
+    // Resend All requires a status filter too (see canBulkResendOrDelete).
+    const statusFilter = selectKit(".invite-status-filter");
+    await statusFilter.expand();
+    await statusFilter.selectRowByValue("skipped");
+
     await fillIn(".user-invite-search input", "nit");
     await click(".user-invite-buttons .btn .d-icon-arrows-rotate");
     await click(".resend-invite-modal .resend-invite-confirm");
@@ -172,6 +184,10 @@ acceptance("User invited - delivery status filter", function (needs) {
 
   test("passes keywords and ai_personalization along with a bulk resend", async function (assert) {
     await visit("/u/eviltrout/invited/pending");
+
+    const statusFilter = selectKit(".invite-status-filter");
+    await statusFilter.expand();
+    await statusFilter.selectRowByValue("skipped");
 
     await click(".user-invite-buttons .btn .d-icon-arrows-rotate");
     await fillIn(".resend-invite-modal textarea", "robotics club");
@@ -184,6 +200,10 @@ acceptance("User invited - delivery status filter", function (needs) {
 
   test("sends schedule_send false with ai_personalization false for an immediate bulk resend", async function (assert) {
     await visit("/u/eviltrout/invited/pending");
+
+    const statusFilter = selectKit(".invite-status-filter");
+    await statusFilter.expand();
+    await statusFilter.selectRowByValue("skipped");
 
     await click(".user-invite-buttons .btn .d-icon-arrows-rotate");
 
@@ -204,6 +224,10 @@ acceptance("User invited - delivery status filter", function (needs) {
   test("sends schedule_send true with ai_personalization false for a paced bulk resend", async function (assert) {
     await visit("/u/eviltrout/invited/pending");
 
+    const statusFilter = selectKit(".invite-status-filter");
+    await statusFilter.expand();
+    await statusFilter.selectRowByValue("skipped");
+
     await click(".user-invite-buttons .btn .d-icon-arrows-rotate");
 
     await click(
@@ -217,6 +241,32 @@ acceptance("User invited - delivery status filter", function (needs) {
     assert.strictEqual(reinviteAllRequests.length, 1);
     assert.strictEqual(reinviteAllRequests[0].ai_personalization, "false");
     assert.strictEqual(reinviteAllRequests[0].schedule_send, "true");
+  });
+
+  test("disables Resend All and Delete All until a specific status is selected", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    assert
+      .dom(".resend-delete-combo .d-combo-button-button")
+      .isDisabled("Resend All starts disabled with no status filter");
+
+    await click(".resend-delete-combo .fk-d-menu__trigger");
+    assert
+      .dom(".fk-d-menu .delete-all-invites")
+      .isDisabled("Delete All starts disabled with no status filter");
+
+    const statusFilter = selectKit(".invite-status-filter");
+    await statusFilter.expand();
+    await statusFilter.selectRowByValue("skipped");
+
+    assert
+      .dom(".resend-delete-combo .d-combo-button-button")
+      .isEnabled("Resend All enables once a status is selected");
+
+    await click(".resend-delete-combo .fk-d-menu__trigger");
+    assert
+      .dom(".fk-d-menu .delete-all-invites")
+      .isEnabled("Delete All enables once a status is selected");
   });
 
   test("resends a single invite with its own keywords from the kebab menu", async function (assert) {
@@ -253,6 +303,29 @@ acceptance("User invited - delivery status filter", function (needs) {
 
     assert.strictEqual(sendNowRequests.length, 1);
     assert.strictEqual(sendNowRequests[0].invite_id, "3");
+  });
+
+  test("shows Cancel Schedule only for a scheduled invite, and cancels it when clicked", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    await click(
+      "table.user-invite-list tbody tr:nth-child(1) .d-icon-ellipsis-vertical"
+    );
+    assert
+      .dom(".cancel-schedule-invite")
+      .doesNotExist("a skipped row has no Cancel Schedule action");
+
+    await click(
+      "table.user-invite-list tbody tr:nth-child(3) .d-icon-ellipsis-vertical"
+    );
+    assert
+      .dom(".cancel-schedule-invite")
+      .exists("the scheduled row offers Cancel Schedule");
+
+    await click(".cancel-schedule-invite");
+
+    assert.strictEqual(cancelScheduleRequests.length, 1);
+    assert.strictEqual(cancelScheduleRequests[0].invite_id, "3");
   });
 
   test("offers the ac.in umbrella domain alongside specific institute domains", async function (assert) {

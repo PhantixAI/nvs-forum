@@ -38,7 +38,7 @@ module Jobs
         Rails.logger.error(
           "[ProcessBulkInviteEmails] invite #{invite.id} could not be sent: #{e.class}: #{e.message}",
         )
-        invite.update_columns(emailed_status: Invite.emailed_status_types[:pending])
+        invite.update_emailed_status!(Invite.emailed_status_types[:pending])
       end
 
       reschedule
@@ -106,8 +106,7 @@ module Jobs
               .where("created_at >= ?", invite.updated_at)
               .exists?
 
-          invite.update_column(
-            :emailed_status,
+          invite.update_emailed_status!(
             (
               if delivered
                 Invite.emailed_status_types[:sent]
@@ -132,8 +131,8 @@ module Jobs
     def claim_next_pending_invite
       Invite.transaction do
         invite = pending_invites.order(:id).lock("FOR UPDATE SKIP LOCKED").limit(1).first
-        invite&.update_columns(
-          emailed_status: Invite.emailed_status_types[:sending],
+        invite&.update_emailed_status!(
+          Invite.emailed_status_types[:sending],
           updated_at: Time.zone.now,
         )
         invite

@@ -7787,7 +7787,8 @@ CREATE TABLE public.invites (
     schedule_send boolean DEFAULT true NOT NULL,
     custom_subject character varying,
     ai_personalization boolean DEFAULT true NOT NULL,
-    source_url character varying(2048)
+    source_url character varying(2048),
+    last_emailed_status integer
 );
 
 
@@ -26750,6 +26751,7 @@ ALTER TABLE ONLY public.ad_plugin_house_ads_groups
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20261108093015'),
 ('20261105165644'),
 ('20261104011110'),
 ('20261102194941'),

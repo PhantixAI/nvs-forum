@@ -4424,6 +4424,14 @@ uncategorized:
     client: false
     area: "users"
 
+  invite_cancel_schedule_rate_limit_per_hour:
+    default: 30
+    type: integer
+    min: 1
+    max: 10000
+    client: false
+    area: "users"
+
   bulk_invite_resend_rate_limit_per_day:
     default: 1
     type: integer

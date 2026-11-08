@@ -46,6 +46,7 @@ class InvitesController < ApplicationController
                    resend_invite
                    resend_all_invites
                    send_now_invite
+                   cancel_schedule
                    upload_csv
                    extract_from_url
                    last_url_extraction_rules
@@ -324,12 +325,14 @@ class InvitesController < ApplicationController
         end
 
         if old_email != new_email
-          invite.emailed_status =
+          set_emailed_status(
+            invite,
             if new_email && !params[:skip_email]
               Invite.emailed_status_types[:pending]
             else
               Invite.emailed_status_types[:not_required]
-            end
+            end,
+          )
         end
 
         invite.domain = nil if invite.email.present?
@@ -340,7 +343,7 @@ class InvitesController < ApplicationController
 
         if invite.domain.present?
           invite.email = nil
-          invite.emailed_status = Invite.emailed_status_types[:not_required]
+          set_emailed_status(invite, Invite.emailed_status_types[:not_required])
         end
       end
 
@@ -373,7 +376,7 @@ class InvitesController < ApplicationController
           end
         end
 
-        invite.emailed_status = Invite.emailed_status_types[:pending]
+        set_emailed_status(invite, Invite.emailed_status_types[:pending])
       end
 
       begin
@@ -393,7 +396,7 @@ class InvitesController < ApplicationController
     end
 
     if invite.emailed_status == Invite.emailed_status_types[:pending]
-      invite.update_column(:emailed_status, Invite.emailed_status_types[:sending])
+      invite.update_emailed_status!(Invite.emailed_status_types[:sending])
       Jobs.enqueue(:invite_email, invite_id: invite.id, invite_to_topic: params[:invite_to_topic])
     end
 
@@ -626,7 +629,7 @@ class InvitesController < ApplicationController
         e,
         message: "Send-now personalization failed for invite #{claimed.id}",
       )
-      claimed.update_columns(emailed_status: Invite.emailed_status_types[:skipped])
+      claimed.update_emailed_status!(Invite.emailed_status_types[:skipped])
       return render_json_error(I18n.t("invite.ai_personalization_failed"))
     end
 
@@ -639,6 +642,35 @@ class InvitesController < ApplicationController
     render json: success_json.merge(delivery_status: claimed.reload.delivery_status)
   rescue RateLimiter::LimitExceeded => e
     log_invite_rate_limit_exceeded(e, action: "send_now_invite")
+    render_json_error(I18n.t("rate_limiter.slow_down"))
+  end
+
+  # Inverse of #send_now_invite: pulls a Scheduled (pending/bulk_pending)
+  # invite back out of the send pipeline instead of pushing it forward.
+  # Invite.claim_for_schedule_cancel's conditional UPDATE is what makes this
+  # race-safe against Jobs::ProcessBulkInviteEmails picking the same invite
+  # up for sending at the same moment.
+  def cancel_schedule
+    RateLimiter.new(
+      current_user,
+      "cancel-schedule-invite-per-hour",
+      SiteSetting.invite_cancel_schedule_rate_limit_per_hour,
+      1.hour,
+    ).performed!
+
+    invite = Invite.find_by(id: params[:invite_id])
+    raise Discourse::InvalidParameters.new(:invite_id) if invite.blank?
+
+    unless guardian.can_see_invite_details?(invite.invited_by)
+      return render_json_error(I18n.t("invite.disabled_errors.invalid_access"), 403)
+    end
+
+    claimed = Invite.claim_for_schedule_cancel(invite.id)
+    return render_json_error(I18n.t("invite.cancel_schedule_not_scheduled")) if claimed.blank?
+
+    render json: success_json.merge(delivery_status: claimed.reload.delivery_status)
+  rescue RateLimiter::LimitExceeded => e
+    log_invite_rate_limit_exceeded(e, action: "cancel_schedule")
     render_json_error(I18n.t("rate_limiter.slow_down"))
   end
 
@@ -1087,6 +1119,15 @@ class InvitesController < ApplicationController
   end
 
   private
+
+  # Mirrors Invite#update_emailed_status!'s "capture the old value into
+  # last_emailed_status, then set the new one" rule for an in-memory
+  # attribute assignment -- #update's own persistence happens later in the
+  # method via invite.update!/#update_emailed_status!, not here.
+  def set_emailed_status(invite, new_status)
+    invite.last_emailed_status = invite.emailed_status
+    invite.emailed_status = new_status
+  end
 
   # Surfaces every invite rate-limit block in Logster (admin-visible at /logs)
   # instead of only the generic message the blocked admin sees -- without

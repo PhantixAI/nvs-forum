@@ -2827,6 +2827,107 @@ RSpec.describe InvitesController do
     end
   end
 
+  describe "#cancel_schedule" do
+    it "requires to be logged in" do
+      post "/invites/cancel-schedule.json", params: { invite_id: 1 }
+      expect(response.status).to eq(403)
+    end
+
+    context "while logged in" do
+      fab!(:user)
+      fab!(:invite) do
+        Fabricate(
+          :invite,
+          invited_by: user,
+          emailed_status: Invite.emailed_status_types[:bulk_pending],
+          last_emailed_status: Invite.emailed_status_types[:sent],
+        )
+      end
+
+      before { sign_in(user) }
+
+      it "raises an error when the invite does not exist" do
+        post "/invites/cancel-schedule.json", params: { invite_id: -1 }
+        expect(response.status).to eq(400)
+      end
+
+      it "rejects an unrelated non-staff user" do
+        other_user = Fabricate(:user)
+        sign_in(other_user)
+
+        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
+
+        expect(response.status).to eq(403)
+        expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+      end
+
+      it "lets staff cancel someone else's scheduled invite" do
+        sign_in(Fabricate(:admin))
+
+        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
+
+        expect(response.status).to eq(200)
+        expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:sent])
+      end
+
+      it "reverts a bulk_pending invite to its last_emailed_status and clears it" do
+        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
+
+        expect(response.status).to eq(200)
+        expect(response.parsed_body["delivery_status"]).to eq("sent")
+        invite.reload
+        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:sent])
+        expect(invite.last_emailed_status).to be_nil
+      end
+
+      it "falls back to review when no last_emailed_status was ever captured" do
+        invite.update_columns(last_emailed_status: nil)
+
+        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
+
+        expect(response.status).to eq(200)
+        expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
+      end
+
+      it "does not cancel an invite that isn't currently scheduled" do
+        invite.update_column(:emailed_status, Invite.emailed_status_types[:sent])
+
+        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
+
+        expect(response.status).to eq(422)
+        expect(response.parsed_body["errors"]).to include(
+          I18n.t("invite.cancel_schedule_not_scheduled"),
+        )
+      end
+
+      it "honors invite_cancel_schedule_rate_limit_per_hour instead of a fixed limit" do
+        RateLimiter.enable
+        SiteSetting.invite_cancel_schedule_rate_limit_per_hour = 1
+
+        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
+        expect(response.status).to eq(200)
+
+        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
+        expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
+      end
+
+      it "logs the rate limit event" do
+        RateLimiter.enable
+        SiteSetting.invite_cancel_schedule_rate_limit_per_hour = 1
+
+        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
+
+        allow(Discourse).to receive(:warn_exception)
+        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
+
+        expect(Discourse).to have_received(:warn_exception) do |e, message:, **|
+          expect(e).to be_a(RateLimiter::LimitExceeded)
+          expect(message).to include("action=cancel_schedule")
+        end
+      end
+    end
+  end
+
   describe "#resend_all_invites" do
     let(:admin) { Fabricate(:admin) }
 

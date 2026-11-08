@@ -31,7 +31,7 @@ module Jobs
       Email::Sender.new(message, :invite).send
 
       if invite.emailed_status != Invite.emailed_status_types[:not_required]
-        invite.update_column(:emailed_status, Invite.emailed_status_types[:sent])
+        invite.update_emailed_status!(Invite.emailed_status_types[:sent])
       end
     end
   end

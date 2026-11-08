@@ -430,4 +430,17 @@ export default class Invite extends EmberObject {
       }
     ).then((result) => this.set("delivery_status", result.delivery_status));
   }
+
+  // Inverse of #sendNow -- pulls a Scheduled invite back out of the send
+  // queue instead of pushing it forward. Same shape/error-handling
+  // contract: the caller (user-invited/show.js) handles the error itself.
+  cancelSchedule(): Promise<DeliveryStatus | null> {
+    return ajax<{ delivery_status: DeliveryStatus | null }>(
+      "/invites/cancel-schedule",
+      {
+        type: "POST",
+        data: { invite_id: this.id },
+      }
+    ).then((result) => this.set("delivery_status", result.delivery_status));
+  }
 }

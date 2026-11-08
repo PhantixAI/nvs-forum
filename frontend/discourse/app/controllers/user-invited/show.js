@@ -165,6 +165,18 @@ export default class UserInvitedShowController extends Controller {
     return this.model.invites.length > 0 && this.currentUser.staff;
   }
 
+  // "Resend All"/"Delete All" across every status at once has far more
+  // blast radius than any single status's worth -- confirmed in
+  // production: one such click silently re-queued thousands of invites
+  // across every status for AI regeneration and resend. Require a specific
+  // status to be selected first on this page. The underlying endpoints
+  // still support an unfiltered bulk action for other callers (see their
+  // own request specs), so this is a page-level guard, not an API change.
+  @computed("selectedStatus")
+  get canBulkResendOrDelete() {
+    return Boolean(this.selectedStatus);
+  }
+
   @computed("invitesCount", "filter", "selectedDomain", "selectedStatus")
   get showSearch() {
     // The Extracted tab searches by URL substring instead of
@@ -328,6 +340,18 @@ export default class UserInvitedShowController extends Controller {
       await invite.sendNow();
       this.toasts.success({
         data: { message: i18n("user.invited.invite.send_now_success") },
+      });
+    } catch (error) {
+      popupAjaxError(error);
+    }
+  }
+
+  @action
+  async cancelSchedule(invite) {
+    try {
+      await invite.cancelSchedule();
+      this.toasts.success({
+        data: { message: i18n("user.invited.invite.cancel_schedule_success") },
       });
     } catch (error) {
       popupAjaxError(error);
