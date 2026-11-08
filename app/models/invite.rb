@@ -552,11 +552,7 @@ class Invite < ActiveRecord::Base
     if status.present?
       invites = with_delivery_status(invites, status)
     else
-      invites =
-        invites.where(
-          "emailed_status IS NULL OR emailed_status NOT IN (?)",
-          emailed_status_types.values_at(:review, :drafting),
-        )
+      invites = exclude_review_bounced_and_complained(invites)
     end
     invites
   end
@@ -570,14 +566,32 @@ class Invite < ActiveRecord::Base
         .where(invited_by_id: inviter.id)
         .where("redemption_count < max_redemptions_allowed")
         .where("expires_at < ?", Time.zone.now)
-        .where(
-          "emailed_status IS NULL OR emailed_status NOT IN (?)",
-          emailed_status_types.values_at(:review, :drafting),
-        )
         .order("invites.expires_at ASC")
     invites = invites.where(*domain_filter_condition(domain)) if domain.present?
-    invites = with_delivery_status(invites, status) if status.present?
+    invites =
+      if status.present?
+        with_delivery_status(invites, status)
+      else
+        exclude_review_bounced_and_complained(invites)
+      end
     invites
+  end
+
+  # Shared default (no-status-filter) exclusion for .pending/.expired --
+  # review/drafting were already excluded here before Bounced/Complained
+  # existed as filterable outcomes; those two get the same treatment for the
+  # same reason: an admin reviews email-pipeline failures deliberately via
+  # the status dropdown, rather than having them clutter the default list.
+  def self.exclude_review_bounced_and_complained(invites)
+    invites
+      .joins(latest_invite_email_log_join)
+      .where(
+        "emailed_status IS NULL OR emailed_status NOT IN (?)",
+        emailed_status_types.values_at(:review, :drafting),
+      )
+      .where(
+        "latest_log.id IS NULL OR (latest_log.complained_at IS NULL AND NOT latest_log.bounced)",
+      )
   end
 
   # Invites a Jobs::GenerateInvitePersonalization run has claimed but not yet
@@ -655,6 +669,58 @@ class Invite < ActiveRecord::Base
     Jobs.enqueue(:invite_email, invite_id: id)
   end
 
+  # The send pipeline's own in-flight states -- an invite can hop between
+  # these several times on its way to actually sending (review -> drafting
+  # -> bulk_pending -> sending, or back to bulk_pending on a retry) without
+  # ever leaving "currently being scheduled". last_emailed_status is meant
+  # to capture the status *before that whole episode started*, not every
+  # micro-hop within it -- capturing on every hop would otherwise overwrite
+  # the real prior status (e.g. "review") with an intermediate one (e.g.
+  # "drafting") by the time an admin clicks Cancel Schedule.
+  IN_FLIGHT_EMAILED_STATUSES = %i[review drafting pending bulk_pending sending]
+
+  # Generic "last status" tracking: every write to emailed_status carries
+  # whatever value it's replacing into last_emailed_status in the same
+  # update, so a later action (e.g. "Cancel Schedule") can revert to it --
+  # not specific to any one transition, every caller that changes
+  # emailed_status via update_columns goes through this instead of setting
+  # emailed_status directly. Only actually captures when the current status
+  # is leaving the in-flight set above; a hop *within* that set leaves
+  # whatever was already captured untouched, per the comment on
+  # IN_FLIGHT_EMAILED_STATUSES.
+  def update_emailed_status!(new_status, **other_columns)
+    if Invite.in_flight_emailed_status?(emailed_status)
+      update_columns(emailed_status: new_status, **other_columns)
+    else
+      update_columns(
+        last_emailed_status: emailed_status,
+        emailed_status: new_status,
+        **other_columns,
+      )
+    end
+  end
+
+  def self.in_flight_emailed_status?(status)
+    status.present? &&
+      IN_FLIGHT_EMAILED_STATUSES.map { |s| emailed_status_types[s] }.include?(status)
+  end
+
+  # Bulk counterpart of #update_emailed_status! -- update_all's hash form
+  # can't reference a row's own current value, so this builds the
+  # equivalent raw SQL assignment instead, with the same "only capture when
+  # leaving the in-flight set" rule. new_status is always a trusted Integer
+  # from emailed_status_types, never user input.
+  def self.set_emailed_status_sql(new_status)
+    in_flight_values = IN_FLIGHT_EMAILED_STATUSES.map { |s| emailed_status_types[s] }
+    <<~SQL.squish
+      last_emailed_status = CASE
+        WHEN emailed_status IN (#{in_flight_values.join(",")}) THEN last_emailed_status
+        ELSE emailed_status
+      END,
+      emailed_status = #{new_status.to_i}
+    SQL
+  end
+
   # Used by InvitesController#resend_all_invites instead of resend_invite,
   # when SiteSetting.bulk_invite_paced_resend_enabled is on: resend_invite
   # sends immediately (fine for a single admin-triggered resend), but firing
@@ -664,11 +730,11 @@ class Invite < ActiveRecord::Base
   # existing one-at-a-time, randomly-paced throttle (and AI personalization,
   # if enabled) picks it up rather than mailing it out immediately.
   def requeue_for_paced_resend
-    update_columns(
+    update_emailed_status!(
+      Invite.emailed_status_types[:bulk_pending],
       updated_at: Time.zone.now,
       invalidated_at: nil,
       expires_at: SiteSetting.invite_expiry_days.days.from_now,
-      emailed_status: Invite.emailed_status_types[:bulk_pending],
     )
   end
 
@@ -682,8 +748,37 @@ class Invite < ActiveRecord::Base
     claimable_statuses = emailed_status_types.values_at(:pending, :bulk_pending)
     claimed_count =
       where(id: id, emailed_status: claimable_statuses).update_all(
-        emailed_status: emailed_status_types[:sending],
-        updated_at: Time.zone.now,
+        [
+          "#{set_emailed_status_sql(emailed_status_types[:sending])}, updated_at = ?",
+          Time.zone.now,
+        ],
+      )
+    claimed_count == 1 ? find_by(id: id) : nil
+  end
+
+  # Mirrors #claim_for_immediate_send's same claimable-statuses/conditional
+  # UPDATE pattern, in reverse: pulls a Scheduled (pending/bulk_pending)
+  # invite back out of the send pipeline instead of pushing it forward.
+  # Reverts to whichever status it held right before becoming Scheduled
+  # (carried into last_emailed_status by whatever write put it there --
+  # see #update_emailed_status!/.set_emailed_status_sql), falling back to
+  # :review when nothing was ever captured -- that puts it back in front of
+  # an admin rather than guessing a terminal state.
+  def self.claim_for_schedule_cancel(id)
+    claimable_statuses = emailed_status_types.values_at(:pending, :bulk_pending)
+
+    # COALESCE reads last_emailed_status from the row itself, inside this
+    # same UPDATE -- not from a separate preceding SELECT -- so a concurrent
+    # write to last_emailed_status between a read and this write can't be
+    # silently clobbered (mirrors #claim_for_immediate_send's single atomic
+    # conditional UPDATE, rather than a read-then-write pair).
+    claimed_count =
+      where(id: id, emailed_status: claimable_statuses).update_all(
+        [
+          "emailed_status = COALESCE(last_emailed_status, ?), last_emailed_status = NULL, updated_at = ?",
+          emailed_status_types[:review],
+          Time.zone.now,
+        ],
       )
     claimed_count == 1 ? find_by(id: id) : nil
   end
@@ -729,8 +824,7 @@ class Invite < ActiveRecord::Base
     return [] if claimable_ids.empty?
 
     where(id: claimable_ids).update_all(
-      emailed_status: emailed_status_types[:drafting],
-      updated_at: Time.zone.now,
+      ["#{set_emailed_status_sql(emailed_status_types[:drafting])}, updated_at = ?", Time.zone.now],
     )
     claimable_ids
   end
@@ -761,7 +855,9 @@ class Invite < ActiveRecord::Base
     where(emailed_status: emailed_status_types[:drafting]).where(
       "updated_at < ?",
       STALE_DRAFTING_AFTER.ago,
-    ).update_all(emailed_status: emailed_status_types[:review], updated_at: Time.zone.now)
+    ).update_all(
+      ["#{set_emailed_status_sql(emailed_status_types[:review])}, updated_at = ?", Time.zone.now],
+    )
   end
 
   def limit_invites_per_day
@@ -840,15 +936,7 @@ class Invite < ActiveRecord::Base
         end
 
       relation
-        .joins(<<~SQL)
-          LEFT JOIN LATERAL (
-            SELECT email_logs.id, email_logs.complained_at, email_logs.bounced, email_logs.delivered_at
-            FROM email_logs
-            WHERE email_logs.invite_id = invites.id AND email_logs.email_type = 'invite'
-            ORDER BY email_logs.created_at DESC
-            LIMIT 1
-          ) latest_log ON TRUE
-        SQL
+        .joins(latest_invite_email_log_join)
         .where(
           "invites.emailed_status IS NULL OR invites.emailed_status NOT IN (?)",
           types.values_at(
@@ -865,6 +953,22 @@ class Invite < ActiveRecord::Base
     else
       relation.none
     end
+  end
+
+  # Shared by with_delivery_status and .pending/.expired's own
+  # bounced/complained exclusion -- both need to know each invite's latest
+  # invite-type EmailLog, and must stay in step with each other (see
+  # with_delivery_status's own comment).
+  def self.latest_invite_email_log_join
+    <<~SQL
+      LEFT JOIN LATERAL (
+        SELECT email_logs.id, email_logs.complained_at, email_logs.bounced, email_logs.delivered_at
+        FROM email_logs
+        WHERE email_logs.invite_id = invites.id AND email_logs.email_type = 'invite'
+        ORDER BY email_logs.created_at DESC
+        LIMIT 1
+      ) latest_log ON TRUE
+    SQL
   end
 
   def self.base_directory
@@ -970,6 +1074,7 @@ end
 #  expires_at              :datetime         not null
 #  invalidated_at          :datetime
 #  invite_key              :string(32)       not null
+#  last_emailed_status     :integer
 #  max_redemptions_allowed :integer          default(1), not null
 #  moderator               :boolean          default(FALSE), not null
 #  recipient_keywords      :text

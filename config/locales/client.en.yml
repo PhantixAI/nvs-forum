@@ -2774,6 +2774,8 @@ en:
           preview_sent_email: "Preview last email sent"
           send_now: "Send Now"
           send_now_success: "Invite sent."
+          cancel_schedule: "Cancel Schedule"
+          cancel_schedule_success: "Invite's schedule cancelled."
           share_link: "Share link"
           link_validity_MF: |
             Link is valid for up to { user_count, plural,

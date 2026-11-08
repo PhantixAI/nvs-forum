@@ -29,7 +29,7 @@ module Jobs
       # against a provider that is still failing, so one invite can't block
       # the rest of this batch -- an admin resends it again afterwards.
       Rails.logger.error("[ResendInvitesWithKeywords] invite #{invite.id} skipped -- #{e.message}")
-      invite.update_columns(emailed_status: Invite.emailed_status_types[:skipped])
+      invite.update_emailed_status!(Invite.emailed_status_types[:skipped])
     end
   end
 end
