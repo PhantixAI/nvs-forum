@@ -669,22 +669,56 @@ class Invite < ActiveRecord::Base
     Jobs.enqueue(:invite_email, invite_id: id)
   end
 
-  # Generic "last status" tracking: every write to emailed_status should
-  # carry whatever value it's replacing into last_emailed_status in the
-  # same update, so a later action (e.g. "Cancel Schedule") can revert to
-  # it -- not specific to any one transition, every caller that changes
+  # The send pipeline's own in-flight states -- an invite can hop between
+  # these several times on its way to actually sending (review -> drafting
+  # -> bulk_pending -> sending, or back to bulk_pending on a retry) without
+  # ever leaving "currently being scheduled". last_emailed_status is meant
+  # to capture the status *before that whole episode started*, not every
+  # micro-hop within it -- capturing on every hop would otherwise overwrite
+  # the real prior status (e.g. "review") with an intermediate one (e.g.
+  # "drafting") by the time an admin clicks Cancel Schedule.
+  IN_FLIGHT_EMAILED_STATUSES = %i[review drafting pending bulk_pending sending]
+
+  # Generic "last status" tracking: every write to emailed_status carries
+  # whatever value it's replacing into last_emailed_status in the same
+  # update, so a later action (e.g. "Cancel Schedule") can revert to it --
+  # not specific to any one transition, every caller that changes
   # emailed_status via update_columns goes through this instead of setting
-  # emailed_status directly.
+  # emailed_status directly. Only actually captures when the current status
+  # is leaving the in-flight set above; a hop *within* that set leaves
+  # whatever was already captured untouched, per the comment on
+  # IN_FLIGHT_EMAILED_STATUSES.
   def update_emailed_status!(new_status, **other_columns)
-    update_columns(last_emailed_status: emailed_status, emailed_status: new_status, **other_columns)
+    if Invite.in_flight_emailed_status?(emailed_status)
+      update_columns(emailed_status: new_status, **other_columns)
+    else
+      update_columns(
+        last_emailed_status: emailed_status,
+        emailed_status: new_status,
+        **other_columns,
+      )
+    end
+  end
+
+  def self.in_flight_emailed_status?(status)
+    status.present? &&
+      IN_FLIGHT_EMAILED_STATUSES.map { |s| emailed_status_types[s] }.include?(status)
   end
 
   # Bulk counterpart of #update_emailed_status! -- update_all's hash form
   # can't reference a row's own current value, so this builds the
-  # equivalent raw SQL assignment instead. new_status is always a trusted
-  # Integer from emailed_status_types, never user input.
+  # equivalent raw SQL assignment instead, with the same "only capture when
+  # leaving the in-flight set" rule. new_status is always a trusted Integer
+  # from emailed_status_types, never user input.
   def self.set_emailed_status_sql(new_status)
-    "last_emailed_status = emailed_status, emailed_status = #{new_status.to_i}"
+    in_flight_values = IN_FLIGHT_EMAILED_STATUSES.map { |s| emailed_status_types[s] }
+    <<~SQL.squish
+      last_emailed_status = CASE
+        WHEN emailed_status IN (#{in_flight_values.join(",")}) THEN last_emailed_status
+        ELSE emailed_status
+      END,
+      emailed_status = #{new_status.to_i}
+    SQL
   end
 
   # Used by InvitesController#resend_all_invites instead of resend_invite,
@@ -732,15 +766,17 @@ class Invite < ActiveRecord::Base
   # an admin rather than guessing a terminal state.
   def self.claim_for_schedule_cancel(id)
     claimable_statuses = emailed_status_types.values_at(:pending, :bulk_pending)
-    invite = where(id: id, emailed_status: claimable_statuses).first
-    return nil if invite.nil?
 
-    revert_to = invite.last_emailed_status || emailed_status_types[:review]
+    # COALESCE reads last_emailed_status from the row itself, inside this
+    # same UPDATE -- not from a separate preceding SELECT -- so a concurrent
+    # write to last_emailed_status between a read and this write can't be
+    # silently clobbered (mirrors #claim_for_immediate_send's single atomic
+    # conditional UPDATE, rather than a read-then-write pair).
     claimed_count =
       where(id: id, emailed_status: claimable_statuses).update_all(
         [
-          "emailed_status = ?, last_emailed_status = NULL, updated_at = ?",
-          revert_to,
+          "emailed_status = COALESCE(last_emailed_status, ?), last_emailed_status = NULL, updated_at = ?",
+          emailed_status_types[:review],
           Time.zone.now,
         ],
       )

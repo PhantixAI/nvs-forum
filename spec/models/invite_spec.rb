@@ -1265,13 +1265,13 @@ RSpec.describe Invite do
   end
 
   describe "#update_emailed_status! / .set_emailed_status_sql" do
-    fab!(:invite) { Fabricate(:invite, emailed_status: Invite.emailed_status_types[:review]) }
+    fab!(:invite) { Fabricate(:invite, emailed_status: Invite.emailed_status_types[:sent]) }
 
-    it "carries the current emailed_status into last_emailed_status when updating an instance" do
+    it "carries the current emailed_status into last_emailed_status when leaving a settled status" do
       invite.update_emailed_status!(Invite.emailed_status_types[:bulk_pending])
 
       expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
-      expect(invite.last_emailed_status).to eq(Invite.emailed_status_types[:review])
+      expect(invite.last_emailed_status).to eq(Invite.emailed_status_types[:sent])
     end
 
     it "accepts other columns to update in the same call" do
@@ -1287,7 +1287,32 @@ RSpec.describe Invite do
       )
 
       expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
-      expect(invite.last_emailed_status).to eq(Invite.emailed_status_types[:review])
+      expect(invite.last_emailed_status).to eq(Invite.emailed_status_types[:sent])
+    end
+
+    it "does not overwrite an already-captured last_emailed_status while hopping between in-flight statuses" do
+      # review -> drafting -> bulk_pending, exactly as Invite.claim_for_drafting then
+      # Jobs::GenerateInvitePersonalization#generate_safely do -- the real prior status
+      # ("sent") must survive both hops, not get clobbered by the intermediate "drafting"
+      # hop in between (regression guard: this is exactly what Cancel Schedule reverts to).
+      invite.update_columns(
+        emailed_status: Invite.emailed_status_types[:review],
+        last_emailed_status: Invite.emailed_status_types[:sent],
+      )
+
+      invite.update_emailed_status!(Invite.emailed_status_types[:drafting])
+      expect(invite.reload.last_emailed_status).to eq(Invite.emailed_status_types[:sent])
+
+      invite.update_emailed_status!(Invite.emailed_status_types[:bulk_pending])
+      expect(invite.reload.last_emailed_status).to eq(Invite.emailed_status_types[:sent])
+    end
+
+    it "does not capture anything when first entering the pipeline from review" do
+      invite.update_columns(emailed_status: Invite.emailed_status_types[:review])
+
+      invite.update_emailed_status!(Invite.emailed_status_types[:bulk_pending])
+
+      expect(invite.reload.last_emailed_status).to be_nil
     end
   end
 
