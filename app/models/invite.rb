@@ -757,30 +757,32 @@ class Invite < ActiveRecord::Base
   end
 
   # Mirrors #claim_for_immediate_send's same claimable-statuses/conditional
-  # UPDATE pattern, in reverse: pulls a Scheduled (pending/bulk_pending)
-  # invite back out of the send pipeline instead of pushing it forward.
-  # Reverts to whichever status it held right before becoming Scheduled
-  # (carried into last_emailed_status by whatever write put it there --
-  # see #update_emailed_status!/.set_emailed_status_sql), falling back to
+  # UPDATE pattern, in reverse: pulls a whole filtered batch of invites back
+  # out of `from_statuses` (e.g. Scheduled's pending/bulk_pending, or
+  # Drafting's drafting) instead of pushing them forward. Reverts each to
+  # whichever status it held right before entering `from_statuses` (carried
+  # into last_emailed_status by whatever write put it there -- see
+  # #update_emailed_status!/.set_emailed_status_sql), falling back to
   # :review when nothing was ever captured -- that puts it back in front of
-  # an admin rather than guessing a terminal state.
-  def self.claim_for_schedule_cancel(id)
-    claimable_statuses = emailed_status_types.values_at(:pending, :bulk_pending)
+  # an admin rather than guessing a terminal state. Used by
+  # InvitesController#cancel_all_schedule and #cancel_all_drafting.
+  #
+  # A single atomic conditional UPDATE (id IN (...) AND emailed_status IN
+  # (...) evaluated as one WHERE, not a pluck-then-update_all pair) -- so a
+  # row that another request already claimed out of `from_statuses` in
+  # between can't be double-claimed or clobbered. Returns the number of
+  # rows actually reverted.
+  def self.claim_all_for_status_cancel(invite_ids, from_statuses)
+    return 0 if invite_ids.blank?
 
-    # COALESCE reads last_emailed_status from the row itself, inside this
-    # same UPDATE -- not from a separate preceding SELECT -- so a concurrent
-    # write to last_emailed_status between a read and this write can't be
-    # silently clobbered (mirrors #claim_for_immediate_send's single atomic
-    # conditional UPDATE, rather than a read-then-write pair).
-    claimed_count =
-      where(id: id, emailed_status: claimable_statuses).update_all(
-        [
-          "emailed_status = COALESCE(last_emailed_status, ?), last_emailed_status = NULL, updated_at = ?",
-          emailed_status_types[:review],
-          Time.zone.now,
-        ],
-      )
-    claimed_count == 1 ? find_by(id: id) : nil
+    claimable_statuses = emailed_status_types.values_at(*from_statuses)
+    where(id: invite_ids, emailed_status: claimable_statuses).update_all(
+      [
+        "emailed_status = COALESCE(last_emailed_status, ?), last_emailed_status = NULL, updated_at = ?",
+        emailed_status_types[:review],
+        Time.zone.now,
+      ],
+    )
   end
 
   # Atomically flips a batch of pre-existing invites into :drafting, for a

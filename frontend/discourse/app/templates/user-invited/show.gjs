@@ -141,6 +141,26 @@ export default <template>
                           @label="user.invited.delete_all"
                         />
                       </dropdown.item>
+                      {{#if @controller.showCancelAllSchedule}}
+                        <dropdown.item>
+                          <DButton
+                            class="btn-transparent cancel-all-schedule"
+                            @action={{@controller.cancelAllSchedule}}
+                            @icon="xmark"
+                            @label="user.invited.cancel_all_schedule"
+                          />
+                        </dropdown.item>
+                      {{/if}}
+                      {{#if @controller.showCancelAllDrafting}}
+                        <dropdown.item>
+                          <DButton
+                            class="btn-transparent cancel-all-drafting"
+                            @action={{@controller.cancelAllDrafting}}
+                            @icon="xmark"
+                            @label="user.invited.cancel_all_drafting"
+                          />
+                        </dropdown.item>
+                      {{/if}}
                     </DDropdownMenu>
                   </combo.Menu>
                 </DComboButton>
@@ -552,17 +572,6 @@ export default <template>
                                       @action={{fn @controller.sendNow invite}}
                                       @icon="paper-plane"
                                       @label="user.invited.invite.send_now"
-                                    />
-                                  </dropdown.item>
-                                  <dropdown.item>
-                                    <DButton
-                                      class="btn-transparent cancel-schedule-invite"
-                                      @action={{fn
-                                        @controller.cancelSchedule
-                                        invite
-                                      }}
-                                      @icon="xmark"
-                                      @label="user.invited.invite.cancel_schedule"
                                     />
                                   </dropdown.item>
                                 {{/if}}

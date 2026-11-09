@@ -46,7 +46,8 @@ class InvitesController < ApplicationController
                    resend_invite
                    resend_all_invites
                    send_now_invite
-                   cancel_schedule
+                   cancel_all_schedule
+                   cancel_all_drafting
                    upload_csv
                    extract_from_url
                    last_url_extraction_rules
@@ -645,35 +646,6 @@ class InvitesController < ApplicationController
     render_json_error(I18n.t("rate_limiter.slow_down"))
   end
 
-  # Inverse of #send_now_invite: pulls a Scheduled (pending/bulk_pending)
-  # invite back out of the send pipeline instead of pushing it forward.
-  # Invite.claim_for_schedule_cancel's conditional UPDATE is what makes this
-  # race-safe against Jobs::ProcessBulkInviteEmails picking the same invite
-  # up for sending at the same moment.
-  def cancel_schedule
-    RateLimiter.new(
-      current_user,
-      "cancel-schedule-invite-per-hour",
-      SiteSetting.invite_cancel_schedule_rate_limit_per_hour,
-      1.hour,
-    ).performed!
-
-    invite = Invite.find_by(id: params[:invite_id])
-    raise Discourse::InvalidParameters.new(:invite_id) if invite.blank?
-
-    unless guardian.can_see_invite_details?(invite.invited_by)
-      return render_json_error(I18n.t("invite.disabled_errors.invalid_access"), 403)
-    end
-
-    claimed = Invite.claim_for_schedule_cancel(invite.id)
-    return render_json_error(I18n.t("invite.cancel_schedule_not_scheduled")) if claimed.blank?
-
-    render json: success_json.merge(delivery_status: claimed.reload.delivery_status)
-  rescue RateLimiter::LimitExceeded => e
-    log_invite_rate_limit_exceeded(e, action: "cancel_schedule")
-    render_json_error(I18n.t("rate_limiter.slow_down"))
-  end
-
   def resend_all_invites
     if !SiteSetting.allow_email_invites
       return render_json_error(I18n.t("invite.email_invites_disabled"))
@@ -829,6 +801,82 @@ class InvitesController < ApplicationController
     invites_to_destroy.find_each { |invite| invite.trash!(current_user) }
 
     render json: success_json
+  end
+
+  def cancel_all_schedule
+    guardian.ensure_can_resend_all_invites!
+
+    # Same domain-validation reasoning as resend_all_invites/destroy_all_invites above.
+    # No status param here -- this action is inherently scoped to Scheduled invites, not
+    # whatever status happens to be selected.
+    domain = params[:domain].presence if params[:domain].to_s.match?(Invite::DOMAIN_REGEX)
+
+    begin
+      # Separate key from bulk-reinvite/bulk-destroy-per-day so this doesn't block, or get
+      # blocked by, either of those for the same filtered set the same day.
+      rate_limit_key = ["bulk-cancel-schedule-invite-per-day", domain].compact.join("-")
+      RateLimiter.new(
+        current_user,
+        rate_limit_key,
+        SiteSetting.bulk_invite_cancel_schedule_rate_limit_per_day,
+        1.day,
+        apply_limit_to_staff: true,
+      ).performed!
+    rescue RateLimiter::LimitExceeded => e
+      log_invite_rate_limit_exceeded(e, action: "cancel_all_schedule")
+      return render_json_error(I18n.t("rate_limiter.slow_down"))
+    end
+
+    invites_to_cancel = Invite.pending(current_user, domain:, status: "scheduled")
+    invites_to_cancel =
+      Invite.search_filter(
+        invites_to_cancel,
+        params[:search],
+        show_emails: guardian.can_see_invite_emails?(current_user),
+      )
+
+    ids = invites_to_cancel.reorder(nil).pluck(:id)
+    cancelled_count = Invite.claim_all_for_status_cancel(ids, %i[pending bulk_pending])
+
+    render json: success_json.merge(cancelled_count:)
+  end
+
+  # Twin of #cancel_all_schedule, for Drafting invites (the review -> drafting ->
+  # bulk_pending AI-personalization queue, not the send-pipeline's pending/bulk_pending) --
+  # same domain/rate-limit/search shape, just a different source status and claimable set.
+  def cancel_all_drafting
+    guardian.ensure_can_resend_all_invites!
+
+    domain = params[:domain].presence if params[:domain].to_s.match?(Invite::DOMAIN_REGEX)
+
+    begin
+      # Separate key from the other bulk actions' per-day buckets so this doesn't block, or
+      # get blocked by, any of them for the same filtered set the same day.
+      rate_limit_key = ["bulk-cancel-drafting-invite-per-day", domain].compact.join("-")
+      RateLimiter.new(
+        current_user,
+        rate_limit_key,
+        SiteSetting.bulk_invite_cancel_drafting_rate_limit_per_day,
+        1.day,
+        apply_limit_to_staff: true,
+      ).performed!
+    rescue RateLimiter::LimitExceeded => e
+      log_invite_rate_limit_exceeded(e, action: "cancel_all_drafting")
+      return render_json_error(I18n.t("rate_limiter.slow_down"))
+    end
+
+    invites_to_cancel = Invite.pending(current_user, domain:, status: "drafting")
+    invites_to_cancel =
+      Invite.search_filter(
+        invites_to_cancel,
+        params[:search],
+        show_emails: guardian.can_see_invite_emails?(current_user),
+      )
+
+    ids = invites_to_cancel.reorder(nil).pluck(:id)
+    cancelled_count = Invite.claim_all_for_status_cancel(ids, %i[drafting])
+
+    render json: success_json.merge(cancelled_count:)
   end
 
   def upload_csv

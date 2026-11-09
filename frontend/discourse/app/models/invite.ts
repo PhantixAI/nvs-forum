@@ -223,6 +223,39 @@ export default class Invite extends EmberObject {
     return ajax("/invites/destroy-all", { type: "POST", data });
   }
 
+  // Bulk revert of every Scheduled (pending/bulk_pending) invite matching the current
+  // domain/search filters back to its prior status -- see
+  // InvitesController#cancel_all_schedule. No status param: inherently scoped to Scheduled.
+  static cancelAllSchedule(
+    domain?: string | null,
+    search?: string | null
+  ): Promise<{ cancelled_count: number }> {
+    const data: { domain?: string; search?: string } = {};
+    if (!isNone(domain)) {
+      data.domain = domain;
+    }
+    if (!isNone(search)) {
+      data.search = search;
+    }
+    return ajax("/invites/cancel-schedule-all", { type: "POST", data });
+  }
+
+  // Twin of #cancelAllSchedule, for Drafting invites -- see
+  // InvitesController#cancel_all_drafting.
+  static cancelAllDrafting(
+    domain?: string | null,
+    search?: string | null
+  ): Promise<{ cancelled_count: number }> {
+    const data: { domain?: string; search?: string } = {};
+    if (!isNone(domain)) {
+      data.domain = domain;
+    }
+    if (!isNone(search)) {
+      data.search = search;
+    }
+    return ajax("/invites/cancel-drafting-all", { type: "POST", data });
+  }
+
   static findLatestSentEmail(inviteId: number): Promise<SentInviteEmailFields> {
     return ajax(`/admin/email-logs/invite_sent/${inviteId}.json`);
   }
@@ -424,19 +457,6 @@ export default class Invite extends EmberObject {
   sendNow(): Promise<DeliveryStatus | null> {
     return ajax<{ delivery_status: DeliveryStatus | null }>(
       "/invites/send-now",
-      {
-        type: "POST",
-        data: { invite_id: this.id },
-      }
-    ).then((result) => this.set("delivery_status", result.delivery_status));
-  }
-
-  // Inverse of #sendNow -- pulls a Scheduled invite back out of the send
-  // queue instead of pushing it forward. Same shape/error-handling
-  // contract: the caller (user-invited/show.js) handles the error itself.
-  cancelSchedule(): Promise<DeliveryStatus | null> {
-    return ajax<{ delivery_status: DeliveryStatus | null }>(
-      "/invites/cancel-schedule",
       {
         type: "POST",
         data: { invite_id: this.id },

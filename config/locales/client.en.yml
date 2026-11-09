@@ -2720,6 +2720,14 @@ en:
         delete_all_confirm_domain: "Are you sure you want to permanently delete all invites for %{domain}? This cannot be undone."
         delete_all_confirm_status: "Are you sure you want to permanently delete all invites with status \"%{status}\"? This cannot be undone."
         delete_all_confirm_domain_status: "Are you sure you want to permanently delete all invites for %{domain} with status \"%{status}\"? This cannot be undone."
+        cancel_all_schedule: "Cancel Schedule"
+        cancelled_all_schedule: "All matching invites' schedules cancelled!"
+        cancel_all_schedule_confirm: "Are you sure you want to cancel the schedule for all Scheduled invites?"
+        cancel_all_schedule_confirm_domain: "Are you sure you want to cancel the schedule for all Scheduled invites for %{domain}?"
+        cancel_all_drafting: "Cancel Drafting"
+        cancelled_all_drafting: "All matching invites' drafts cancelled!"
+        cancel_all_drafting_confirm: "Are you sure you want to cancel drafting for all Drafting invites?"
+        cancel_all_drafting_confirm_domain: "Are you sure you want to cancel drafting for all Drafting invites for %{domain}?"
         invited_email: "Invited Email"
         account_email: "Account Email"
         create: "Invite"
@@ -2774,8 +2782,6 @@ en:
           preview_sent_email: "Preview last email sent"
           send_now: "Send Now"
           send_now_success: "Invite sent."
-          cancel_schedule: "Cancel Schedule"
-          cancel_schedule_success: "Invite's schedule cancelled."
           share_link: "Share link"
           link_validity_MF: |
             Link is valid for up to { user_count, plural,
