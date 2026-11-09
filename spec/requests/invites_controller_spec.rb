@@ -2827,104 +2827,225 @@ RSpec.describe InvitesController do
     end
   end
 
-  describe "#cancel_schedule" do
+  describe "#cancel_all_schedule" do
+    let(:admin) { Fabricate(:admin) }
+
+    before { RateLimiter.enable }
+
     it "requires to be logged in" do
-      post "/invites/cancel-schedule.json", params: { invite_id: 1 }
+      post "/invites/cancel-schedule-all.json"
       expect(response.status).to eq(403)
     end
 
-    context "while logged in" do
-      fab!(:user)
-      fab!(:invite) do
+    it "returns 403 for non-staff user and cancels nothing" do
+      user = Fabricate(:user)
+      invite =
         Fabricate(
           :invite,
           invited_by: user,
           emailed_status: Invite.emailed_status_types[:bulk_pending],
           last_emailed_status: Invite.emailed_status_types[:sent],
         )
-      end
 
-      before { sign_in(user) }
+      sign_in(user)
+      post "/invites/cancel-schedule-all.json"
 
-      it "raises an error when the invite does not exist" do
-        post "/invites/cancel-schedule.json", params: { invite_id: -1 }
-        expect(response.status).to eq(400)
-      end
+      expect(response.status).to eq(403)
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
+    end
 
-      it "rejects an unrelated non-staff user" do
-        other_user = Fabricate(:user)
-        sign_in(other_user)
-
-        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
-
-        expect(response.status).to eq(403)
-        expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
-      end
-
-      it "lets staff cancel someone else's scheduled invite" do
-        sign_in(Fabricate(:admin))
-
-        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
-
-        expect(response.status).to eq(200)
-        expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:sent])
-      end
-
-      it "reverts a bulk_pending invite to its last_emailed_status and clears it" do
-        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
-
-        expect(response.status).to eq(200)
-        expect(response.parsed_body["delivery_status"]).to eq("sent")
-        invite.reload
-        expect(invite.emailed_status).to eq(Invite.emailed_status_types[:sent])
-        expect(invite.last_emailed_status).to be_nil
-      end
-
-      it "falls back to review when no last_emailed_status was ever captured" do
-        invite.update_columns(last_emailed_status: nil)
-
-        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
-
-        expect(response.status).to eq(200)
-        expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
-      end
-
-      it "does not cancel an invite that isn't currently scheduled" do
-        invite.update_column(:emailed_status, Invite.emailed_status_types[:sent])
-
-        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
-
-        expect(response.status).to eq(422)
-        expect(response.parsed_body["errors"]).to include(
-          I18n.t("invite.cancel_schedule_not_scheduled"),
+    it "reverts every scheduled invite by a user to its last_emailed_status, leaving others alone" do
+      pending_invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          emailed_status: Invite.emailed_status_types[:pending],
+          last_emailed_status: Invite.emailed_status_types[:review],
         )
+      bulk_pending_invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          emailed_status: Invite.emailed_status_types[:bulk_pending],
+          last_emailed_status: Invite.emailed_status_types[:sent],
+        )
+      drafting_invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          emailed_status: Invite.emailed_status_types[:drafting],
+        )
+
+      sign_in(admin)
+      post "/invites/cancel-schedule-all.json"
+
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["cancelled_count"]).to eq(2)
+      expect(pending_invite.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
+      expect(bulk_pending_invite.reload.emailed_status).to eq(Invite.emailed_status_types[:sent])
+      expect(drafting_invite.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
+    end
+
+    it "falls back to review when no last_emailed_status was ever captured" do
+      invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          emailed_status: Invite.emailed_status_types[:pending],
+          last_emailed_status: nil,
+        )
+
+      sign_in(admin)
+      post "/invites/cancel-schedule-all.json"
+
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
+    end
+
+    it "only cancels invites matching the given domain" do
+      nit_invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          email: "student@nit.ac.in",
+          emailed_status: Invite.emailed_status_types[:pending],
+        )
+      iitb_invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          email: "student@iitb.ac.in",
+          emailed_status: Invite.emailed_status_types[:pending],
+        )
+
+      sign_in(admin)
+      post "/invites/cancel-schedule-all.json", params: { domain: "nit.ac.in" }
+
+      expect(nit_invite.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
+      expect(iitb_invite.reload.emailed_status).to eq(Invite.emailed_status_types[:pending])
+    end
+
+    it "errors if admins try to exceed the limit of one bulk cancel per day" do
+      Fabricate(:invite, invited_by: admin, emailed_status: Invite.emailed_status_types[:pending])
+
+      sign_in(admin)
+      start = Time.now
+      freeze_time(start)
+
+      post "/invites/cancel-schedule-all.json"
+      expect(response.parsed_body["errors"]).to_not be_present
+
+      freeze_time(start + 10.minutes)
+      post "/invites/cancel-schedule-all.json"
+      expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
+    end
+
+    it "honors bulk_invite_cancel_schedule_rate_limit_per_day instead of a fixed limit" do
+      sign_in(admin)
+      SiteSetting.bulk_invite_cancel_schedule_rate_limit_per_day = 2
+
+      2.times do
+        post "/invites/cancel-schedule-all.json"
+        expect(response.parsed_body["errors"]).to_not be_present
       end
 
-      it "honors invite_cancel_schedule_rate_limit_per_hour instead of a fixed limit" do
-        RateLimiter.enable
-        SiteSetting.invite_cancel_schedule_rate_limit_per_hour = 1
+      post "/invites/cancel-schedule-all.json"
+      expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
+    end
 
-        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
-        expect(response.status).to eq(200)
+    it "logs the rate limit event" do
+      sign_in(admin)
+      SiteSetting.bulk_invite_cancel_schedule_rate_limit_per_day = 1
 
-        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
-        expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
+      post "/invites/cancel-schedule-all.json"
+
+      allow(Discourse).to receive(:warn_exception)
+      post "/invites/cancel-schedule-all.json"
+
+      expect(Discourse).to have_received(:warn_exception) do |e, message:, **|
+        expect(e).to be_a(RateLimiter::LimitExceeded)
+        expect(message).to include("action=cancel_all_schedule")
       end
+    end
+  end
 
-      it "logs the rate limit event" do
-        RateLimiter.enable
-        SiteSetting.invite_cancel_schedule_rate_limit_per_hour = 1
+  describe "#cancel_all_drafting" do
+    let(:admin) { Fabricate(:admin) }
 
-        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
+    before { RateLimiter.enable }
 
-        allow(Discourse).to receive(:warn_exception)
-        post "/invites/cancel-schedule.json", params: { invite_id: invite.id }
+    it "requires to be logged in" do
+      post "/invites/cancel-drafting-all.json"
+      expect(response.status).to eq(403)
+    end
 
-        expect(Discourse).to have_received(:warn_exception) do |e, message:, **|
-          expect(e).to be_a(RateLimiter::LimitExceeded)
-          expect(message).to include("action=cancel_schedule")
-        end
-      end
+    it "returns 403 for non-staff user and cancels nothing" do
+      user = Fabricate(:user)
+      invite =
+        Fabricate(
+          :invite,
+          invited_by: user,
+          emailed_status: Invite.emailed_status_types[:drafting],
+          last_emailed_status: Invite.emailed_status_types[:sent],
+        )
+
+      sign_in(user)
+      post "/invites/cancel-drafting-all.json"
+
+      expect(response.status).to eq(403)
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
+    end
+
+    it "reverts every drafting invite by a user to its last_emailed_status, leaving Scheduled alone" do
+      drafting_invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          emailed_status: Invite.emailed_status_types[:drafting],
+          last_emailed_status: Invite.emailed_status_types[:sent],
+        )
+      bulk_pending_invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          emailed_status: Invite.emailed_status_types[:bulk_pending],
+          last_emailed_status: Invite.emailed_status_types[:sent],
+        )
+
+      sign_in(admin)
+      post "/invites/cancel-drafting-all.json"
+
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["cancelled_count"]).to eq(1)
+      expect(drafting_invite.reload.emailed_status).to eq(Invite.emailed_status_types[:sent])
+      expect(bulk_pending_invite.reload.emailed_status).to eq(
+        Invite.emailed_status_types[:bulk_pending],
+      )
+    end
+
+    it "falls back to review when no last_emailed_status was ever captured" do
+      invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          emailed_status: Invite.emailed_status_types[:drafting],
+          last_emailed_status: nil,
+        )
+
+      sign_in(admin)
+      post "/invites/cancel-drafting-all.json"
+
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
+    end
+
+    it "honors bulk_invite_cancel_drafting_rate_limit_per_day instead of a fixed limit" do
+      sign_in(admin)
+      SiteSetting.bulk_invite_cancel_drafting_rate_limit_per_day = 1
+
+      post "/invites/cancel-drafting-all.json"
+      expect(response.parsed_body["errors"]).to_not be_present
+
+      post "/invites/cancel-drafting-all.json"
+      expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
     end
   end
 

@@ -177,6 +177,20 @@ export default class UserInvitedShowController extends Controller {
     return Boolean(this.selectedStatus);
   }
 
+  // Cancel All Schedule/Drafting are each inherently scoped to one status (unlike
+  // Resend/Delete All, which can target any filtered set) -- shown only once the matching
+  // status filter is explicitly selected, mirroring the per-row Send Now/row-action guard's
+  // own {{eq invite.delivery_status "..."}} pattern.
+  @computed("selectedStatus")
+  get showCancelAllSchedule() {
+    return this.selectedStatus === "scheduled";
+  }
+
+  @computed("selectedStatus")
+  get showCancelAllDrafting() {
+    return this.selectedStatus === "drafting";
+  }
+
   @computed("invitesCount", "filter", "selectedDomain", "selectedStatus")
   get showSearch() {
     // The Extracted tab searches by URL substring instead of
@@ -347,18 +361,6 @@ export default class UserInvitedShowController extends Controller {
   }
 
   @action
-  async cancelSchedule(invite) {
-    try {
-      await invite.cancelSchedule();
-      this.toasts.success({
-        data: { message: i18n("user.invited.invite.cancel_schedule_success") },
-      });
-    } catch (error) {
-      popupAjaxError(error);
-    }
-  }
-
-  @action
   openResendInvite(invite) {
     this.modal.show(ResendInviteModal, {
       model: {
@@ -503,6 +505,46 @@ export default class UserInvitedShowController extends Controller {
     });
   }
 
+  @action
+  cancelAllSchedule() {
+    const domain = this.selectedDomain;
+    const search = this.searchTerm;
+
+    this.dialog.confirm({
+      message: this.#cancelAllScheduleConfirmMessage(domain),
+      didConfirm: () => {
+        return Invite.cancelAllSchedule(domain, search)
+          .then(() => {
+            this.toasts.success({
+              data: { message: i18n("user.invited.cancelled_all_schedule") },
+            });
+            this.send("triggerRefresh");
+          })
+          .catch(popupAjaxError);
+      },
+    });
+  }
+
+  @action
+  cancelAllDrafting() {
+    const domain = this.selectedDomain;
+    const search = this.searchTerm;
+
+    this.dialog.confirm({
+      message: this.#cancelAllDraftingConfirmMessage(domain),
+      didConfirm: () => {
+        return Invite.cancelAllDrafting(domain, search)
+          .then(() => {
+            this.toasts.success({
+              data: { message: i18n("user.invited.cancelled_all_drafting") },
+            });
+            this.send("triggerRefresh");
+          })
+          .catch(popupAjaxError);
+      },
+    });
+  }
+
   // A resend is rate-limited per domain and status, so a new filter gets its
   // own "Resend invites" button back.
   @action
@@ -588,6 +630,27 @@ export default class UserInvitedShowController extends Controller {
       return i18n("user.invited.delete_all_confirm_domain", { domain });
     }
     return i18n("user.invited.delete_all_confirm");
+  }
+
+  // No status variant -- Cancel All Schedule/Drafting are each inherently scoped to one
+  // fixed status (see #showCancelAllSchedule/#showCancelAllDrafting), unlike
+  // reinvite/delete which can target whatever status happens to be selected.
+  #cancelAllScheduleConfirmMessage(domain) {
+    if (domain) {
+      return i18n("user.invited.cancel_all_schedule_confirm_domain", {
+        domain,
+      });
+    }
+    return i18n("user.invited.cancel_all_schedule_confirm");
+  }
+
+  #cancelAllDraftingConfirmMessage(domain) {
+    if (domain) {
+      return i18n("user.invited.cancel_all_drafting_confirm_domain", {
+        domain,
+      });
+    }
+    return i18n("user.invited.cancel_all_drafting_confirm");
   }
 
   @debounce(INPUT_DELAY)

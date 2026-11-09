@@ -41,7 +41,7 @@ acceptance("User invited - delivery status filter", function (needs) {
   let reinviteRequests;
   let destroyAllRequests;
   let sendNowRequests;
-  let cancelScheduleRequests;
+  let cancelAllScheduleRequests;
 
   needs.hooks.beforeEach(() => {
     invitedRequests = [];
@@ -49,7 +49,7 @@ acceptance("User invited - delivery status filter", function (needs) {
     reinviteRequests = [];
     destroyAllRequests = [];
     sendNowRequests = [];
-    cancelScheduleRequests = [];
+    cancelAllScheduleRequests = [];
   });
 
   needs.pretender((server, helper) => {
@@ -79,9 +79,9 @@ acceptance("User invited - delivery status filter", function (needs) {
       return helper.response({ success: "OK", delivery_status: "pending" });
     });
 
-    server.post("/invites/cancel-schedule", (request) => {
-      cancelScheduleRequests.push(helper.parsePostData(request.requestBody));
-      return helper.response({ success: "OK", delivery_status: "review" });
+    server.post("/invites/cancel-schedule-all", (request) => {
+      cancelAllScheduleRequests.push(helper.parsePostData(request.requestBody));
+      return helper.response({ success: "OK", cancelled_count: 1 });
     });
 
     server.post("/invites/reinvite-all", (request) => {
@@ -305,27 +305,35 @@ acceptance("User invited - delivery status filter", function (needs) {
     assert.strictEqual(sendNowRequests[0].invite_id, "3");
   });
 
-  test("shows Cancel Schedule only for a scheduled invite, and cancels it when clicked", async function (assert) {
+  test("shows Cancel All Schedule only once the Scheduled status filter is selected, and cancels when clicked", async function (assert) {
     await visit("/u/eviltrout/invited/pending");
 
-    await click(
-      "table.user-invite-list tbody tr:nth-child(1) .d-icon-ellipsis-vertical"
-    );
+    await click(".resend-delete-combo .fk-d-menu__trigger");
     assert
-      .dom(".cancel-schedule-invite")
-      .doesNotExist("a skipped row has no Cancel Schedule action");
+      .dom(".fk-d-menu .cancel-all-schedule")
+      .doesNotExist("hidden with no status filter selected");
 
-    await click(
-      "table.user-invite-list tbody tr:nth-child(3) .d-icon-ellipsis-vertical"
-    );
+    const statusFilter = selectKit(".invite-status-filter");
+    await statusFilter.expand();
+    await statusFilter.selectRowByValue("skipped");
+
+    await click(".resend-delete-combo .fk-d-menu__trigger");
     assert
-      .dom(".cancel-schedule-invite")
-      .exists("the scheduled row offers Cancel Schedule");
+      .dom(".fk-d-menu .cancel-all-schedule")
+      .doesNotExist("still hidden for an unrelated status filter");
 
-    await click(".cancel-schedule-invite");
+    await statusFilter.expand();
+    await statusFilter.selectRowByValue("scheduled");
 
-    assert.strictEqual(cancelScheduleRequests.length, 1);
-    assert.strictEqual(cancelScheduleRequests[0].invite_id, "3");
+    await click(".resend-delete-combo .fk-d-menu__trigger");
+    assert
+      .dom(".fk-d-menu .cancel-all-schedule")
+      .exists("shown once Scheduled is selected");
+
+    await click(".fk-d-menu .cancel-all-schedule");
+    await click(".dialog-footer .btn-primary");
+
+    assert.strictEqual(cancelAllScheduleRequests.length, 1);
   });
 
   test("offers the ac.in umbrella domain alongside specific institute domains", async function (assert) {
@@ -376,6 +384,12 @@ acceptance("User invited - review vs drafting status filter", function (needs) {
 
   const STATUSES_WITH_REVIEW_AND_DRAFTING = [...STATUSES, "review", "drafting"];
 
+  let cancelAllDraftingRequests;
+
+  needs.hooks.beforeEach(() => {
+    cancelAllDraftingRequests = [];
+  });
+
   needs.pretender((server, helper) => {
     server.get("/u/eviltrout/invited.json", (request) => {
       const status = request.queryParams.status;
@@ -391,6 +405,11 @@ acceptance("User invited - review vs drafting status filter", function (needs) {
         available_domains: [],
         available_statuses: STATUSES_WITH_REVIEW_AND_DRAFTING,
       });
+    });
+
+    server.post("/invites/cancel-drafting-all", (request) => {
+      cancelAllDraftingRequests.push(helper.parsePostData(request.requestBody));
+      return helper.response({ success: "OK", cancelled_count: 1 });
     });
   });
 
@@ -417,6 +436,32 @@ acceptance("User invited - review vs drafting status filter", function (needs) {
     await statusFilter.selectRowByValue("drafting");
     assert.dom(".delivery-status-pill.--drafting").hasText("Drafting");
     assert.dom(".delivery-status-pill.--review").doesNotExist();
+  });
+
+  test("shows Cancel All Drafting only once the Drafting status filter is selected, and cancels when clicked", async function (assert) {
+    await visit("/u/eviltrout/invited/pending");
+
+    const statusFilter = selectKit(".invite-status-filter");
+    await statusFilter.expand();
+    await statusFilter.selectRowByValue("review");
+
+    await click(".resend-delete-combo .fk-d-menu__trigger");
+    assert
+      .dom(".fk-d-menu .cancel-all-drafting")
+      .doesNotExist("hidden for Review, a different in-flight status");
+
+    await statusFilter.expand();
+    await statusFilter.selectRowByValue("drafting");
+
+    await click(".resend-delete-combo .fk-d-menu__trigger");
+    assert
+      .dom(".fk-d-menu .cancel-all-drafting")
+      .exists("shown once Drafting is selected");
+
+    await click(".fk-d-menu .cancel-all-drafting");
+    await click(".dialog-footer .btn-primary");
+
+    assert.strictEqual(cancelAllDraftingRequests.length, 1);
   });
 
   test("hides both Review and Drafting status filter options on the Expired tab", async function (assert) {

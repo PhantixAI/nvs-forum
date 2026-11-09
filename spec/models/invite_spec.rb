@@ -1209,20 +1209,26 @@ RSpec.describe Invite do
     end
   end
 
-  describe ".claim_for_schedule_cancel" do
+  describe ".claim_all_for_status_cancel" do
     fab!(:invite)
+    fab!(:other_invite, :invite)
 
-    it "reverts a bulk_pending invite to whatever its last_emailed_status was" do
-      invite.update_columns(
-        emailed_status: Invite.emailed_status_types[:bulk_pending],
-        last_emailed_status: Invite.emailed_status_types[:sent],
-      )
+    it "reverts every matching invite to whatever its last_emailed_status was" do
+      [invite, other_invite].each do |i|
+        i.update_columns(
+          emailed_status: Invite.emailed_status_types[:bulk_pending],
+          last_emailed_status: Invite.emailed_status_types[:sent],
+        )
+      end
 
-      claimed = Invite.claim_for_schedule_cancel(invite.id)
+      claimed_count =
+        Invite.claim_all_for_status_cancel([invite.id, other_invite.id], %i[pending bulk_pending])
 
-      expect(claimed.id).to eq(invite.id)
-      expect(claimed.emailed_status).to eq(Invite.emailed_status_types[:sent])
-      expect(claimed.last_emailed_status).to be_nil
+      expect(claimed_count).to eq(2)
+      [invite, other_invite].each do |i|
+        expect(i.reload.emailed_status).to eq(Invite.emailed_status_types[:sent])
+        expect(i.last_emailed_status).to be_nil
+      end
     end
 
     it "reverts a plain pending invite the same way" do
@@ -1231,9 +1237,20 @@ RSpec.describe Invite do
         last_emailed_status: Invite.emailed_status_types[:review],
       )
 
-      claimed = Invite.claim_for_schedule_cancel(invite.id)
+      Invite.claim_all_for_status_cancel([invite.id], %i[pending bulk_pending])
 
-      expect(claimed.emailed_status).to eq(Invite.emailed_status_types[:review])
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
+    end
+
+    it "reverts a drafting invite when scoped to the drafting status" do
+      invite.update_columns(
+        emailed_status: Invite.emailed_status_types[:drafting],
+        last_emailed_status: Invite.emailed_status_types[:sent],
+      )
+
+      Invite.claim_all_for_status_cancel([invite.id], %i[drafting])
+
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:sent])
     end
 
     it "falls back to review when no last_emailed_status was ever captured" do
@@ -1242,25 +1259,36 @@ RSpec.describe Invite do
         last_emailed_status: nil,
       )
 
-      claimed = Invite.claim_for_schedule_cancel(invite.id)
+      Invite.claim_all_for_status_cancel([invite.id], %i[pending bulk_pending])
 
-      expect(claimed.emailed_status).to eq(Invite.emailed_status_types[:review])
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
     end
 
-    it "returns nil without changing anything for a non-claimable status" do
+    it "leaves a non-claimable status untouched" do
       %i[sending sent skipped not_required review].each do |status|
         invite.update_columns(
           emailed_status: Invite.emailed_status_types[status],
           last_emailed_status: Invite.emailed_status_types[:sent],
         )
 
-        expect(Invite.claim_for_schedule_cancel(invite.id)).to be_nil
+        claimed_count = Invite.claim_all_for_status_cancel([invite.id], %i[pending bulk_pending])
+
+        expect(claimed_count).to eq(0)
         expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[status])
       end
     end
 
-    it "returns nil for an id that doesn't exist" do
-      expect(Invite.claim_for_schedule_cancel(-1)).to be_nil
+    it "does not touch an invite outside `from_statuses` even if it's in the id list" do
+      invite.update_columns(emailed_status: Invite.emailed_status_types[:drafting])
+
+      claimed_count = Invite.claim_all_for_status_cancel([invite.id], %i[pending bulk_pending])
+
+      expect(claimed_count).to eq(0)
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
+    end
+
+    it "returns 0 for an empty id list" do
+      expect(Invite.claim_all_for_status_cancel([], %i[pending bulk_pending])).to eq(0)
     end
   end
 
