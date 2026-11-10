@@ -66,7 +66,7 @@ RSpec.describe PostAlerter do
         :user_api_key,
         user: user,
         scopes: ["notifications"].map { |name| UserApiKeyScope.new(name: name) },
-        push_url: "https://site2.com/push",
+        push_url: "ios",
         user_api_key_client_id: client.id,
       )
     end
@@ -1395,10 +1395,7 @@ RSpec.describe PostAlerter do
     let(:mention_post) { create_post_with_alerts(user: user, raw: "Hello @eviltrout :heart:") }
     let(:topic) { mention_post.topic }
 
-    before do
-      SiteSetting.allowed_user_api_push_urls = "https://site.com/push|https://site2.com/push"
-      setup_push_notification_subscription_for(user: evil_trout)
-    end
+    before { setup_push_notification_subscription_for(user: evil_trout) }
 
     describe "DiscoursePluginRegistry#push_notification_filters" do
       let!(:original_filters) { DiscoursePluginRegistry._raw_push_notification_filters.dup }
@@ -1752,12 +1749,11 @@ RSpec.describe PostAlerter do
     it "does not publish to MessageBus /notification-alert if the user has not been seen for > 30 days, but still sends a push notification" do
       evil_trout.update_columns(last_seen_at: 31.days.ago)
 
-      SiteSetting.allowed_user_api_push_urls = "https://site2.com/push"
       Fabricate(
         :user_api_key,
         user: evil_trout,
         scopes: ["notifications"].map { |name| UserApiKeyScope.new(name: name) },
-        push_url: "https://site2.com/push",
+        push_url: "ios",
       )
 
       events = nil

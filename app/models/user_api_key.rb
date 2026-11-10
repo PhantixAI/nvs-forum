@@ -1,10 +1,9 @@
 # frozen_string_literal: true
 
 class UserApiKey < ActiveRecord::Base
-  # push_url stores the platform for direct FCM/APNs push clients -- repurposed
-  # from the old relay-URL scheme, which no longer applies. Kept as a single
-  # source of truth so the write-side validators and this read-side filter
-  # can't drift apart again.
+  # push_url stores the platform ("ios"/"android") for direct FCM/APNs push
+  # clients, not a relay URL. Single source of truth shared by the controller's
+  # validate_platform, has_push?, and push_clients_for.
   ALLOWED_PUSH_PLATFORMS = %w[ios android].freeze
   PUSH_SCOPE_NAMES = %w[push notifications].freeze
 
@@ -82,7 +81,7 @@ class UserApiKey < ActiveRecord::Base
       .user_api_keys
       .active
       .joins(:scopes, :client)
-      .where("user_api_key_scopes.name IN ('push', 'notifications')")
+      .where("user_api_key_scopes.name IN (?)", PUSH_SCOPE_NAMES)
       .where(push_url: ALLOWED_PUSH_PLATFORMS)
       .order("user_api_key_clients.client_id ASC")
       .pluck("user_api_key_clients.client_id, user_api_keys.push_url")
