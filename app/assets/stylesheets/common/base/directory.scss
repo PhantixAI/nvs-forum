@@ -251,6 +251,22 @@
       @include viewport.until(sm) {
         font-size: var(--font-down-1);
       }
+
+      // Show the full name where the username normally sits, with the
+      // username moved below it on its own line.
+      .name-line {
+        flex-direction: column;
+        gap: 0;
+
+        .name-wrapper {
+          order: -1;
+          font-weight: bold;
+        }
+
+        .username-wrapper .username {
+          font-weight: normal;
+        }
+      }
     }
 
     .title {
