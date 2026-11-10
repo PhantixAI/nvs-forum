@@ -4392,7 +4392,7 @@ uncategorized:
     default: 10
     type: integer
     min: 1
-    max: 1000
+    max: 10000
     client: false
     area: "users"
     depends_on:
@@ -4428,7 +4428,7 @@ uncategorized:
     default: 1
     type: integer
     min: 1
-    max: 1000
+    max: 20000
     client: false
     area: "users"
 
@@ -4436,7 +4436,7 @@ uncategorized:
     default: 1
     type: integer
     min: 1
-    max: 1000
+    max: 20000
     client: false
     area: "users"
 
@@ -4444,7 +4444,7 @@ uncategorized:
     default: 1
     type: integer
     min: 1
-    max: 1000
+    max: 20000
     client: false
     area: "users"
 
@@ -4452,15 +4452,15 @@ uncategorized:
     default: 1
     type: integer
     min: 1
-    max: 1000
+    max: 20000
     client: false
     area: "users"
 
   invite_reinvite_rate_limit_per_day:
-    default: 3
+    default: 10
     type: integer
     min: 1
-    max: 1000
+    max: 30000
     client: false
     area: "users"
 

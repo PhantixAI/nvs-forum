@@ -2854,6 +2854,24 @@ RSpec.describe InvitesController do
       expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:bulk_pending])
     end
 
+    it "returns 403 for a non-admin moderator acting on another user's invites and cancels nothing" do
+      moderator = Fabricate(:moderator)
+      other_user = Fabricate(:user)
+      invite =
+        Fabricate(
+          :invite,
+          invited_by: other_user,
+          emailed_status: Invite.emailed_status_types[:pending],
+          last_emailed_status: Invite.emailed_status_types[:review],
+        )
+
+      sign_in(moderator)
+      post "/invites/cancel-schedule-all.json", params: { username: other_user.username }
+
+      expect(response.status).to eq(403)
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:pending])
+    end
+
     it "reverts every scheduled invite by a user to its last_emailed_status, leaving others alone" do
       pending_invite =
         Fabricate(
@@ -3023,6 +3041,24 @@ RSpec.describe InvitesController do
       expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
     end
 
+    it "returns 403 for a non-admin moderator acting on another user's invites and cancels nothing" do
+      moderator = Fabricate(:moderator)
+      other_user = Fabricate(:user)
+      invite =
+        Fabricate(
+          :invite,
+          invited_by: other_user,
+          emailed_status: Invite.emailed_status_types[:drafting],
+          last_emailed_status: Invite.emailed_status_types[:sent],
+        )
+
+      sign_in(moderator)
+      post "/invites/cancel-drafting-all.json", params: { username: other_user.username }
+
+      expect(response.status).to eq(403)
+      expect(invite.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
+    end
+
     it "reverts every drafting invite by a user to its last_emailed_status, leaving Scheduled alone" do
       drafting_invite =
         Fabricate(
@@ -3157,6 +3193,25 @@ RSpec.describe InvitesController do
       expect(response.status).to eq(200)
       expect(viewed_users_invite.reload.expires_at).to eq_time(30.days.from_now)
       expect(staff_members_own_invite.reload.expires_at).to eq_time(5.days.from_now)
+    end
+
+    it "returns 403 for a non-admin moderator acting on another user's invites and resends nothing" do
+      freeze_time
+
+      moderator = Fabricate(:moderator)
+      other_user = Fabricate(:user)
+      invite = Fabricate(:invite, invited_by: other_user)
+      invite.update!(expires_at: 5.days.from_now)
+
+      sign_in(moderator)
+      post "/invites/reinvite-all",
+           params: {
+             username: other_user.username,
+             ai_personalization: "false",
+           }
+
+      expect(response.status).to eq(403)
+      expect(invite.reload.expires_at).to eq_time(5.days.from_now)
     end
 
     it "errors if admins try to exceed limit of one bulk invite per day" do

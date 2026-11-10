@@ -651,12 +651,8 @@ class InvitesController < ApplicationController
       return render_json_error(I18n.t("invite.email_invites_disabled"))
     end
 
-    guardian.ensure_can_resend_all_invites!
-
-    # The invited-page owner this bulk action should operate on -- defaults to
-    # the caller when no username is given (keeps direct/API callers working
-    # against their own invites without having to name themselves).
-    user = params[:username].present? ? fetch_user_from_params : current_user
+    user = invited_page_target_user
+    guardian.ensure_can_resend_all_invites!(user)
 
     # See UsersController#invited for why this is validated against
     # DOMAIN_REGEX rather than used as-is -- it also becomes part of the
@@ -770,12 +766,7 @@ class InvitesController < ApplicationController
   end
 
   def destroy_all_invites
-    # Same default-to-self reasoning as resend_all_invites above. Needed before
-    # the guardian check here (unlike resend_all_invites/cancel_all_schedule/
-    # cancel_all_drafting's plain is_staff? gate), since can_destroy_all_invites?
-    # itself takes the target user -- is_me?(nil) is false, so an unauthenticated
-    # request (user stays nil below) still correctly 403s rather than crashing.
-    user = params[:username].present? ? fetch_user_from_params : current_user
+    user = invited_page_target_user
     guardian.ensure_can_destroy_all_invites!(user)
 
     # Same scoping as resend_all_invites above -- this sits behind the same
@@ -819,10 +810,8 @@ class InvitesController < ApplicationController
   end
 
   def cancel_all_schedule
-    guardian.ensure_can_resend_all_invites!
-
-    # Same default-to-self reasoning as resend_all_invites above.
-    user = params[:username].present? ? fetch_user_from_params : current_user
+    user = invited_page_target_user
+    guardian.ensure_can_resend_all_invites!(user)
 
     # Same domain-validation reasoning as resend_all_invites/destroy_all_invites above.
     # No status param here -- this action is inherently scoped to Scheduled invites, not
@@ -864,10 +853,8 @@ class InvitesController < ApplicationController
   # bulk_pending AI-personalization queue, not the send-pipeline's pending/bulk_pending) --
   # same domain/rate-limit/search shape, just a different source status and claimable set.
   def cancel_all_drafting
-    guardian.ensure_can_resend_all_invites!
-
-    # Same default-to-self reasoning as resend_all_invites above.
-    user = params[:username].present? ? fetch_user_from_params : current_user
+    user = invited_page_target_user
+    guardian.ensure_can_resend_all_invites!(user)
 
     domain = params[:domain].presence if params[:domain].to_s.match?(Invite::DOMAIN_REGEX)
 
@@ -1191,6 +1178,18 @@ class InvitesController < ApplicationController
   end
 
   private
+
+  # The invited-page owner a bulk action (resend_all_invites, destroy_all_invites,
+  # cancel_all_schedule, cancel_all_drafting) should operate on -- defaults to the
+  # caller when no username is given, so a direct/API caller without one keeps
+  # working against their own invites rather than erroring. Shared so all four
+  # actions resolve it identically; each still gates it through its own guardian
+  # check afterward (can_resend_all_invites?/can_destroy_all_invites? both take
+  # this as their target), since resolving a user here says nothing about
+  # whether the caller may act on them.
+  def invited_page_target_user
+    params[:username].present? ? fetch_user_from_params : current_user
+  end
 
   # Mirrors Invite#update_emailed_status!'s "capture the old value into
   # last_emailed_status, then set the new one" rule for an in-memory
