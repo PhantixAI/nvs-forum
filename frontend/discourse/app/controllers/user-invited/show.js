@@ -469,7 +469,7 @@ export default class UserInvitedShowController extends Controller {
           maxUsers,
           shareableDomain,
         }) => {
-          await Invite.reinviteAll(domain, status, search, {
+          await Invite.reinviteAll(this.user, domain, status, search, {
             keywords,
             aiPersonalization,
             scheduleSend,
@@ -493,7 +493,7 @@ export default class UserInvitedShowController extends Controller {
     this.dialog.deleteConfirm({
       message: this.#deleteAllInvitesConfirmMessage(domain, status),
       didConfirm: () => {
-        return Invite.destroyAllInvites(domain, status, search)
+        return Invite.destroyAllInvites(this.user, domain, status, search)
           .then(() => {
             this.toasts.success({
               data: { message: i18n("user.invited.deleted_all") },
@@ -513,7 +513,7 @@ export default class UserInvitedShowController extends Controller {
     this.dialog.confirm({
       message: this.#cancelAllScheduleConfirmMessage(domain),
       didConfirm: () => {
-        return Invite.cancelAllSchedule(domain, search)
+        return Invite.cancelAllSchedule(this.user, domain, search)
           .then(() => {
             this.toasts.success({
               data: { message: i18n("user.invited.cancelled_all_schedule") },
@@ -533,7 +533,7 @@ export default class UserInvitedShowController extends Controller {
     this.dialog.confirm({
       message: this.#cancelAllDraftingConfirmMessage(domain),
       didConfirm: () => {
-        return Invite.cancelAllDrafting(domain, search)
+        return Invite.cancelAllDrafting(this.user, domain, search)
           .then(() => {
             this.toasts.success({
               data: { message: i18n("user.invited.cancelled_all_drafting") },

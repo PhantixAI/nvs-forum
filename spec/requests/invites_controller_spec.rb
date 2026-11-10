@@ -2886,6 +2886,34 @@ RSpec.describe InvitesController do
       expect(drafting_invite.reload.emailed_status).to eq(Invite.emailed_status_types[:drafting])
     end
 
+    it "operates on the viewed page's invites (username param), not the signed-in staff member's own -- regression guard for the invited-page bulk actions silently scoping to current_user instead of the page being viewed" do
+      moderator = Fabricate(:moderator)
+      viewed_users_invite =
+        Fabricate(
+          :invite,
+          invited_by: moderator,
+          emailed_status: Invite.emailed_status_types[:pending],
+          last_emailed_status: Invite.emailed_status_types[:review],
+        )
+      staff_members_own_invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          emailed_status: Invite.emailed_status_types[:pending],
+          last_emailed_status: Invite.emailed_status_types[:review],
+        )
+
+      sign_in(admin)
+      post "/invites/cancel-schedule-all.json", params: { username: moderator.username }
+
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["cancelled_count"]).to eq(1)
+      expect(viewed_users_invite.reload.emailed_status).to eq(Invite.emailed_status_types[:review])
+      expect(staff_members_own_invite.reload.emailed_status).to eq(
+        Invite.emailed_status_types[:pending],
+      )
+    end
+
     it "falls back to review when no last_emailed_status was ever captured" do
       invite =
         Fabricate(
@@ -3022,6 +3050,34 @@ RSpec.describe InvitesController do
       )
     end
 
+    it "operates on the viewed page's invites (username param), not the signed-in staff member's own -- regression guard for the invited-page bulk actions silently scoping to current_user instead of the page being viewed" do
+      moderator = Fabricate(:moderator)
+      viewed_users_invite =
+        Fabricate(
+          :invite,
+          invited_by: moderator,
+          emailed_status: Invite.emailed_status_types[:drafting],
+          last_emailed_status: Invite.emailed_status_types[:sent],
+        )
+      staff_members_own_invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          emailed_status: Invite.emailed_status_types[:drafting],
+          last_emailed_status: Invite.emailed_status_types[:sent],
+        )
+
+      sign_in(admin)
+      post "/invites/cancel-drafting-all.json", params: { username: moderator.username }
+
+      expect(response.status).to eq(200)
+      expect(response.parsed_body["cancelled_count"]).to eq(1)
+      expect(viewed_users_invite.reload.emailed_status).to eq(Invite.emailed_status_types[:sent])
+      expect(staff_members_own_invite.reload.emailed_status).to eq(
+        Invite.emailed_status_types[:drafting],
+      )
+    end
+
     it "falls back to review when no last_emailed_status was ever captured" do
       invite =
         Fabricate(
@@ -3080,6 +3136,27 @@ RSpec.describe InvitesController do
       expect(new_invite.reload.expires_at).to eq_time(30.days.from_now)
       expect(expired_invite.reload.expires_at).to eq_time(2.days.ago)
       expect(redeemed_invite.reload.expires_at).to eq_time(5.days.ago)
+    end
+
+    it "operates on the viewed page's invites (username param), not the signed-in staff member's own -- regression guard for the invited-page bulk actions silently scoping to current_user instead of the page being viewed" do
+      freeze_time
+
+      moderator = Fabricate(:moderator)
+      viewed_users_invite = Fabricate(:invite, invited_by: moderator)
+      viewed_users_invite.update!(expires_at: 5.days.from_now)
+      staff_members_own_invite = Fabricate(:invite, invited_by: admin)
+      staff_members_own_invite.update!(expires_at: 5.days.from_now)
+
+      sign_in(admin)
+      post "/invites/reinvite-all",
+           params: {
+             username: moderator.username,
+             ai_personalization: "false",
+           }
+
+      expect(response.status).to eq(200)
+      expect(viewed_users_invite.reload.expires_at).to eq_time(30.days.from_now)
+      expect(staff_members_own_invite.reload.expires_at).to eq_time(5.days.from_now)
     end
 
     it "errors if admins try to exceed limit of one bulk invite per day" do
@@ -3623,6 +3700,19 @@ RSpec.describe InvitesController do
       expect(response.status).to eq(200)
       expect(nit_invite.reload.deleted_at).to be_present
       expect(other_invite.reload.deleted_at).to be_present
+    end
+
+    it "operates on the viewed page's invites (username param), not the signed-in staff member's own -- regression guard for the invited-page bulk actions silently scoping to current_user instead of the page being viewed" do
+      moderator = Fabricate(:moderator)
+      viewed_users_invite = Fabricate(:invite, invited_by: moderator, email: "student@nit.ac.in")
+      staff_members_own_invite = Fabricate(:invite, invited_by: admin, email: "other@nit.ac.in")
+
+      sign_in(admin)
+      post "/invites/destroy-all", params: { username: moderator.username }
+
+      expect(response.status).to eq(200)
+      expect(viewed_users_invite.reload.deleted_at).to be_present
+      expect(staff_members_own_invite.reload.deleted_at).to eq(nil)
     end
 
     it "only deletes invites matching the given domain" do
