@@ -38,6 +38,24 @@
         width: 100%;
       }
     }
+
+    // Users-directory rows lead with the full name, not the username, so
+    // flip their relative position without touching other `directory-table`
+    // consumers (e.g. the group members/requests pages) that intentionally
+    // keep the username first.
+    .directory-table .user-info .name-line {
+      flex-direction: column;
+      gap: 0;
+
+      .name-wrapper {
+        order: -1;
+        font-weight: bold;
+      }
+
+      .username-wrapper .username {
+        font-weight: normal;
+      }
+    }
   }
 
   .user-info {
@@ -250,22 +268,6 @@
 
       @include viewport.until(sm) {
         font-size: var(--font-down-1);
-      }
-
-      // Show the full name where the username normally sits, with the
-      // username moved below it on its own line.
-      .name-line {
-        flex-direction: column;
-        gap: 0;
-
-        .name-wrapper {
-          order: -1;
-          font-weight: bold;
-        }
-
-        .username-wrapper .username {
-          font-weight: normal;
-        }
       }
     }
 
