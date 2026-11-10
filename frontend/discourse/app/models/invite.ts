@@ -147,6 +147,7 @@ export default class Invite extends EmberObject {
   }
 
   static reinviteAll(
+    user: User,
     domain?: string | null,
     status?: string | null,
     search?: string | null,
@@ -168,7 +169,7 @@ export default class Invite extends EmberObject {
       shareableDomain?: string;
     } = {}
   ): Promise<unknown> {
-    const data: Record<string, unknown> = {};
+    const data: Record<string, unknown> = { username: user.username };
     if (!isNone(domain)) {
       data.domain = domain;
     }
@@ -206,11 +207,19 @@ export default class Invite extends EmberObject {
   }
 
   static destroyAllInvites(
+    user: User,
     domain?: string | null,
     status?: string | null,
     search?: string | null
   ): Promise<unknown> {
-    const data: { domain?: string; status?: string; search?: string } = {};
+    const data: {
+      username: string;
+      domain?: string;
+      status?: string;
+      search?: string;
+    } = {
+      username: user.username,
+    };
     if (!isNone(domain)) {
       data.domain = domain;
     }
@@ -227,10 +236,13 @@ export default class Invite extends EmberObject {
   // domain/search filters back to its prior status -- see
   // InvitesController#cancel_all_schedule. No status param: inherently scoped to Scheduled.
   static cancelAllSchedule(
+    user: User,
     domain?: string | null,
     search?: string | null
   ): Promise<{ cancelled_count: number }> {
-    const data: { domain?: string; search?: string } = {};
+    const data: { username: string; domain?: string; search?: string } = {
+      username: user.username,
+    };
     if (!isNone(domain)) {
       data.domain = domain;
     }
@@ -243,10 +255,13 @@ export default class Invite extends EmberObject {
   // Twin of #cancelAllSchedule, for Drafting invites -- see
   // InvitesController#cancel_all_drafting.
   static cancelAllDrafting(
+    user: User,
     domain?: string | null,
     search?: string | null
   ): Promise<{ cancelled_count: number }> {
-    const data: { domain?: string; search?: string } = {};
+    const data: { username: string; domain?: string; search?: string } = {
+      username: user.username,
+    };
     if (!isNone(domain)) {
       data.domain = domain;
     }

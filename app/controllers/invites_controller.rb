@@ -651,7 +651,8 @@ class InvitesController < ApplicationController
       return render_json_error(I18n.t("invite.email_invites_disabled"))
     end
 
-    guardian.ensure_can_resend_all_invites!
+    user = invited_page_target_user
+    guardian.ensure_can_resend_all_invites!(user)
 
     # See UsersController#invited for why this is validated against
     # DOMAIN_REGEX rather than used as-is -- it also becomes part of the
@@ -660,16 +661,19 @@ class InvitesController < ApplicationController
     status = params[:status].presence if Invite::DELIVERY_STATUSES.include?(params[:status])
 
     begin
-      # Keyed per domain so resending nit.ac.in and iitb.ac.in the same day
-      # are independent, while resending nit.ac.in twice the same day (or
-      # resending everyone) still only gets one shot each. Status is part of
-      # the key too, so retrying the "skipped" invites after a provider
-      # outage isn't blocked by an ordinary resend earlier the same day.
-      # The "ac.in" umbrella domain (see Invite.domain_filter_condition)
-      # forms its own independent bucket here too, same as any other domain
-      # string -- resending it doesn't double-count against (or get blocked
-      # by) an individual institute's own bucket, by design.
-      rate_limit_key = ["bulk-reinvite-per-day", domain, status].compact.join("-")
+      # Keyed per viewed-user (the invited-page owner, not necessarily the staff
+      # member clicking the button) so resending for one user doesn't block
+      # resending for another the same day. Also per domain, so resending
+      # nit.ac.in and iitb.ac.in the same day are independent, while resending
+      # nit.ac.in twice the same day (or resending everyone) still only gets one
+      # shot each. Status is part of the key too, so retrying the "skipped"
+      # invites after a provider outage isn't blocked by an ordinary resend
+      # earlier the same day. The "ac.in" umbrella domain (see
+      # Invite.domain_filter_condition) forms its own independent bucket here
+      # too, same as any other domain string -- resending it doesn't
+      # double-count against (or get blocked by) an individual institute's own
+      # bucket, by design.
+      rate_limit_key = ["bulk-reinvite-per-day", user.id, domain, status].compact.join("-")
       RateLimiter.new(
         current_user,
         rate_limit_key,
@@ -687,7 +691,7 @@ class InvitesController < ApplicationController
     # (see Jobs::BulkInvite) without sweeping in ordinary never-emailed link invites,
     # which stay at :not_required.
     invites_to_resend =
-      Invite.pending(current_user, domain:, status:).where(
+      Invite.pending(user, domain:, status:).where(
         "email IS NOT NULL OR emailed_status != ?",
         Invite.emailed_status_types[:not_required],
       )
@@ -695,7 +699,7 @@ class InvitesController < ApplicationController
       Invite.search_filter(
         invites_to_resend,
         params[:search],
-        show_emails: guardian.can_see_invite_emails?(current_user),
+        show_emails: guardian.can_see_invite_emails?(user),
       )
 
     send_count = params[:send_count].presence&.to_i
@@ -762,7 +766,8 @@ class InvitesController < ApplicationController
   end
 
   def destroy_all_invites
-    guardian.ensure_can_destroy_all_invites!(current_user)
+    user = invited_page_target_user
+    guardian.ensure_can_destroy_all_invites!(user)
 
     # Same scoping as resend_all_invites above -- this sits behind the same
     # button, so it must affect exactly the set resend would have touched
@@ -771,9 +776,10 @@ class InvitesController < ApplicationController
     status = params[:status].presence if Invite::DELIVERY_STATUSES.include?(params[:status])
 
     begin
-      # Separate key from bulk-reinvite-per-day so resending and deleting
-      # the same filtered set the same day don't block each other.
-      rate_limit_key = ["bulk-destroy-invite-per-day", domain, status].compact.join("-")
+      # Keyed per viewed-user, same reasoning as resend_all_invites above. Also
+      # separate from bulk-reinvite-per-day so resending and deleting the same
+      # filtered set the same day don't block each other.
+      rate_limit_key = ["bulk-destroy-invite-per-day", user.id, domain, status].compact.join("-")
       RateLimiter.new(
         current_user,
         rate_limit_key,
@@ -787,7 +793,7 @@ class InvitesController < ApplicationController
     end
 
     invites_to_destroy =
-      Invite.pending(current_user, domain:, status:).where(
+      Invite.pending(user, domain:, status:).where(
         "email IS NOT NULL OR emailed_status != ?",
         Invite.emailed_status_types[:not_required],
       )
@@ -795,7 +801,7 @@ class InvitesController < ApplicationController
       Invite.search_filter(
         invites_to_destroy,
         params[:search],
-        show_emails: guardian.can_see_invite_emails?(current_user),
+        show_emails: guardian.can_see_invite_emails?(user),
       )
 
     invites_to_destroy.find_each { |invite| invite.trash!(current_user) }
@@ -804,7 +810,8 @@ class InvitesController < ApplicationController
   end
 
   def cancel_all_schedule
-    guardian.ensure_can_resend_all_invites!
+    user = invited_page_target_user
+    guardian.ensure_can_resend_all_invites!(user)
 
     # Same domain-validation reasoning as resend_all_invites/destroy_all_invites above.
     # No status param here -- this action is inherently scoped to Scheduled invites, not
@@ -812,9 +819,10 @@ class InvitesController < ApplicationController
     domain = params[:domain].presence if params[:domain].to_s.match?(Invite::DOMAIN_REGEX)
 
     begin
-      # Separate key from bulk-reinvite/bulk-destroy-per-day so this doesn't block, or get
-      # blocked by, either of those for the same filtered set the same day.
-      rate_limit_key = ["bulk-cancel-schedule-invite-per-day", domain].compact.join("-")
+      # Keyed per viewed-user, same reasoning as resend_all_invites above. Also
+      # separate from bulk-reinvite/bulk-destroy-per-day so this doesn't block, or
+      # get blocked by, either of those for the same filtered set the same day.
+      rate_limit_key = ["bulk-cancel-schedule-invite-per-day", user.id, domain].compact.join("-")
       RateLimiter.new(
         current_user,
         rate_limit_key,
@@ -827,12 +835,12 @@ class InvitesController < ApplicationController
       return render_json_error(I18n.t("rate_limiter.slow_down"))
     end
 
-    invites_to_cancel = Invite.pending(current_user, domain:, status: "scheduled")
+    invites_to_cancel = Invite.pending(user, domain:, status: "scheduled")
     invites_to_cancel =
       Invite.search_filter(
         invites_to_cancel,
         params[:search],
-        show_emails: guardian.can_see_invite_emails?(current_user),
+        show_emails: guardian.can_see_invite_emails?(user),
       )
 
     ids = invites_to_cancel.reorder(nil).pluck(:id)
@@ -845,14 +853,17 @@ class InvitesController < ApplicationController
   # bulk_pending AI-personalization queue, not the send-pipeline's pending/bulk_pending) --
   # same domain/rate-limit/search shape, just a different source status and claimable set.
   def cancel_all_drafting
-    guardian.ensure_can_resend_all_invites!
+    user = invited_page_target_user
+    guardian.ensure_can_resend_all_invites!(user)
 
     domain = params[:domain].presence if params[:domain].to_s.match?(Invite::DOMAIN_REGEX)
 
     begin
-      # Separate key from the other bulk actions' per-day buckets so this doesn't block, or
-      # get blocked by, any of them for the same filtered set the same day.
-      rate_limit_key = ["bulk-cancel-drafting-invite-per-day", domain].compact.join("-")
+      # Keyed per viewed-user, same reasoning as resend_all_invites above. Also
+      # separate from the other bulk actions' per-day buckets so this doesn't
+      # block, or get blocked by, any of them for the same filtered set the
+      # same day.
+      rate_limit_key = ["bulk-cancel-drafting-invite-per-day", user.id, domain].compact.join("-")
       RateLimiter.new(
         current_user,
         rate_limit_key,
@@ -865,12 +876,12 @@ class InvitesController < ApplicationController
       return render_json_error(I18n.t("rate_limiter.slow_down"))
     end
 
-    invites_to_cancel = Invite.pending(current_user, domain:, status: "drafting")
+    invites_to_cancel = Invite.pending(user, domain:, status: "drafting")
     invites_to_cancel =
       Invite.search_filter(
         invites_to_cancel,
         params[:search],
-        show_emails: guardian.can_see_invite_emails?(current_user),
+        show_emails: guardian.can_see_invite_emails?(user),
       )
 
     ids = invites_to_cancel.reorder(nil).pluck(:id)
@@ -1167,6 +1178,18 @@ class InvitesController < ApplicationController
   end
 
   private
+
+  # The invited-page owner a bulk action (resend_all_invites, destroy_all_invites,
+  # cancel_all_schedule, cancel_all_drafting) should operate on -- defaults to the
+  # caller when no username is given, so a direct/API caller without one keeps
+  # working against their own invites rather than erroring. Shared so all four
+  # actions resolve it identically; each still gates it through its own guardian
+  # check afterward (can_resend_all_invites?/can_destroy_all_invites? both take
+  # this as their target), since resolving a user here says nothing about
+  # whether the caller may act on them.
+  def invited_page_target_user
+    params[:username].present? ? fetch_user_from_params : current_user
+  end
 
   # Mirrors Invite#update_emailed_status!'s "capture the old value into
   # last_emailed_status, then set the new one" rule for an in-memory

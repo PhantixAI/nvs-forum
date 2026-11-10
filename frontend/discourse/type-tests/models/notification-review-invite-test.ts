@@ -178,7 +178,7 @@ expectTypeOf(invited?.can_see_invite_details).toEqualTypeOf<
 expectTypeOf(invited?.counts.redeemed).toEqualTypeOf<number | undefined>();
 Invite.findInvitedBy(user, "pending", "term", 30);
 Invite.destroyAllExpired(user);
-Invite.reinviteAll();
+Invite.reinviteAll(user);
 
 /* Registry spellings, open packets and wire shapes. */
 

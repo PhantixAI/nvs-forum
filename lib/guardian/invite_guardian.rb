@@ -64,8 +64,14 @@ module InviteGuardian
     can_bulk_invite_to_forum?
   end
 
-  def can_resend_all_invites?
-    is_staff?
+  # Same trust boundary as #can_destroy_all_invites? below -- staff may bulk
+  # resend/cancel-schedule/cancel-drafting for themselves, but acting on another
+  # user's invited page this way requires admin. These are non-destructive, but
+  # still affect another user's data (sends real email, reschedules AI
+  # personalization) on their behalf, so they get the same self-or-admin gate
+  # as deletion.
+  def can_resend_all_invites?(user)
+    is_staff? && (is_admin? || is_me?(user))
   end
 
   def can_destroy_all_invites?(user)
