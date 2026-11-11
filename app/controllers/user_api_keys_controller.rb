@@ -92,7 +92,7 @@ class UserApiKeysController < ApplicationController
     key =
       @client.keys.create!(
         user_id: current_user.id,
-        push_url: params[:push_url],
+        push_url: params[:platform],
         expires_at: expires_at,
         scopes: scopes.map { |name| UserApiKeyScope.new(name: name) },
       )
@@ -519,6 +519,7 @@ class UserApiKeysController < ApplicationController
       auth_redirect: params[:auth_redirect],
       redirect_uri: redirect_uri_for(params[:auth_redirect]),
       push_url: params[:push_url],
+      platform: params[:platform],
       localized_scopes: localized_scopes(scopes),
       scopes: scopes,
       write_scope: scopes.split(",").include?("write"),
@@ -603,6 +604,8 @@ class UserApiKeysController < ApplicationController
     return if auth_redirect.blank? || auth_redirect == "discourse://auth_redirect"
 
     uri = URI.parse(auth_redirect)
+    return I18n.t("user_api_key.redirect_target_mobile_app") if %w[http https].exclude?(uri.scheme)
+
     if uri.port.nil? || [80, 443].include?(uri.port)
       uri.host
     else
@@ -648,6 +651,7 @@ class UserApiKeysController < ApplicationController
 
     parsed_public_key if public_key_str.present?
     validate_padding
+    validate_platform
   end
 
   def require_params_otp
@@ -663,6 +667,12 @@ class UserApiKeysController < ApplicationController
     return if params[:padding].blank?
     return if ALLOWED_PADDING_MODES.include?(params[:padding])
     raise Discourse::InvalidParameters.new(:padding)
+  end
+
+  def validate_platform
+    return if params[:platform].blank?
+    return if UserApiKey::ALLOWED_PUSH_PLATFORMS.include?(params[:platform])
+    raise Discourse::InvalidParameters.new(:platform)
   end
 
   def validate_auth_redirect
