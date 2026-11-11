@@ -214,18 +214,15 @@ RSpec.describe UserApiKeysController do
       expect(response.status).to eq(403)
     end
 
-    it "does not return push access if platform not provided" do
+    it "rejects a push scope request if platform not provided" do
       SiteSetting.user_api_key_allowed_groups = Group::AUTO_GROUPS[:trust_level_0]
       SiteSetting.allowed_user_api_auth_redirects = args[:auth_redirect]
       user = Fabricate(:user, trust_level: TrustLevel[0])
       sign_in(user)
 
       post "/user-api-key.json", params: args.merge(scopes: "push,read")
-      expect(response.status).to eq(200)
-
-      parsed = JSON.parse(decrypt_payload(extract_payload_from_redirect(response)))
-      expect(parsed["push"]).to eq(false)
-      expect(user.user_api_keys.first.scopes.map(&:name)).to include("push")
+      expect(response.status).to eq(400)
+      expect(user.user_api_keys).to be_empty
     end
 
     it "redirects with valid encrypted token" do

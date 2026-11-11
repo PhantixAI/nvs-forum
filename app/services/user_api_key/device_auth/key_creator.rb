@@ -31,6 +31,7 @@ class UserApiKey::DeviceAuth::KeyCreator
     public_key = UserApiKey::DeviceAuth::Crypto.parse_public_key!(grant.public_key)
     UserApiKey::DeviceAuth::RequestValidator.validate_public_key_constraints!(public_key)
     UserApiKey::DeviceAuth::RequestValidator.validate_padding!(grant.padding)
+    UserApiKey::DeviceAuth::RequestValidator.validate_platform!(grant.platform, grant.scopes)
     UserApiKey::DeviceAuth::PayloadBuilder.validate_size!(grant)
     validate_grant_size!(grant)
   end

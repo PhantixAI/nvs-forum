@@ -100,5 +100,30 @@ RSpec.describe UserApiKey::DeviceAuth::CreateRequest do
         expect(grant).not_to be_unregistered_client
       end
     end
+
+    context "when a push scope is requested without a platform" do
+      let(:params) { super().merge(scopes: "push") }
+
+      it { is_expected.to fail_with_exception(Discourse::InvalidParameters) }
+    end
+
+    context "when a push scope is requested with a valid platform" do
+      let(:params) { super().merge(scopes: "push", platform: "ios") }
+
+      it { is_expected.to run_successfully }
+
+      it "stores the platform on the grant" do
+        device_request = result[:device_request]
+        grant = UserApiKey::DeviceAuth::GrantStore.load(device_request[:device_code])
+
+        expect(grant.platform).to eq("ios")
+      end
+    end
+
+    context "when a push scope is requested with an invalid platform" do
+      let(:params) { super().merge(scopes: "push", platform: "windows") }
+
+      it { is_expected.to fail_with_exception(Discourse::InvalidParameters) }
+    end
   end
 end
