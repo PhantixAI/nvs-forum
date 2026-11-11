@@ -58,6 +58,12 @@
       .username-wrapper .username {
         font-weight: normal;
       }
+
+      .batch-moderator-badge,
+      .staff-badge {
+        position: relative;
+        top: -1px;
+      }
     }
   }
 
