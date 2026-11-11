@@ -8,6 +8,13 @@ pt:
   js:
     dsa_notice:
       go_back: "Anterior"
+    code_editor:
+      search:
+        next: "Próximo"
+        previous: "Anterior"
+        close: "Fechar"
+      fold:
+        to: "para"
     user_api_key:
       authorize: "Autorizar"
       deny: "Cancelar"
@@ -456,12 +463,13 @@ pt:
       back: "Anterior"
       next: "Próximo"
       sections:
-        theme: "Tema"
+        logo: "Logótipo"
         homepage: "Página de início"
-        search: "Procurar"
-      colors:
-        light: "Claro"
-        dark: "Escuro"
+      fonts:
+        base_font: "Corpo"
+        heading_font: "Cabeçalhos"
+      logo:
+        help_text: "O tamanho recomendado é 600 x 80 píxeis."
       homepage:
         topics: "Tópicos"
         categories: "Categorias"
@@ -4636,10 +4644,10 @@ pt:
           title: "Avançado"
       upcoming_changes:
         name: "Nome"
-        enabled: "Ativado"
+        enabled: "Ativado?"
+        feedback: "Opinião"
+        settings: "Configurações"
         preview: "Pré-visualização"
-        enabled_for_options:
-          everyone: "Todos"
         statuses:
           experimental: "Experimental"
         impact_roles:

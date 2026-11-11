@@ -9,6 +9,14 @@ da:
     dsa_notice:
       choice_title: "Det er ulovligt"
       email: "E-mail adresse"
+    code_editor:
+      search:
+        replace: "Erstat"
+        next: "Næste"
+        previous: "Forrige"
+        close: "Luk"
+      fold:
+        to: "til"
     user_api_key:
       authorize: "Autoriser"
       deny: "Annuller"
@@ -438,17 +446,16 @@ da:
       back: "Tilbage"
       next: "Næste"
       sections:
-        theme: "Tema"
         fonts: "Skrifttyper"
+        logo: "Logo"
         homepage: "Hjemmeside"
-        search: "Søg"
       theme:
         selected: "Valgt"
-      colors:
-        light: "Lys"
-        dark: "Mørk"
       fonts:
-        heading_font: "Overskrifts skrifttype"
+        base_font: "Brødtekst"
+        heading_font: "Overskrifter"
+      logo:
+        help_text: "Anbefalet størrelse er 600 x 80 pixels."
       homepage:
         topics: "Emner"
         categories: "Kategorier"
@@ -4396,11 +4403,11 @@ da:
           title: "Avanceret"
       upcoming_changes:
         name: "Navn"
-        enabled: "Aktiveret"
+        enabled: "Aktiveret?"
+        feedback: "Tilbagemelding"
         select_groups: "Vælg grupper…"
+        settings: "Indstillinger"
         preview: "Forhåndsvisning"
-        enabled_for_options:
-          everyone: "Alle"
         statuses:
           experimental: "Eksperimentel"
         impact_roles:

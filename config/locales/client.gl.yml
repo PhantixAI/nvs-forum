@@ -6,6 +6,14 @@
 
 gl:
   js:
+    code_editor:
+      search:
+        replace: "Substituír"
+        next: "Seguinte"
+        previous: "Anterior"
+        close: "Pechar"
+      fold:
+        to: "para o"
     user_api_key:
       authorize: "Autorizar"
       deny: "Cancelar"
@@ -273,15 +281,10 @@ gl:
       back: "Volver"
       next: "Seguinte"
       sections:
-        theme: "Tema"
         fonts: "Tipos de letra"
         homepage: "Páxina de inicio"
-        search: "Buscar"
-      colors:
-        light: "Claro"
-        dark: "Escuro"
       fonts:
-        heading_font: "Tipo de letra de título"
+        base_font: "Mensaxe"
       homepage:
         topics: "Temas"
         categories: "Categorías"
@@ -3480,10 +3483,9 @@ gl:
           title: "Complementos"
       upcoming_changes:
         name: "Nome"
-        enabled: "Activado"
+        enabled: "Activado?"
+        settings: "Configuración"
         preview: "Visualizar"
-        enabled_for_options:
-          everyone: "Todos"
         impact_roles:
           admins: "Administradores"
           moderators: "Moderadores"

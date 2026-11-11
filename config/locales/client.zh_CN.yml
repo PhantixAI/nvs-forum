@@ -33,6 +33,22 @@ zh_CN:
       any_domain: "来自任何域的 CIMD"
     ace_editor:
       resize: "调整代码编辑器大小"
+    code_editor:
+      resize: "调整代码编辑器大小"
+      tab_hint: "按下 Esc 键，然后按 Tab 键将焦点移出编辑器。"
+      completions: "完成"
+      search:
+        find: "查找"
+        replace: "替换"
+        next: "下一步"
+        previous: "上一步"
+        all: "选择所有匹配项"
+        match_case: "匹配大小写"
+        regexp: "正则表达式"
+        close: "关闭"
+        go: "开始"
+      fold:
+        to: "至"
     user_api_key:
       title: '授权“%{application_name}”'
       authorize: "授权"
@@ -544,7 +560,7 @@ zh_CN:
       dismiss: "取消设置"
       select_theme:
         title: "自定义您的网站"
-        description: "选择颜色、字体以及网站的布局。"
+        description: "通过自定义徽标、配色和布局，打造属于您自己的网站。"
         action: "查看选项"
         completed: "更改选项"
         show_light_screenshot: "显示浅色截图"
@@ -595,65 +611,54 @@ zh_CN:
       next: "下一步"
       launch: "设计向导"
       launch_description: "再仔细检查一下网站的主题、颜色、字体和布局。"
-      intro:
-        description: "该向导将引导您完成网站的主题、颜色、字体、首页布局、欢迎横幅和搜索样式设置。"
-        autosave: "每一步操作都会实时保存，因此会员可以立即看到更改。关闭时，您可以恢复所有设置。"
-        start: "开始使用"
       close:
         message: "您已保存了对网站设计的一些更改。是否要保留这些更改？"
         message_without_revert: "您已保存了对网站设计的一些更改，这些更改无法从此处撤销。"
         keep: "保留更改"
         revert: "撤销更改"
         continue_editing: "继续编辑"
+      steps:
+        theme:
+          title: "选择一个主题"
+          description: "为您的网站选择整体外观。你可以在接下来的步骤中对其进行微调。"
+        colors:
+          title: "让它成为你的"
+          description: "添加您的徽标并选择网站的配色方案。"
+        homepage:
+          title: "外观和感觉"
+          description: "选择字体以及会员首先看到的内容。"
       sections:
-        theme: "主题"
-        colors: "默认颜色"
+        colors: "站点颜色模式"
         fonts: "字体"
+        logo: "徽标"
         homepage: "首页"
-        welcome_banner: "欢迎横幅"
-        search: "搜索"
       theme:
         selected: "所选"
         applying: "应用…"
         custom_theme_notice: "您的网站当前使用 %{name} 作为其默认主题。请选择以下主题进行预览。保存后将替换您当前的主题。"
       colors:
-        light: "亮"
-        dark: "深色"
-        dark_only: "%{name} 只有深色模式"
-        both_modes: "每个调色板都包含配套的浅色和深色模式"
-        user_selectable: "允许成员切换调色板"
-        user_selectable_description: "在菜单中显示这些调色板，成员可从中进行选择"
+        description: "为每个模式设置一个默认调色板。成员的外观首选项决定他们看到哪一个。"
+        light_palette: "浅色调"
+        dark_palette: "深色调"
+        modes:
+          label: "颜色模式"
+          both: "浅色与深色"
+          light: "仅浅色"
+          dark: "仅深色"
       fonts:
-        base_font: "基础字体"
-        heading_font: "标题字体"
+        base_font: "正文"
+        heading_font: "标题"
+      logo:
+        description: "显示在站点顶部导航以及站点电子邮件通知的顶部。"
+        help_text: "建议尺寸为 600 x 80 像素。"
       homepage:
         topics: "话题"
         categories: "类别"
-        topic_page_type: "话题页面类型"
-        topic_pages:
-          latest: "按最新活动时间排序的话题，最新活动排在最前面。"
-          new: "最近几天创建的话题，最新创建的话题排在最前面。"
-          hot: "当前热门话题，综合了整体受欢迎程度和近期互动情况。"
         category_page_style: "类别页面样式"
         styles:
           boxes: "框"
           with_topics: "类别与话题"
           only: "仅类别"
-      welcome_banner:
-        enable: "显示欢迎横幅"
-        enable_description: "向访客显示您的网站名称和搜索框"
-        location: "横幅位置"
-        locations:
-          below_site_header: "网站标题下方"
-          above_topic_content: "主题列表上方"
-      search:
-        experiences:
-          search_icon:
-            title: "搜索图标"
-            description: "标题栏中的放大镜图标可打开搜索功能。"
-          search_field:
-            title: "搜索字段"
-            description: "页面顶部有一个完整的搜索框，始终可见。"
     about:
       edit: "编辑此页面"
       simple_title: "关于"
@@ -2743,7 +2748,6 @@ zh_CN:
         }</a>超过了 { limit, plural,other { # 个错误/分钟}}的站点设置上限。
     learn_more: "了解详情…"
     learn_more_with_link: "<a href='%{url}' target='_blank'>了解详情…</a>"
-    feedback_with_link: "<a href='%{url}' target='_blank'>反馈…</a>"
     mute: 免打扰
     unmute: 取消免打扰
     last_post: 发布时间
@@ -6214,24 +6218,23 @@ zh_CN:
         name: "名称"
         plugin: "插件"
         metadata: "元数据"
-        enabled: "已启用"
-        enabled_for: "已启用…"
+        enabled: "已启用？"
         show_image: "显示图片"
-        edit_groups: "编辑选择加入的群组"
+        feedback: "反馈"
+        toggle: "启用 %{name}"
         groups_updated: "群组已更新！"
         save_groups: "保存群组"
         add_groups_to_enable: "添加群组以启用此功能"
         no_changes_to_save: "没有要保存的更改"
         select_groups: "选择群组…"
         opt_in_groups: "选择加入的群组"
-        show_related_settings: "显示相关设置…"
+        settings: "设置"
         opt_in_groups_instructions: "选择加入的群组可以用于让特定用户群组在向所有人发布更改前进行测试。请注意，当更改进入稳定状态后，这些群组将不再适用。"
         enabled_for_throttle: "您修改此更改启用对象的速度过快。请稍等片刻后再试。"
         change_enabled_for_success: "您已为 %{enabledFor} 启用此更改"
         change_disabled: "您已选择不加入此更改"
         depends_on_notice: "此更改需要启用%{dependencyLinks} 。"
         permanent_notice: "此更改现已永久生效，并将很快被移除。您无法再选择退出。"
-        permanent_soon_notice: "此更改将很快永久生效。您将无法再选择退出。"
         permanent_no_group_selection: "不适用，永久更改适用于所有群组。"
         no_changes: "目前暂无即将推出的更改"
         preview: "预览"
@@ -6239,7 +6242,6 @@ zh_CN:
         default_warning_short: "此设置的默认值已更改，请在<a href='%{basePath}/admin/config/upcoming-changes?changeNamesFilter=%{changeNamesFilter}'>即将推出的更改</a>页面中阅读更多相关信息。"
         enabled_for_options:
           no_one: "没有人"
-          everyone: "所有人"
           staff: "仅限 %{staffGroupName}"
           specific_groups: "特定群组"
           specific_groups_with_group_names:
