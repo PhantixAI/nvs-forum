@@ -6,6 +6,13 @@
 
 lv:
   js:
+    code_editor:
+      search:
+        next: "Nākamais"
+        previous: "Iepriekšējais"
+        close: "Aizvērt"
+      fold:
+        to: "kam"
     user_api_key:
       deny: "Atcelt"
       copied: "Nokopēts!"
@@ -279,9 +286,8 @@ lv:
     design_wizard:
       back: "Atpakaļ"
       next: "Nākamais"
-      sections:
-        theme: "Tēma"
-        search: "Meklēt"
+      fonts:
+        base_font: "Saturs"
       homepage:
         topics: "Tēmas"
         categories: "Sadaļas"
@@ -2941,10 +2947,9 @@ lv:
           title: "Spraudņi"
       upcoming_changes:
         name: "Vārds"
-        enabled: "Ieslēgts"
+        enabled: "Ieslēgts?"
+        settings: "Iestatījumi"
         preview: "Priekšskatījums"
-        enabled_for_options:
-          everyone: "Ikviens"
         impact_roles:
           admins: "Administratori"
           moderators: "Moderātori"

@@ -37,6 +37,9 @@ module Email
     class InactiveUserError < ProcessingError
     end
 
+    class SuspendedUserError < ProcessingError
+    end
+
     class SilencedUserError < ProcessingError
     end
 
@@ -96,12 +99,27 @@ module Email
       end
     end
 
+    class MaxMimeDepthExceededError < ProcessingError
+    end
+
+    class MaxMimePartsExceededError < ProcessingError
+    end
+
     attr_reader :incoming_email
     attr_reader :raw_email
     attr_reader :mail
     attr_reader :message_id
+    attr_reader :from_email
 
     COMMON_ENCODINGS = [-"utf-8", -"windows-1252", -"iso-8859-1"]
+
+    # The mail gem walks nested MIME parts recursively, so bound the nesting
+    # before any traversal to keep one message from exhausting the stack.
+    MAX_MIME_DEPTH = 20
+
+    # Bound the total number of MIME parts so a wide message can't monopolise
+    # the mail worker.
+    MAX_MIME_PARTS = 1_000
 
     def self.formats
       @formats ||= Enum.new(plaintext: 1, markdown: 2)
@@ -122,6 +140,8 @@ module Email
       @message_id = @mail.message_id.presence || Digest::MD5.hexdigest(mail_string)
       @opts = opts
       @destinations ||= opts[:destinations]
+
+      ensure_shallow_mime_structure!
     end
 
     def process!
@@ -163,6 +183,42 @@ module Email
           return true
         end
       end
+      false
+    end
+
+    def ensure_shallow_mime_structure!
+      pending = [[@mail, 1]]
+      part_count = 1
+
+      until pending.empty?
+        part, depth = pending.pop
+        raise MaxMimeDepthExceededError if depth > MAX_MIME_DEPTH
+
+        next unless part.multipart?
+
+        # Mail parses every sibling as soon as `parts` is called, so check the
+        # raw source first to avoid building a huge tree only to reject it.
+        raise MaxMimePartsExceededError if too_many_mime_parts?(part)
+
+        children = part.parts
+        part_count += children.size
+        raise MaxMimePartsExceededError if part_count > MAX_MIME_PARTS
+
+        pending.concat(children.map { |child| [child, depth + 1] })
+      end
+    end
+
+    def too_many_mime_parts?(part)
+      boundary = part.boundary
+      return false if boundary.blank?
+
+      count = 0
+      part
+        .raw_source
+        .scan(/(?:\A|\r?\n)--#{Regexp.escape(boundary)}(?:--)?(?=\s*$)/) do
+          count += 1
+          return true if count > MAX_MIME_PARTS
+        end
       false
     end
 
@@ -294,6 +350,7 @@ module Email
       @incoming_email.update_columns(user_id: user.id)
 
       raise InactiveUserError if !user.active && !user.staged
+      raise SuspendedUserError if user.suspended?
       raise SilencedUserError if user.silenced?
     end
 
@@ -989,7 +1046,14 @@ module Email
         post_ids << post_id_from_email_log if post_id_from_email_log
       end
 
-      target_post = post_ids.any? && Post.where(id: post_ids).order(:created_at).last
+      target_post =
+        if post_ids.any?
+          Post
+            .joins(topic: :topic_allowed_groups)
+            .where(id: post_ids, topic_allowed_groups: { group_id: group.id })
+            .order(:created_at)
+            .last
+        end
       too_old_for_group_smtp = destination_too_old?(target_post) && group.smtp_enabled
 
       if target_post.blank? || too_old_for_group_smtp
@@ -1527,6 +1591,7 @@ module Email
       options[:via_email] = true
       options[:raw_email] = @raw_email
 
+      options[:created_at] = Time.zone.now if options[:topic_id] && !options[:import_mode]
       options[:created_at] ||= @mail.date
       options[:created_at] = DateTime.now if options[:created_at] > DateTime.now
 
@@ -1554,6 +1619,12 @@ module Email
         )
         user = Discourse.system_user
         options[:post_type] = Post.types[:whisper]
+      end
+
+      # Skipping validations also skips the max_post_length check, so bound
+      # the body here before it reaches the post or queued post records.
+      if options[:skip_validations]
+        options[:raw] = options[:raw].truncate(SiteSetting.max_post_length, omission: "")
       end
 
       # To avoid race conditions with the post alerter and Group SMTP

@@ -134,8 +134,6 @@ module ::DiscourseEvents
         reference_message_id: message.id,
       )
 
-      return if !SiteSetting.chat_pinned_messages
-
       Chat::PinMessage.call(
         guardian:,
         params: {

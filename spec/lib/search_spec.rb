@@ -532,6 +532,17 @@ RSpec.describe Search do
     expect(search.clean_term).to eq('"discourse"')
   end
 
+  it "limits the size of search text when ranking results" do
+    words = (1..51).map { |number| "word#{number}" }
+
+    expect { Search.new(words.first(50).join(" ")) }.not_to raise_error
+    expect { Search.new("a" * 500) }.not_to raise_error
+    expect { Search.new(words.join(" ")) }.not_to raise_error
+    expect { Search.execute(words.join(" ")) }.to raise_error(Discourse::InvalidParameters)
+    expect { Search.execute(words.join(",")) }.to raise_error(Discourse::InvalidParameters)
+    expect { Search.execute("a" * 501) }.to raise_error(Discourse::InvalidParameters)
+  end
+
   it "does not search when the search term is too small" do
     search = Search.new("evil", min_search_term_length: 5)
     search.execute
@@ -1088,6 +1099,21 @@ RSpec.describe Search do
 
       expect(result.blurb(post)).to eq(
         "#{"a" * Search::GroupedSearchResults::BLURB_LENGTH}#{Search::GroupedSearchResults::OMISSION}",
+      )
+    end
+
+    it "escapes HTML from the indexed text while keeping highlights" do
+      SiteSetting.use_pg_headlines_for_excerpt = true
+
+      reply.update!(
+        raw: %(elephant [link](https://example.com "<img src=x onerror=alert(1)>") AT&T elephant),
+      )
+
+      result = Search.execute("elephant")
+      post = result.posts.first
+
+      expect(result.blurb(post)).to eq(
+        "<span class=\"#{Search::HIGHLIGHT_CSS_CLASS}\">elephant</span> &lt;img src=x onerror=alert(1)&gt; https://example.com link AT &amp; T <span class=\"#{Search::HIGHLIGHT_CSS_CLASS}\">elephant</span>",
       )
     end
 
