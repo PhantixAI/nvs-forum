@@ -47,6 +47,8 @@
     // badges after it (e.g. the staff/batch-moderator icons) stay packed
     // together on the line below.
     .directory-table .user-info .name-line {
+      align-items: center;
+
       .name-wrapper {
         order: -1;
         width: 100%;
