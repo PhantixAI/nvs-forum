@@ -486,6 +486,29 @@ en:
 
         no_automations: "There are no automations yet"
 
+        sentiment:
+          name: "Sentiment and emotion"
+          description: "Classifies the sentiment and emotion of posts in the background"
+          sentiment: "Sentiment"
+          emotion: "Emotion"
+          backend: "Backend"
+          enabled: "Enabled"
+          agent: "Agent"
+          decision_model: "Decision model"
+          posts_per_hour: "Posts per hour"
+          post_age_limit: "Post age limit (days)"
+          posts_per_hour_description: "Approximate rate. 0 stops the scan, including new posts. Edited posts are checked separately."
+          background_description: "Checks unclassified posts every 5 minutes, within these shared limits. Each enabled classifier may incur a request per post. Refusals may be retried."
+          emotion_scores: "Scores are distributed across 28 emotions."
+          model_change_warning: "Changing the selected model does not reclassify existing results."
+          dedicated_description: "Dedicated classification endpoints are configured in site settings."
+          configure_dedicated: "Configure dedicated classification endpoints"
+          manage_decision_models: "Manage decision models"
+          setting_groups:
+            sentiment: "Sentiment"
+            emotion: "Emotion"
+            background_processing: "Background processing"
+
         summarization:
           name: "Summaries"
           description: "Makes a summarization button available that allows visitors to summarize topics"
