@@ -38,6 +38,27 @@
         width: 100%;
       }
     }
+
+    // Users-directory rows lead with the full name, not the username, so
+    // flip their relative position without touching other `directory-table`
+    // consumers (e.g. the group members/requests pages) that intentionally
+    // keep the username first. The name takes the full first line (forcing
+    // a wrap, same technique as `--show-status` above); the username and any
+    // badges after it (e.g. the staff/batch-moderator icons) stay packed
+    // together on the line below.
+    .directory-table .user-info .name-line {
+      align-items: flex-start;
+
+      .name-wrapper {
+        order: -1;
+        width: 100%;
+        font-weight: bold;
+      }
+
+      .username-wrapper .username {
+        font-weight: normal;
+      }
+    }
   }
 
   .user-info {
