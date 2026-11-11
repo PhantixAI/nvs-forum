@@ -651,7 +651,7 @@ class UserApiKeysController < ApplicationController
 
     parsed_public_key if public_key_str.present?
     validate_padding
-    validate_platform
+    validate_platform(requested_scopes)
   end
 
   def require_params_otp
@@ -669,10 +669,17 @@ class UserApiKeysController < ApplicationController
     raise Discourse::InvalidParameters.new(:padding)
   end
 
-  def validate_platform
-    return if params[:platform].blank?
-    return if UserApiKey::ALLOWED_PUSH_PLATFORMS.include?(params[:platform])
-    raise Discourse::InvalidParameters.new(:platform)
+  def validate_platform(requested_scopes)
+    if params[:platform].blank?
+      if (UserApiKey::PUSH_SCOPE_NAMES & requested_scopes.to_a).present?
+        raise Discourse::InvalidParameters.new(:platform)
+      end
+      return
+    end
+
+    if UserApiKey::ALLOWED_PUSH_PLATFORMS.exclude?(params[:platform])
+      raise Discourse::InvalidParameters.new(:platform)
+    end
   end
 
   def validate_auth_redirect

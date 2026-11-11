@@ -49,6 +49,10 @@ class PushNotificationPusher
     message
   end
 
+  def self.absolute_post_url(payload)
+    UrlHelper.absolute_without_cdn(Discourse.base_path + payload[:post_url].to_s)
+  end
+
   # Called by Jobs::DeliverUntrustedPushNotifications, which limits slow hosts to one
   # background worker per site.
   def self.push_untrusted(user, message, subscription_id: nil)

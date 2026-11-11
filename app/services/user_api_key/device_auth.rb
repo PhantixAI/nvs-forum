@@ -74,6 +74,7 @@ class UserApiKey::DeviceAuth
         expires_at
         expires_in_seconds
         padding
+        platform
         push_url
         redirect_uri
       ],
