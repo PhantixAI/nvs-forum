@@ -1800,6 +1800,8 @@ Discourse::Application.routes.draw do
 
     get "/service-worker.js" => "static#service_worker_asset", :format => :js
 
+    get "/get-app" => "app_links#show"
+
     get "cdn_asset/:site/*path" => "static#cdn_asset",
         :format => false,
         :constraints => {
