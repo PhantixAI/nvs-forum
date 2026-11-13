@@ -1,0 +1,29 @@
+navodians:
+  adapter: postgresql
+  database: uat_navodians
+  username: discourse
+  host: ""            # unix socket, same as single-site default
+  pool: 5
+  timeout: 5000
+  host_names:
+    - uat.navodians.com
+
+nitians:
+  adapter: postgresql
+  database: uat_nitians
+  username: discourse
+  host: ""
+  pool: 5
+  timeout: 5000
+  host_names:
+    - uat.nitians.in
+
+iitians:
+  adapter: postgresql
+  database: uat_iitians
+  username: discourse
+  host: ""
+  pool: 5
+  timeout: 5000
+  host_names:
+    - uat.iitians.in
