@@ -1,8 +1,10 @@
-# UAT Environment — uat.nitians.in
+# UAT Environment — uat.navodians.com / uat.nitians.in / uat.iitians.in
 
-A single-site Discourse preview install, separate from production's multisite container.
-It previews every push to `master` and every PR targeting `master`, so changes can be reviewed
-before someone manually triggers a production deploy (see `DEPLOYMENT.md`).
+A 3-site multisite Discourse preview install, mirroring production's multisite topology (same
+hostnames-per-site pattern, same custom hooks/initializers/nginx patches, same per-site S3/CDN
+routing) with one deliberate exception: its database is local PostgreSQL, not RDS. It previews
+every push to `master` and every PR targeting `master`, so changes can be reviewed before someone
+manually triggers a production deploy (see `DEPLOYMENT.md`).
 
 Its Lightsail instance is **not always-on**: it's created on demand from a saved snapshot when a
 deploy fires, reused across rapid successive deploys, and deleted once ~30 minutes pass with no
@@ -20,11 +22,14 @@ only deleting it actually avoids cost — that's why this uses create/delete rat
 - Each run determines whether to deploy `master`'s HEAD or a PR's HEAD SHA, and substitutes that
   into `containers/uat.yml`'s `<UAT_VERSION>` placeholder — so a PR preview actually reflects that
   PR's commits, not just whatever's on `master`.
-- `containers/uat.yml` is `app.yml`'s single-site counterpart: no `config/multisite.yml` mount, no
-  multisite hooks/nginx patches. Its database is a **local PostgreSQL container** (not production's
-  RDS instance) backed by a persistent Lightsail block storage disk, so UAT workloads never share
-  CPU/IO/connections with production (see "Database" below). Its uploads go to their own S3 bucket
-  (`uat-nitians-forum-uploads`).
+- `containers/uat.yml` is `app.yml`'s multisite counterpart: same `DISCOURSE_HOSTNAME`/
+  `DISCOURSE_HOSTNAME_ALIASES` pattern (one container, 3 hostnames), same `UNICORN_WORKERS: 2`,
+  same per-site CDN/S3-fallback initializers and multisite nginx SSL patch, same
+  `multisite:migrate` hook. The one structural difference from production: its database is a
+  **local PostgreSQL container** (not production's RDS instance), backed by a persistent Lightsail
+  block storage disk, so UAT workloads never share CPU/IO/connections with production (see
+  "Database" below). Each site's uploads go to its own dedicated S3 bucket/CDN, fully isolated
+  from production's buckets/CDN/SES identity (see "AWS resources" below).
 
 ## Manual start/stop
 
@@ -42,14 +47,19 @@ UAT up or down on demand, independent of push/PR deploys and the 30-minute idle 
 - It shares `deploy-uat.yml`'s `uat-deploy` concurrency group with `cancel-in-progress: true`, so a
   manual `stop` immediately pre-empts a `deploy-uat.yml` run sitting in its idle wait rather than
   racing it, and vice versa.
+- Both workflows carry near-identical secret-substitution and "verify the UAT sites are up" blocks
+  — kept in lockstep deliberately; see the comments at the top of each file if they ever need to
+  change again.
 
 ## Checking current state / SSH access
 
 ```bash
-# Does the instance currently exist?
+# Does the instance currently exist? (one instance serves all 3 hostnames)
 aws lightsail get-instance --instance-name uat-nitians --profile personal
 
-# If it exists, SSH in (uses the dedicated uat-nitians-key, not the account default key pair)
+# If it exists, SSH in (uses the dedicated uat-nitians-key, not the account default key pair).
+# Any of the 3 hostnames resolves to the same instance/static IP; uat.nitians.in is used here
+# only because it's the longest-lived of the three.
 ssh -i /path/to/uat-nitians-key.pem ubuntu@uat.nitians.in
 
 # Inside: same commands as production, container name is `uat` instead of `app`
@@ -63,7 +73,8 @@ automatically on the next push/PR trigger, or you can run `deploy-uat.yml` manua
 
 ## One-time setup (already done — for reference / disaster recovery)
 
-If the snapshot, key pair, or static IP are ever lost and need to be redone:
+If the snapshot, key pair, static IP, or any of the AWS resources below are ever lost and need to
+be redone:
 
 1. **Dedicated SSH key pair** (scoped to just this instance, not the account-wide default):
    ```bash
@@ -89,8 +100,8 @@ If the snapshot, key pair, or static IP are ever lost and need to be redone:
    `deploy-uat.yml` attaches this at `/dev/xvdf` and mounts it at `/var/discourse/shared/uat` on
    every instance create, formatting it with `mkfs.ext4` only the very first time (detected via
    `blkid`). Since PostgreSQL's data directory (`/shared/postgres_data` inside the container) lives
-   under that same mount, the database persists across every instance delete/recreate cycle even
-   though the compute instance itself doesn't.
+   under that same mount, all 3 logical databases persist across every instance delete/recreate
+   cycle even though the compute instance itself doesn't.
 
 3. **Base instance**: create one Ubuntu 24.04 Lightsail instance, region `ap-south-1`, plan
    `small_3_1` (2 GB RAM, 2 vCPU, $12/mo — current Lightsail bundle naming as of 2026-10;
@@ -126,49 +137,104 @@ If the snapshot, key pair, or static IP are ever lost and need to be redone:
    aws lightsail delete-instance --instance-name uat-nitians-base --profile personal
    ```
 
-7. **DNS**: add an A record `uat.nitians.in` → the static IP from step 2, in whichever Route 53
-   zone actually hosts `nitians.in` (verify this — `DEPLOYMENT.md`'s documented zone,
-   `Z01839133PSJPBM657V7N`, is for `navodians.com`; confirm `nitians.in` is delegated there or has
-   its own zone before assuming it's the same one).
+7. **DNS**: 3 A records (`uat.navodians.com`, `uat.nitians.in`, `uat.iitians.in`) → the static IP
+   from step 2, one per site's own Route 53 hosted zone (all 3 domains have their own zone in this
+   account, confirmed via `aws route53 list-hosted-zones --profile personal`):
 
-8. **S3 bucket**: create `uat-nitians-forum-uploads`, separate from any production bucket.
+   | Hostname | Zone | Zone ID |
+   |---|---|---|
+   | `uat.navodians.com` | `navodians.com` | `Z01839133PSJPBM657V7N` |
+   | `uat.nitians.in` | `nitians.in` | `Z0746140Z037GXIG5GET` |
+   | `uat.iitians.in` | `iitians.in` | `Z09039812NKNJUGOJXEOB` |
 
-9. **GitHub repo secrets**:
-   - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — a dedicated IAM user scoped to the Lightsail
-     actions the workflow needs (`CreateInstancesFromSnapshot`, `DeleteInstance`, `GetInstance`,
-     `GetInstanceState`, `AttachStaticIp`, `DetachStaticIp`, `GetInstanceSnapshot`, `CreateDisk`,
-     `GetDisk`, `AttachDisk`, `DetachDisk`, `OpenInstancePublicPorts`, `PutInstancePublicPorts`,
-     `GetInstancePortStates`, `StopInstance`). The last four are needed for opening port 443 on a
-     freshly-created instance and for stopping the instance before `DetachDisk` (AWS requires the
-     instance to be stopped before its disk can be detached). Lightsail's IAM support for
-     resource-ARN scoping is
-     limited, so this will likely be action-scoped rather than restricted to just this one
-     instance/disk — an accepted tradeoff.
-   - `UAT_SSH_PRIVATE_KEY` — from step 1.
-   - `UAT_DISCOURSE_S3_ACCESS_KEY_ID` / `UAT_DISCOURSE_S3_SECRET_ACCESS_KEY` — scoped to just the
-     UAT bucket (or reuse production's key if its IAM policy already covers the new bucket).
-   - `NVS_GITHUB_PAT` is reused as-is from the existing production secret (same GitHub repo).
-     `DISCOURSE_DB_PASSWORD` is **not** used by UAT — its database is local, not RDS.
+   Let's Encrypt issues one multi-SAN cert covering all 3 UAT hostnames on the instance itself —
+   same mechanism production uses, no separate manual cert step needed for the app's own TLS.
 
-## Database: local PostgreSQL, one-time seed + mandatory PII scrub
+8. **S3 buckets** (3, one per site, separate from any production bucket):
+   `uat-navodians-forum-uploads`, `uat-nitians-forum-uploads`, `uat-iitians-forum-uploads`.
+
+9. **CloudFront distributions** (3, new — UAT previously had no CDN): `cdn.uat.navodians.com`,
+   `cdn.uat.nitians.in`, `cdn.uat.iitians.in`, each fronting its own bucket above via Origin Access
+   Control (not legacy OAI), each with its own ACM certificate (requested in `us-east-1`,
+   regardless of the bucket's `ap-south-1` region — a CloudFront/ACM requirement) and its own DNS
+   CNAME pointing at the distribution's `*.cloudfront.net` domain, in the same zone as that site's
+   A record above.
+
+10. **SES identities**: 3 dedicated domain identities, one per site — `uat.navodians.com`,
+    `uat.nitians.in`, `uat.iitians.in` (region `ap-south-1`) — each with its own DKIM/SPF DNS
+    records (added to that site's own zone once SES returns them). Not shared with production's
+    `navodians.com`/`nitians.in`/`iitians.in` identities. This mirrors production's actual
+    architecture: SES authorizes sending by checking the From-address's own domain against a
+    verified identity for that exact domain, so each site's `notification_email` (set per-site in
+    its DB, e.g. `noreply@uat.navodians.com`) needs its own matching identity — a single shared
+    identity is not sufficient, even though `DISCOURSE_SMTP_DOMAIN` (the SMTP connection/HELO
+    domain, set to `uat.navodians.com` in `containers/uat.yml`) is one shared value across all 3
+    sites, matching production's own `app.yml` pattern for that specific setting.
+
+11. **GitHub repo secrets**:
+    - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — a dedicated IAM user scoped to the Lightsail
+      actions the workflow needs (`CreateInstancesFromSnapshot`, `DeleteInstance`, `GetInstance`,
+      `GetInstanceState`, `AttachStaticIp`, `DetachStaticIp`, `GetInstanceSnapshot`, `CreateDisk`,
+      `GetDisk`, `AttachDisk`, `DetachDisk`, `OpenInstancePublicPorts`, `PutInstancePublicPorts`,
+      `GetInstancePortStates`, `StopInstance`). The last four are needed for opening port 443 on a
+      freshly-created instance and for stopping the instance before `DetachDisk` (AWS requires the
+      instance to be stopped before its disk can be detached). Lightsail's IAM support for
+      resource-ARN scoping is
+      limited, so this will likely be action-scoped rather than restricted to just this one
+      instance/disk — an accepted tradeoff.
+    - `UAT_SSH_PRIVATE_KEY` — from step 1.
+    - `UAT_DISCOURSE_S3_ACCESS_KEY_ID` / `UAT_DISCOURSE_S3_SECRET_ACCESS_KEY` — one IAM user/policy
+      scoped to cover **all 3** UAT buckets from step 8 (one principal, not three, per
+      least-privilege guidance — three near-identical scoped-to-one-bucket principals buy nothing
+      extra for a low-traffic preview environment).
+    - `UAT_DISCOURSE_SMTP_USERNAME` / `UAT_DISCOURSE_SMTP_PASSWORD` — SMTP credentials generated
+      against the dedicated SES identity from step 10. These replace UAT's previous reuse of
+      production's `DISCOURSE_SMTP_USERNAME`/`DISCOURSE_SMTP_PASSWORD` secrets — infra isolation
+      from production now extends to email sending, not just storage.
+    - `NVS_GITHUB_PAT` is reused as-is from the existing production secret (same GitHub repo).
+      `DISCOURSE_DB_PASSWORD` is **not** used by UAT — its database is local, not RDS.
+
+## Database: local PostgreSQL, 3 logical databases, one-time seed + mandatory PII scrub
 
 UAT's database is **not** production's shared RDS instance — `containers/uat.yml` includes
-`templates/postgres.template.yml`, so each UAT instance runs its own local PostgreSQL container,
+`templates/postgres.template.yml`, so the UAT instance runs its own local PostgreSQL container,
 with data stored at `/shared/postgres_data` (i.e. under the `/var/discourse/shared/uat` bind mount,
 which is the persistent disk described above, not the instance's ephemeral root volume). This is
 what keeps UAT's bootstrap/migration/test load from ever competing with production for CPU, IOPS,
 or connection slots on the shared `db.t4g.micro` RDS instance.
 
-The database was seeded **once**, directly on the persistent disk, from a `pg_dump` of production's
-`nitians_forum` (taken over SSH from inside production's own `app` container, a consistent
-snapshot that doesn't lock production), restored into the local `discourse` database and then
-PII-scrubbed in place before the UAT container was ever pointed at it. It is **not** re-dumped on
-later deploys — it persists and accumulates its own test data across every subsequent deploy/delete
-cycle, independent of the compute instance's lifecycle, because the disk (not the instance) is what
-carries it forward.
+Unlike today's old single-database setup, UAT is now genuinely **multisite**: that one local
+Postgres server hosts 3 logical databases — `uat_navodians`, `uat_nitians`, `uat_iitians` — all
+owned by the same local `discourse` role. `templates/postgres.template.yml` (vendored from
+`discourse_docker`, not in this repo) only provisions one database by default, named via the
+`db_name` param (`uat_navodians` here — see `containers/uat.yml`'s `params:` block); the other two
+are created by a new `after_postgres` hook in `containers/uat.yml`, the pups-supported insertion
+point immediately after `postgres.template.yml`'s own default-database creation step (see
+`discourse_docker`'s `samples/data.yml` for the same pattern, there used to set a password). That
+hook's `createdb ... || true` / `create extension if not exists` pattern makes it safe to run on
+every container start, not just the first.
 
-**The PII scrub is required, not optional** — `nitians_forum` is a real community DB with real user
-emails, IPs, and private messages. What was scrubbed, against the local `discourse` DB only (never
+`config/multisite.uat.yml` (committed to this repo, plain, no secret — UAT's local Postgres uses
+trust/peer auth over the Unix socket, so there's nothing secret to keep out of git, unlike
+production's RDS-backed `config/multisite.yml`) names all 3 databases and their host names. An
+`after_code` hook in `containers/uat.yml` copies it over `config/multisite.yml` inside the UAT
+build only — the repo's own `config/multisite.yml` (production's) is never touched. With that file
+in place, Discourse boots in multisite mode and a new `after_db_migrate` hook runs
+`multisite:migrate` for real, across all 3 databases — unlike the old single-site setup, which only
+ever ran plain `db:migrate`.
+
+The databases were seeded **once per site**, directly on the persistent disk, from a `pg_dump` of
+production's corresponding database (`nitians_forum`, `navodians_forum`, `iitians_forum` — taken
+over SSH from inside production's own `app` container, a consistent snapshot that doesn't lock
+production), restored into the matching local database (`uat_nitians`, `uat_navodians`,
+`uat_iitians`, created with `-O discourse` directly, avoiding a `REASSIGN OWNED BY` step that fails
+on objects Postgres itself requires) and then PII-scrubbed in place before the UAT container was
+ever pointed at it. None of the 3 is re-dumped on later deploys — each persists and accumulates its
+own test data across every subsequent deploy/delete cycle, independent of the compute instance's
+lifecycle, because the disk (not the instance) is what carries them forward.
+
+**The PII scrub is required, not optional** — these are real community databases with real user
+emails, IPs, and private messages. What was scrubbed, against each local database only (never
 against production):
 
 - Every row in `user_emails` (keyed by row id, since some users have 2 rows) replaced with a
@@ -186,9 +252,20 @@ against production):
   `chatable_type = 'DirectMessage'` — public Category-backed chat channels are left alone, since
   that's public forum content, not PII).
 
-If the disk is ever lost and needs reseeding, repeat this against the local `discourse` DB on the
-UAT instance (not RDS) — see git history for the exact scrub script.
+**Additionally, each seeded site's `s3_upload_bucket`, `s3_cdn_url`, and `notification_email`
+site settings are repointed** at that site's own UAT-dedicated bucket/CDN/SES identity (from the
+AWS resources above) instead of leaving them pointed at production's. The bucket/CDN repoint
+matters because otherwise UAT would silently read/write uploads against production's live
+bucket; the `notification_email` repoint matters because SES authorizes sending by checking the
+From-address's own domain against a verified identity for that exact domain — a database
+restored straight from production still has `notification_email` set to the production domain
+(e.g. `noreply@navodians.com`), which `uat-ses-smtp`'s credentials have no authorization to send
+under, so outbound mail fails outright until this is fixed. As before, pre-scrub historical
+upload *files* themselves are not copied, so old inline images will still 404 on UAT; this is a
+known, unchanged, accepted limitation.
 
-No `multisite:migrate` involvement here — UAT isn't listed in any `multisite.yml`, so ordinary
-single-site `db:migrate` (run automatically by the standard pups hook on every
-`launcher bootstrap uat`) is all that's needed.
+If a disk is ever lost and needs reseeding, repeat this process (dump → restore with `-O discourse`
+→ scrub → repoint bucket/CDN/notification-email settings) for all 3 sites against their
+respective local databases (not RDS) — see git history around commits
+`5a00bdd5f52`/`c4727b52757`/`e548982303e` for the exact restore-ownership and PII-scrub details
+from when this was first done for `nitians_forum`.

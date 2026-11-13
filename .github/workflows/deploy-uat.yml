@@ -185,8 +185,8 @@ jobs:
       - name: Write containers/uat.yml with secrets and upload it
         env:
           NVS_GITHUB_PAT: ${{ secrets.NVS_GITHUB_PAT }}
-          DISCOURSE_SMTP_USERNAME: ${{ secrets.DISCOURSE_SMTP_USERNAME }}
-          DISCOURSE_SMTP_PASSWORD: ${{ secrets.DISCOURSE_SMTP_PASSWORD }}
+          UAT_DISCOURSE_SMTP_USERNAME: ${{ secrets.UAT_DISCOURSE_SMTP_USERNAME }}
+          UAT_DISCOURSE_SMTP_PASSWORD: ${{ secrets.UAT_DISCOURSE_SMTP_PASSWORD }}
           UAT_DISCOURSE_S3_ACCESS_KEY_ID: ${{ secrets.UAT_DISCOURSE_S3_ACCESS_KEY_ID }}
           UAT_DISCOURSE_S3_SECRET_ACCESS_KEY: ${{ secrets.UAT_DISCOURSE_S3_SECRET_ACCESS_KEY }}
           UAT_VERSION: ${{ steps.ver.outputs.version }}
@@ -198,8 +198,8 @@ jobs:
           content = open('containers/uat.yml').read()
           for placeholder, envvar in [
               ('<GITHUB_PAT>', 'NVS_GITHUB_PAT'),
-              ('<DISCOURSE_SMTP_USERNAME>', 'DISCOURSE_SMTP_USERNAME'),
-              ('<DISCOURSE_SMTP_PASSWORD>', 'DISCOURSE_SMTP_PASSWORD'),
+              ('<UAT_DISCOURSE_SMTP_USERNAME>', 'UAT_DISCOURSE_SMTP_USERNAME'),
+              ('<UAT_DISCOURSE_SMTP_PASSWORD>', 'UAT_DISCOURSE_SMTP_PASSWORD'),
               ('<UAT_DISCOURSE_S3_ACCESS_KEY_ID>', 'UAT_DISCOURSE_S3_ACCESS_KEY_ID'),
               ('<UAT_DISCOURSE_S3_SECRET_ACCESS_KEY>', 'UAT_DISCOURSE_S3_SECRET_ACCESS_KEY'),
               ('<UAT_VERSION>', 'UAT_VERSION'),
@@ -242,22 +242,24 @@ jobs:
             sudo docker exec uat sv reload nginx
           '
 
-      - name: Verify uat.nitians.in is up
+      - name: Verify all 3 UAT sites are up
         run: |
-          up=false
-          for attempt in $(seq 1 60); do
-            if [ "$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' https://uat.nitians.in/)" = "200" ]; then
-              up=true
-              break
+          for host in uat.navodians.com uat.nitians.in uat.iitians.in; do
+            up=false
+            for attempt in $(seq 1 60); do
+              if [ "$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' https://$host/)" = "200" ]; then
+                up=true
+                break
+              fi
+              echo "Waiting for $host ($attempt/60)..."; sleep 5
+            done
+            if [ "$up" != true ]; then
+              echo "$host did not come up in time"
+              ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'sudo docker logs --tail 200 uat'
+              exit 1
             fi
-            echo "Waiting for uat.nitians.in ($attempt/60)..."; sleep 5
+            echo "$host is up"
           done
-          if [ "$up" != true ]; then
-            echo "uat.nitians.in did not come up in time"
-            ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=20 -i ~/.ssh/uat_key ubuntu@uat.nitians.in 'sudo docker logs --tail 200 uat'
-            exit 1
-          fi
-          echo "uat.nitians.in is up"
 
       # Only runs once the old container is already gone (destroy succeeded) --
       # mirrors the same rollback mechanism in deploy.yml so it gets exercised
@@ -292,20 +294,22 @@ jobs:
             sudo docker exec uat sv reload nginx
           '
 
-          up=false
-          for attempt in $(seq 1 30); do
-            if [ "$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' https://uat.nitians.in/)" = "200" ]; then
-              up=true
-              break
+          for host in uat.navodians.com uat.nitians.in uat.iitians.in; do
+            up=false
+            for attempt in $(seq 1 30); do
+              if [ "$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' https://$host/)" = "200" ]; then
+                up=true
+                break
+              fi
+              sleep 5
+            done
+            if [ "$up" = true ]; then
+              echo "$host recovered via rollback"
+            else
+              echo "$host is still down after rollback -- manual intervention required"
+              exit 1
             fi
-            sleep 5
           done
-          if [ "$up" = true ]; then
-            echo "uat.nitians.in recovered via rollback"
-          else
-            echo "uat.nitians.in is still down after rollback -- manual intervention required"
-            exit 1
-          fi
 
       - name: Wait for 30 minutes of inactivity before tearing down
         run: |
