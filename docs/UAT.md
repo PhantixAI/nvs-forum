@@ -160,11 +160,16 @@ be redone:
    CNAME pointing at the distribution's `*.cloudfront.net` domain, in the same zone as that site's
    A record above.
 
-10. **SES identity**: a dedicated domain identity `uat.navodians.com` (region `ap-south-1`), with
-    its own DKIM/SPF DNS records (added to the `navodians.com` zone once SES returns them) — not
-    shared with production's `navodians.com`/`nitians.in`/`iitians.in` identities. All 3 UAT sites
-    send through this one identity (`DISCOURSE_SMTP_DOMAIN: uat.navodians.com` in
-    `containers/uat.yml`), mirroring production's single-global-SMTP-domain pattern.
+10. **SES identities**: 3 dedicated domain identities, one per site — `uat.navodians.com`,
+    `uat.nitians.in`, `uat.iitians.in` (region `ap-south-1`) — each with its own DKIM/SPF DNS
+    records (added to that site's own zone once SES returns them). Not shared with production's
+    `navodians.com`/`nitians.in`/`iitians.in` identities. This mirrors production's actual
+    architecture: SES authorizes sending by checking the From-address's own domain against a
+    verified identity for that exact domain, so each site's `notification_email` (set per-site in
+    its DB, e.g. `noreply@uat.navodians.com`) needs its own matching identity — a single shared
+    identity is not sufficient, even though `DISCOURSE_SMTP_DOMAIN` (the SMTP connection/HELO
+    domain, set to `uat.navodians.com` in `containers/uat.yml`) is one shared value across all 3
+    sites, matching production's own `app.yml` pattern for that specific setting.
 
 11. **GitHub repo secrets**:
     - `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — a dedicated IAM user scoped to the Lightsail
@@ -247,13 +252,20 @@ against production):
   `chatable_type = 'DirectMessage'` — public Category-backed chat channels are left alone, since
   that's public forum content, not PII).
 
-**Additionally, each seeded site's `s3_upload_bucket` and `s3_cdn_url` site settings are repointed**
-at that site's own UAT-dedicated bucket/CDN (from the AWS resources above) instead of leaving them
-pointed at production's — otherwise UAT would silently read/write uploads against production's live
-bucket. As before, pre-scrub historical upload *files* themselves are not copied, so old inline
-images will still 404 on UAT; this is a known, unchanged, accepted limitation.
+**Additionally, each seeded site's `s3_upload_bucket`, `s3_cdn_url`, and `notification_email`
+site settings are repointed** at that site's own UAT-dedicated bucket/CDN/SES identity (from the
+AWS resources above) instead of leaving them pointed at production's. The bucket/CDN repoint
+matters because otherwise UAT would silently read/write uploads against production's live
+bucket; the `notification_email` repoint matters because SES authorizes sending by checking the
+From-address's own domain against a verified identity for that exact domain — a database
+restored straight from production still has `notification_email` set to the production domain
+(e.g. `noreply@navodians.com`), which `uat-ses-smtp`'s credentials have no authorization to send
+under, so outbound mail fails outright until this is fixed. As before, pre-scrub historical
+upload *files* themselves are not copied, so old inline images will still 404 on UAT; this is a
+known, unchanged, accepted limitation.
 
 If a disk is ever lost and needs reseeding, repeat this process (dump → restore with `-O discourse`
-→ scrub → repoint bucket/CDN settings) for all 3 sites against their respective local databases
-(not RDS) — see git history around commits `5a00bdd5f52`/`c4727b52757`/`e548982303e` for the exact
-restore-ownership and PII-scrub details from when this was first done for `nitians_forum`.
+→ scrub → repoint bucket/CDN/notification-email settings) for all 3 sites against their
+respective local databases (not RDS) — see git history around commits
+`5a00bdd5f52`/`c4727b52757`/`e548982303e` for the exact restore-ownership and PII-scrub details
+from when this was first done for `nitians_forum`.
