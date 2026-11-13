@@ -130,21 +130,27 @@ hooks:
   ## discourse_docker's samples/data.yml for the same pattern, there used to set a
   ## password) -- used here to idempotently create the other two logical databases
   ## under the same default db_user (discourse), with the same extensions
-  ## create_db already creates for the default database. createdb's "|| true" and
-  ## psql's "create extension if not exists" make this safe to run on every
-  ## container start, not just the first.
+  ## create_db already creates for the default database. Checks pg_database for each
+  ## db's existence before calling createdb (rather than a blanket "createdb || true"),
+  ## so this is safe to run on every container start, not just the first, without also
+  ## silently swallowing a genuine createdb failure (disk full, permissions, postgres
+  ## not actually up yet) -- those still fail the hook loudly here, instead of only
+  ## surfacing later as a confusing multisite:migrate connection error two hook-phases
+  ## on. psql's "create extension if not exists" is naturally idempotent already.
   after_postgres:
     - exec:
         cmd:
           - |
-            su postgres -c "createdb -O discourse uat_nitians" || true
-            su postgres -c "createdb -O discourse uat_iitians" || true
-            su postgres -c "psql uat_nitians -c 'create extension if not exists hstore;'"
-            su postgres -c "psql uat_nitians -c 'create extension if not exists pg_trgm;'"
-            su postgres -c "psql uat_nitians -c 'create extension if not exists vector;'"
-            su postgres -c "psql uat_iitians -c 'create extension if not exists hstore;'"
-            su postgres -c "psql uat_iitians -c 'create extension if not exists pg_trgm;'"
-            su postgres -c "psql uat_iitians -c 'create extension if not exists vector;'"
+            set -e
+            for db in uat_nitians uat_iitians; do
+              exists=$(su postgres -c "psql -d postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='$db'\"")
+              if [ "$exists" != "1" ]; then
+                su postgres -c "createdb -O discourse $db"
+              fi
+              su postgres -c "psql $db -c 'create extension if not exists hstore;'"
+              su postgres -c "psql $db -c 'create extension if not exists pg_trgm;'"
+              su postgres -c "psql $db -c 'create extension if not exists vector;'"
+            done
   ## UAT is now genuinely multisite (3 logical databases, see after_postgres above),
   ## so multisite:migrate must run -- verbatim from app.yml.
   after_db_migrate:
