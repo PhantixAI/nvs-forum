@@ -43,5 +43,11 @@ RSpec.describe AppLinksController do
 
       expect(response).to redirect_to(Discourse.base_url)
     end
+
+    it "does not match a host that merely ends with a known domain as a substring" do
+      get "/get-app", headers: { "HOST" => "shownitians.in", "HTTP_USER_AGENT" => ios_user_agent }
+
+      expect(response).to redirect_to(Discourse.base_url)
+    end
   end
 end

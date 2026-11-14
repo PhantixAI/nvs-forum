@@ -27,9 +27,9 @@ class AppLinksController < ApplicationController
     destination =
       if links.nil?
         Discourse.base_url
-      elsif ios_user_agent?
+      elsif BrowserDetection.os(request.user_agent) == :ios
         links[:ios]
-      elsif android_user_agent?
+      elsif BrowserDetection.os(request.user_agent) == :android
         links[:android]
       else
         Discourse.base_url
@@ -44,14 +44,6 @@ class AppLinksController < ApplicationController
   # `www.`-prefixed; UAT's `uat.`-prefixed hosts should resolve to the same
   # store links as their production counterpart.
   def current_site_key
-    STORE_LINKS.keys.find { |host| request.host.end_with?(host) }
-  end
-
-  def ios_user_agent?
-    request.user_agent.to_s.match?(/iPhone|iPad|iPod/)
-  end
-
-  def android_user_agent?
-    request.user_agent.to_s.match?(/Android/)
+    STORE_LINKS.keys.find { |host| request.host == host || request.host.end_with?(".#{host}") }
   end
 end
