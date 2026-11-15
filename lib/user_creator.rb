@@ -16,9 +16,10 @@ class UserCreator
     end
   end
 
-  def self.assign_signup_fields(user, submitted_user_fields = nil)
+  def self.assign_signup_fields(user, submitted_user_fields = nil, signup_only: true)
     fields = user.custom_fields
-    UserField.all.each do |field|
+    user_fields = signup_only ? UserField.where(show_on_signup: true) : UserField.all
+    user_fields.each do |field|
       value = yield(field)
       value = nil if value == "false"
       if value.blank?
@@ -75,7 +76,7 @@ class UserCreator
     error =
       self
         .class
-        .assign_signup_fields(user, attributes[:user_fields]) do |field|
+        .assign_signup_fields(user, attributes[:user_fields], signup_only: false) do |field|
           self.class.clean_custom_field_values(field, attributes.dig(:user_fields, field.id.to_s))
         end
     return user if error
@@ -106,7 +107,7 @@ class UserCreator
       else
         user.update!(approved: false, approved_by_id: nil, approved_at: nil)
       end
-      if attributes.fetch(:active, true)
+      if attributes.fetch(:active, true) && guardian.can_activate?(user)
         activate(user)
       else
         send_activation_email(user)

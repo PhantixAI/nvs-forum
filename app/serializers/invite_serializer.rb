@@ -28,11 +28,11 @@ class InviteSerializer < ApplicationSerializer
   has_many :groups, embed: :object, serializer: BasicGroupSerializer
 
   def include_invite_key?
-    can_see_invite_details?
+    can_see_invite_key?
   end
 
   def include_link?
-    can_see_invite_details?
+    can_see_invite_key?
   end
 
   def include_description?
@@ -167,6 +167,13 @@ class InviteSerializer < ApplicationSerializer
   def has_recipient?
     email.present? || object.description.present?
   end
+
+  def can_see_invite_key?
+    return @can_see_invite_key if defined?(@can_see_invite_key)
+
+    @can_see_invite_key = scope.can_see_invite_key?(object.invited_by)
+  end
+
 
   def can_see_invite_emails?
     return @can_see_invite_emails if defined?(@can_see_invite_emails)

@@ -29,6 +29,7 @@ export const EVENT_ATTRIBUTES = {
   recurrenceUntil: { default: null },
   chatEnabled: { default: null },
   livestream: { default: null },
+  allowAnonymousLivestream: { default: null },
   allDay: { default: null },
   // `null` (not "batch") when the raw markdown carries no explicit event-scope attribute at
   // all -- e.g. a legacy event edited via the rich editor -- so `buildParams`'s own "batch"
