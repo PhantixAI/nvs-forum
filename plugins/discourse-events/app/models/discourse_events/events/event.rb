@@ -106,9 +106,8 @@ module DiscourseEvents
       end
 
       def reset_invalid_livestream
-        return unless livestream?
-
-        self.livestream = false unless allowed_livestream_url? && post&.is_first_post?
+        self.livestream = false if livestream? && !(allowed_livestream_url? && post&.is_first_post?)
+        self.allow_anonymous_livestream = false unless livestream?
       end
 
       def allowed_livestream_url?
@@ -230,7 +229,11 @@ module DiscourseEvents
 
       def self.split_reminder(reminder)
         parts = reminder.strip.split(".")
-        parts.reverse if parts.size.between?(2, 3)
+        return if !parts.size.between?(2, 3)
+
+        unit, value, type = parts.reverse
+        unit = "#{unit}s" if %w[minute hour day week].include?(unit)
+        [unit, value, type]
       end
 
       def self.reminder_offset(reminder)
@@ -922,31 +925,32 @@ end
 #
 # Table name: discourse_post_event_events
 #
-#  id                 :bigint           not null, primary key
-#  all_day            :boolean          default(FALSE), not null
-#  chat_enabled       :boolean          default(FALSE), not null
-#  closed             :boolean          default(FALSE), not null
-#  custom_fields      :jsonb            not null
-#  deleted_at         :datetime
-#  description        :string(1000)
-#  livestream         :boolean          default(FALSE), not null
-#  location           :string(1000)
-#  max_attendees      :integer
-#  minimal            :boolean
-#  name               :string
-#  original_ends_at   :datetime
-#  original_starts_at :datetime         not null
-#  raw_invitees       :string           is an Array
-#  recording_url      :string(1000)
-#  recurrence         :string
-#  recurrence_until   :datetime
-#  reminders          :string
-#  show_local_time    :boolean          default(FALSE), not null
-#  status             :integer          default(0), not null
-#  timezone           :string
-#  url                :string(1000)
-#  chat_channel_id    :bigint
-#  image_upload_id    :bigint
+#  id                         :bigint           not null, primary key
+#  all_day                    :boolean          default(FALSE), not null
+#  allow_anonymous_livestream :boolean          default(FALSE), not null
+#  chat_enabled               :boolean          default(FALSE), not null
+#  closed                     :boolean          default(FALSE), not null
+#  custom_fields              :jsonb            not null
+#  deleted_at                 :datetime
+#  description                :string(1000)
+#  livestream                 :boolean          default(FALSE), not null
+#  location                   :string(1000)
+#  max_attendees              :integer
+#  minimal                    :boolean
+#  name                       :string
+#  original_ends_at           :datetime
+#  original_starts_at         :datetime         not null
+#  raw_invitees               :string           is an Array
+#  recording_url              :string(1000)
+#  recurrence                 :string
+#  recurrence_until           :datetime
+#  reminders                  :string
+#  show_local_time            :boolean          default(FALSE), not null
+#  status                     :integer          default(0), not null
+#  timezone                   :string
+#  url                        :string(1000)
+#  chat_channel_id            :bigint
+#  image_upload_id            :bigint
 #
 # Indexes
 #
