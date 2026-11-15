@@ -57,11 +57,18 @@ env:
   DISCOURSE_HOSTNAME_ALIASES: uat.nitians.in,uat.iitians.in
   DISCOURSE_DEVELOPER_EMAILS: 'phantixai@gmail.com'
 
-  ## No DISCOURSE_DB_* block: with postgres.template.yml included, Discourse
-  ## defaults to the local socket and db_name/db_user (uat_navodians/discourse
-  ## above), never touching production's shared RDS instance. The other two
-  ## logical databases (uat_nitians/uat_iitians) are named directly in
-  ## config/multisite.uat.yml, copied into place by the after_code hook below.
+  ## DISCOURSE_DB_NAME must match params.db_name above -- it's what Rails itself
+  ## uses for the *default* (non-multisite) connection, i.e. whatever the primary
+  ## DISCOURSE_HOSTNAME resolves to. Without it, Rails falls back to its hardcoded
+  ## default db name ("discourse") instead of uat_navodians, silently serving
+  ## whatever stale/orphaned "discourse" database happens to exist on the local
+  ## Postgres instance for the primary hostname -- exactly mirrors production's
+  ## own DISCOURSE_DB_NAME: navodians_forum in containers/app.yml. No DISCOURSE_DB_
+  ## host/user/password here: with postgres.template.yml included, those default
+  ## to the local socket/role, never touching production's shared RDS instance.
+  ## The other two logical databases (uat_nitians/uat_iitians) are named directly
+  ## in config/multisite.uat.yml, copied into place by the after_code hook below.
+  DISCOURSE_DB_NAME: uat_navodians
 
   ## ===== AMAZON SES SMTP =====
   ## Dedicated UAT sending identity (uat.navodians.com) -- no longer shares
