@@ -16,12 +16,12 @@ class FcmPushNotificationPusher
     access_token = fetch_access_token
     return if access_token.blank?
 
-    message = build_message(payload)
+    message = build_message(payload, user.all_unread_notifications_count)
 
     client_ids.each { |client_id, _| send_message(access_token, client_id, message) }
   end
 
-  def self.build_message(payload)
+  def self.build_message(payload, badge)
     {
       notification: {
         title: payload[:translated_title] || PushNotificationPusher.title(payload),
@@ -30,6 +30,11 @@ class FcmPushNotificationPusher
       data: {
         discourse_url: PushNotificationPusher.absolute_post_url(payload),
         topic_id: payload[:topic_id].to_s,
+      },
+      android: {
+        notification: {
+          notification_count: badge,
+        },
       },
     }
   end

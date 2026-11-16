@@ -92,6 +92,18 @@ RSpec.describe ApnsPushNotificationPusher do
     end
   end
 
+  it "sets the notification badge to the user's unread notification count" do
+    Fabricate(:notification, user: user, read: false)
+    Fabricate(:notification, user: user, read: false)
+    setup_ios_client(user, client_id: "device-token-1")
+
+    described_class.push(user, payload)
+
+    expect(connection).to have_received(:push) do |notification|
+      expect(notification.badge).to eq(2)
+    end
+  end
+
   it "pushes a separate notification per registered ios client" do
     setup_ios_client(user, client_id: "device-token-1")
     setup_ios_client(user, client_id: "device-token-2")

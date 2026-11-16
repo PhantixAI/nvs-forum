@@ -87,6 +87,24 @@ RSpec.describe FcmPushNotificationPusher do
     )
   end
 
+  it "sets the android notification_count to the user's unread notification count, so the launcher icon badge reflects it" do
+    Fabricate(:notification, user: user, read: false)
+    Fabricate(:notification, user: user, read: false)
+    setup_android_client(user, client_id: "device-token-1")
+    body = nil
+
+    stub_request(:post, "https://fcm.googleapis.com/v1/projects/test-project/messages:send")
+      .with(headers: { "Authorization" => "Bearer test-access-token" })
+      .to_return do |request|
+        body = JSON.parse(request.body)
+        { status: 200 }
+      end
+
+    described_class.push(user, payload)
+
+    expect(body["message"]["android"]["notification"]["notification_count"]).to eq(2)
+  end
+
   it "sends a separate message per registered android client" do
     setup_android_client(user, client_id: "device-token-1")
     setup_android_client(user, client_id: "device-token-2")

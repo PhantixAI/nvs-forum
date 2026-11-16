@@ -19,16 +19,18 @@ class ApnsPushNotificationPusher
     connection = nil
     sandbox_connection = nil
 
+    badge = user.all_unread_notifications_count
+
     client_ids.each do |client_id, _|
       connection ||= build_connection
-      response = send_notification(connection, client_id, payload)
+      response = send_notification(connection, client_id, payload, badge)
 
       # Debug/dev builds installed outside TestFlight/App Store register sandbox
       # APNs tokens, which the production APNs endpoint always rejects with this
       # error — retry once against the sandbox endpoint before giving up.
       if bad_device_token?(response)
         sandbox_connection ||= build_connection(sandbox: true)
-        response = send_notification(sandbox_connection, client_id, payload)
+        response = send_notification(sandbox_connection, client_id, payload, badge)
       end
 
       if !response&.ok?
@@ -42,12 +44,13 @@ class ApnsPushNotificationPusher
     sandbox_connection&.close
   end
 
-  def self.send_notification(connection, client_id, payload)
+  def self.send_notification(connection, client_id, payload, badge)
     notification = Apnotic::Notification.new(client_id)
     notification.alert = {
       title: payload[:translated_title] || PushNotificationPusher.title(payload),
       body: payload[:excerpt],
     }
+    notification.badge = badge
     notification.custom_payload = {
       discourse_url: PushNotificationPusher.absolute_post_url(payload),
       topic_id: payload[:topic_id].to_s,
