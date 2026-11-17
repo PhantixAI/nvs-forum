@@ -1,0 +1,307 @@
+// Cursor-forum look, light mode only, on every screen size unless the script was run with
+// DESKTOP_ONLY=1 (then 768px and up). The first group is the palette Cursor uses (its ten base
+// colours compiled to Discourse's derived custom properties: regenerate it if the colours
+// change), the second holds Cursor's own theme tokens for type, sidebar, nav and buttons.
+@media (prefers-color-scheme: light) {
+  // `body` as well as `:root`: the modernize-foundation upcoming change sets its
+  // variables on the element that carries its class, which would otherwise win.
+  :root,
+  body {
+    --primary: #26251e;
+    --secondary: #f7f7f4;
+    --tertiary: #3b3a33;
+
+    // Core styles every plain link (post content, modal/admin help text, anywhere else
+    // using a bare <a> without its own colour override) via this one variable
+    // (app/assets/stylesheets/common/foundation/base.scss) -- normally var(--tertiary), which
+    // this palette makes near-black like --primary (body text), so a link became
+    // indistinguishable from surrounding text until hovered. Overriding it directly here
+    // (rather than --tertiary itself, which other rules above intentionally reuse for
+    // buttons/icons) fixes every link site-wide without touching anything else.
+    --d-link-color: #eb5600;
+    --header_background: #f7f7f4;
+    --header_primary: #7a7974;
+    --danger: #eb5600;
+    --success: #090;
+    --love: #de9bdf;
+    --d-selected: #ebebe6;
+    --d-selected-hover: #efefeb;
+    --d-hover: #f3f3f0;
+    --primary-rgb: 38, 37, 30;
+    --primary-low-rgb: 236, 235, 230;
+    --primary-very-low-rgb: 249, 249, 248;
+    --secondary-rgb: 247, 247, 244;
+    --header_background-rgb: 247, 247, 244;
+    --tertiary-rgb: 59, 58, 51;
+    --primary-very-low: rgb(97.7058823529%, 97.6294117647%, 97.0941176471%);
+    --primary-low: rgb(92.3529411765%, 92.0980392157%, 90.3137254902%);
+    --primary-low-mid: rgb(77.0588235294%, 76.2941176471%, 70.9411764706%);
+    --primary-medium: rgb(61.7647058824%, 60.4901960784%, 51.568627451%);
+    --primary-high: rgb(43.9607843137%, 42.8039215686%, 34.7058823529%);
+    --primary-very-high: rgb(29.431372549%, 28.6568627451%, 23.2352941176%);
+    --primary-50: rgb(97.7058823529%, 97.6294117647%, 97.0941176471%);
+    --primary-100: rgb(95.4117647059%, 95.2588235294%, 94.1882352941%);
+    --primary-200: rgb(92.3529411765%, 92.0980392157%, 90.3137254902%);
+    --primary-300: rgb(84.7058823529%, 84.1960784314%, 80.6274509804%);
+    --primary-400: rgb(77.0588235294%, 76.2941176471%, 70.9411764706%);
+    --primary-500: rgb(69.4117647059%, 68.3921568627%, 61.2549019608%);
+    --primary-600: rgb(61.7647058824%, 60.4901960784%, 51.568627451%);
+    --primary-700: rgb(51.7098039216%, 50.3490196078%, 40.8235294118%);
+    --primary-800: rgb(43.9607843137%, 42.8039215686%, 34.7058823529%);
+    --primary-900: rgb(29.431372549%, 28.6568627451%, 23.2352941176%);
+    --header_primary-low: rgb(93.1292050185%, 93.1091392032%, 91.9087189038%);
+    --header_primary-low-mid: rgb(
+      83.0643872306%,
+      82.9856182794%,
+      81.7042612901%
+    );
+    --header_primary-medium: rgb(74.0338254103%, 73.894882581%, 72.5140350201%);
+    --header_primary-high: rgb(66.4604654216%, 66.2633706847%, 64.7712088535%);
+    --header_primary-very-high: rgb(
+      54.7568109275%,
+      54.4488303359%,
+      52.7068160515%
+    );
+    --secondary-low: rgb(33.4427244582%, 33.4427244582%, 24.3219814241%);
+    --secondary-medium: rgb(55.737874097%, 55.737874097%, 40.5366357069%);
+    --secondary-high: rgb(68.4871001032%, 68.4871001032%, 56.6697626419%);
+    --secondary-very-high: rgb(91.1876160991%, 91.1876160991%, 87.8829721362%);
+    --tertiary-very-low: rgb(92.7272727273%, 92.5846702317%, 91.5864527629%);
+    --tertiary-low: rgb(89.0909090909%, 88.8770053476%, 87.3796791444%);
+    --tertiary-medium: rgb(63.6363636364%, 62.9233511586%, 57.9322638146%);
+    --tertiary-high: rgb(39.9643493761%, 39.2869875223%, 34.5454545455%);
+    --tertiary-hover: rgb(17.3529411765%, 17.0588235294%, 15%);
+    --tertiary-25: rgb(94.9090909091%, 94.8092691622%, 94.110516934%);
+    --tertiary-50: rgb(92.7272727273%, 92.5846702317%, 91.5864527629%);
+    --tertiary-100: rgb(91.2727272727%, 91.1016042781%, 89.9037433155%);
+    --tertiary-200: rgb(90.5454545455%, 90.3600713012%, 89.0623885918%);
+    --tertiary-300: rgb(89.0909090909%, 88.8770053476%, 87.3796791444%);
+    --tertiary-400: rgb(81.0909090909%, 80.7201426025%, 78.1247771836%);
+    --tertiary-500: rgb(73.0909090909%, 72.5632798574%, 68.8698752228%);
+    --tertiary-600: rgb(63.6363636364%, 62.9233511586%, 57.9322638146%);
+    --tertiary-700: rgb(56.3636363636%, 55.5080213904%, 49.5187165775%);
+    --tertiary-800: rgb(48.3778966132%, 47.5579322638%, 41.8181818182%);
+    --tertiary-900: rgb(39.9643493761%, 39.2869875223%, 34.5454545455%);
+    --danger-low: rgb(100%, 93.1622861911%, 89.2156862745%);
+    --danger-low-mid: rgb(100%, 65.8114309554%, 46.0784313725%, 0.7);
+    --danger-medium: rgb(100%, 52.1360033375%, 24.5098039216%);
+    --danger-hover: rgb(73.7254901961%, 26.9803921569%, 0%);
+    --love-low: rgb(98.0588235294%, 94.1176470588%, 98.1176470588%);
+    --blend-primary-secondary-5: rgb(
+      94.4689115016%,
+      94.4658591186%,
+      93.3005379851%
+    );
+    --primary-med-or-secondary-med: rgb(
+      61.7647058824%,
+      60.4901960784%,
+      51.568627451%
+    );
+    --primary-med-or-secondary-high: rgb(
+      61.7647058824%,
+      60.4901960784%,
+      51.568627451%
+    );
+    --primary-high-or-secondary-low: rgb(
+      43.9607843137%,
+      42.8039215686%,
+      34.7058823529%
+    );
+    --primary-low-mid-or-secondary-high: rgb(
+      77.0588235294%,
+      76.2941176471%,
+      70.9411764706%
+    );
+    --primary-low-mid-or-secondary-low: rgb(
+      77.0588235294%,
+      76.2941176471%,
+      70.9411764706%
+    );
+    --primary-or-primary-low-mid: #26251e;
+    --tertiary-or-tertiary-low: #3b3a33;
+    --tertiary-low-or-tertiary-high: rgb(
+      89.0909090909%,
+      88.8770053476%,
+      87.3796791444%
+    );
+    --tertiary-med-or-tertiary: rgb(
+      63.6363636364%,
+      62.9233511586%,
+      57.9322638146%
+    );
+    --secondary-or-primary: #f7f7f4;
+    --tertiary-or-white: #3b3a33;
+    --hljs-bg: rgb(95.4117647059%, 95.2588235294%, 94.1882352941%);
+    --inline-code-bg: rgb(95.4117647059%, 95.2588235294%, 94.1882352941%);
+    --hljs-comment: rgb(69.4117647059%, 68.3921568627%, 61.2549019608%);
+    --topic-timeline-border-color: rgb(
+      89.0909090909%,
+      88.8770053476%,
+      87.3796791444%
+    );
+    --topic-timeline-handle-color: var(--tertiary);
+    --chat-skeleton-animation-rgb: 249, 249, 248;
+    --calendar-normal: rgb(78.2727272727%, 77.8467023173%, 74.8645276292%);
+    --calendar-close-to-working-hours: rgb(
+      66.568627451%,
+      66.568627451%,
+      66.568627451%
+    );
+    --calendar-in-working-hours: #9d9d9d;
+    --base-font-size: 93.75%;
+    --d-sidebar-background: #f0efea;
+    --d-sidebar-footer-fade: #f0efea;
+    --d-sidebar-link-color: var(--primary);
+    --d-sidebar-highlight-color: var(--primary);
+    --d-sidebar-highlight-background: color-mix(
+      in oklab,
+      #ebeae5 70%,
+      transparent
+    );
+    --d-sidebar-link-icon-color: #7a7974;
+    --d-sidebar-header-color: #7a7974;
+    --d-sidebar-header-icon-color: #7a7974;
+    --d-sidebar-active-background: transparent;
+    --d-sidebar-active-color: #eb5600;
+    --d-sidebar-active-suffix-color: #eb5600;
+    --d-sidebar-active-font-weight: 500;
+    --d-sidebar-header-font-weight: 500;
+    --d-nav-color--active: #eb5600;
+    --d-nav-underline-height: 2px;
+    --d-button-primary-bg-color: var(--primary);
+    --d-button-primary-text-color: var(--secondary);
+    --d-button-primary-icon-color: var(--secondary);
+    --d-button-default-bg-color: transparent;
+    --d-button-default-bg-color--hover: transparent;
+    --d-button-default-border-color: var(--primary-300);
+    --d-button-default-text-color: var(--primary);
+    --d-button-default-icon-color: var(--primary);
+
+    // Every native input (login/signup's email, username and password fields, the header
+    // search box, the topic/admin filter fields, ...) reads its background from this one
+    // token (app/assets/stylesheets/common/base/discourse.scss) -- it defaults to
+    // var(--secondary), same as the page around it, so a field barely reads as a distinct
+    // input at all. Search is a div (.search-input in search-menu.scss) painted with this
+    // same token rather than a real input background, which a selector targeting
+    // input[type="search"] directly would miss entirely.
+    --d-input-bg-color: #fff;
+
+    // A second, separate input-background token (app/assets/stylesheets/common/tokens.scss)
+    // for the newer ui-kit/FormKit surfaces -- also defaults to var(--secondary). Drives
+    // FormKit's own controls, the sidebar search box (.sidebar-search__input-container,
+    // the one reported missing this look), and the generic .filter-input component.
+    --token-color-background-input: #fff;
+  }
+
+  h1 {
+    letter-spacing: -0.025em;
+    line-height: 1.15;
+  }
+
+  h2 {
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+
+  h3 {
+    letter-spacing: -0.015em;
+    line-height: 1.25;
+  }
+
+  .d-header .header-buttons .btn {
+    background: transparent;
+    color: var(--primary);
+    border: 1px solid var(--primary-low);
+    border-radius: 999px;
+    box-shadow: none;
+
+    .d-icon {
+      color: var(--primary-medium);
+    }
+
+    &:hover,
+    &:focus-visible {
+      background: var(--primary-very-low);
+      color: var(--primary);
+    }
+  }
+
+  // Sign Up / Log In are .btn-primary, so without this they'd inherit the
+  // transparent fill above -- restore the solid CTA background so both
+  // buttons match instead of rendering as outline-only.
+  .d-header .header-buttons .btn-primary {
+    background: var(--d-button-primary-bg-color);
+    color: var(--d-button-primary-text-color);
+    border: var(--d-button-primary-border);
+
+    .d-icon {
+      color: var(--d-button-primary-text-color);
+    }
+
+    &:hover,
+    &:focus-visible {
+      background: var(--d-button-primary-bg-color);
+      color: var(--d-button-primary-text-color);
+    }
+  }
+
+  // Not driven by either input-background token above: each of these paints
+  // var(--secondary) straight onto an input-like control (a native select, a select-kit
+  // dropdown's closed box, a date/time or password field, ...), so every one of them needs
+  // its own override to read as an input rather than page background. background-color
+  // (not the background shorthand) so .d-native-select's chevron background-image survives.
+  //
+  // !important throughout this block: every one of these is fighting a rule in core's own
+  // SCSS, several nested several classes deep (multi-select.scss's own .multi-select-header
+  // rule, for one, is 3 class selectors). Matching a core selector's specificity exactly and
+  // relying on "theme CSS loads after core" to win the tie is fragile -- it already lost once
+  // silently this way (.multi-select-header) -- and re-matching it by hand every time core
+  // changes doesn't scale. !important says plainly what's meant: these surfaces are always
+  // white, independent of how core happens to structure the selector underneath.
+  textarea,
+  .d-editor-textarea-wrapper,
+  select,
+  .ember-select,
+  .d-native-select,
+  .calendar-date-time-input,
+  .form-kit__control-password-wrapper,
+  .select-kit.combo-box .select-kit-header,
+  .select-kit.multi-select,
+  // multi-select-header is a native <summary> (select-kit itself a native <details> --
+  // see select-kit.js's @tagName("details") and multi-select-header.gjs's
+  // @tagName("summary")), tag-qualified here to say so rather than matching by class alone.
+  summary.multi-select-header,
+  // The "Search..." row inside an opened select-kit dropdown (category/tag/group choosers,
+  // not just combo-box) -- select-kit.scss leaves .filter-input itself transparent, so this
+  // row otherwise shows through to .select-kit-body's var(--secondary) panel behind it.
+  // Left as-is: .select-kit-body (the result list below the search row) -- a dropdown
+  // panel's list is read as a menu surface, same family as every other dropdown/menu panel
+  // on the site, not as an input.
+  .select-kit-filter,
+  // FormKit's checkbox is a hidden real <input> plus this styled box standing in for it.
+  .form-kit__control-checkbox-checkmark {
+    background-color: #fff !important;
+  }
+
+  // The empty-state avatar/logo upload dropzone (upload.scss) fills with
+  // var(--primary-very-low) -- our palette's version of that is a warm off-white, not
+  // pure white, so it reads as a slightly different shade next to the inputs above rather
+  // than as one of them.
+  .no-image .file-uploader__preview,
+  .no-file .file-uploader__preview,
+  // Once a file IS picked, upload.scss sets no background-color at all on .has-image/
+  // .has-file -- fully transparent, not just unthemed. Confirmed live: these use
+  // background-size: contain (not cover), so a non-square logo leaves letterboxed empty
+  // space around it that was showing the page behind it through, rgba(0,0,0,0), rather
+  // than reading as a white mat around the thumbnail like the empty state above.
+  .has-image .file-uploader__preview,
+  .has-file .file-uploader__preview {
+    background-color: #fff !important;
+  }
+}
+
+@if $hide_channels_and_chat_from_sidebar == "true" {
+  .sidebar-section[data-section-name^="chat-"] {
+    display: none !important;
+  }
+}
