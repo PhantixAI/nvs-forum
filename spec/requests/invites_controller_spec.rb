@@ -3599,6 +3599,32 @@ RSpec.describe InvitesController do
       )
     end
 
+    it "flips a row's own stale ai_personalization=false column to true before claiming/enqueueing, so Generator.personalize (which gates on that persisted column, not this request's param) actually regenerates it -- regression guard for a production incident where a CSV-imported batch kept sending old, unpersonalized content despite ai_personalization being checked on the resend" do
+      invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          email: "student@nit.ac.in",
+          ai_personalization: false,
+          custom_subject: "a stale subject from before",
+        )
+
+      sign_in(admin)
+      post "/invites/reinvite-all",
+           params: {
+             ai_personalization: "true",
+             schedule_send: "true",
+             keywords: "robotics club",
+           }
+
+      expect(response.status).to eq(200)
+      expect(invite.reload.ai_personalization).to eq(true)
+      expect(invite.emailed_status).to eq(Invite.emailed_status_types[:drafting])
+      expect(Jobs::GenerateInvitePersonalization.jobs.first["args"].first["invite_ids"]).to eq(
+        [invite.id],
+      )
+    end
+
     it "rate limits a status-filtered resend separately from a plain resend of the same domain" do
       freeze_time
       Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
@@ -3684,6 +3710,31 @@ RSpec.describe InvitesController do
       job_args = Jobs::ResendInvitesWithKeywords.jobs.first["args"].first
       expect(job_args["invite_ids"]).to eq([invite.id])
       expect(job_args["extra_keywords"]).to eq(nil)
+    end
+
+    it "flips a row's own stale ai_personalization=false column to true before enqueueing the keyword-regeneration job, same as the schedule_send: true branch" do
+      invite =
+        Fabricate(
+          :invite,
+          invited_by: admin,
+          email: "student@nit.ac.in",
+          ai_personalization: false,
+          custom_subject: "a stale subject from before",
+        )
+
+      sign_in(admin)
+      post "/invites/reinvite-all",
+           params: {
+             ai_personalization: "true",
+             schedule_send: "false",
+             keywords: "robotics club",
+           }
+
+      expect(response.status).to eq(200)
+      expect(invite.reload.ai_personalization).to eq(true)
+      expect(Jobs::ResendInvitesWithKeywords.jobs.first["args"].first["invite_ids"]).to eq(
+        [invite.id],
+      )
     end
 
     it "does not enqueue the keyword-regeneration job when ai_personalization is false" do

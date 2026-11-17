@@ -1345,6 +1345,23 @@ class InvitesController < ApplicationController
   # `invites` must be an un-plucked relation -- this method decides itself
   # whether to pluck or find_each.
   def dispatch_bulk_resend(invites, keywords:, personalize:, schedule_send:)
+    if personalize
+      # BulkInvitePersonalization::Generator.personalize gates solely on each
+      # invite's own persisted ai_personalization column (invite.ai_personalization?),
+      # not on this request's choice -- so a row whose column was already
+      # false (e.g. imported via CSV with personalization off, or never
+      # touched since) would otherwise keep silently skipping generation
+      # (and dropping `keywords`) even with this resend's own ai_personalization
+      # explicitly on. Confirmed in production: a nitw.ac.in/student.nitw.ac.in
+      # batch resent with "AI Personalization" checked still went out with
+      # stale, unpersonalized content for ~99% of rows, because the column
+      # had never been flipped. Persisting it here, before either branch
+      # below enqueues, keeps the per-row flag and this request's choice in
+      # sync -- same as #perform_resend already does via
+      # resend_overrides_from_params for a single invite.
+      invites.reorder(nil).update_all(ai_personalization: true)
+    end
+
     if personalize && schedule_send
       # Pre-generates each invite's AI content off-request, in bounded
       # concurrency, *before* any of them reach the paced send queue --
