@@ -1,0 +1,3 @@
+hide_channels_and_chat_from_sidebar:
+  default: true
+  client: true
