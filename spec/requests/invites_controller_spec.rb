@@ -3294,8 +3294,24 @@ RSpec.describe InvitesController do
       expect(invite.reload.expires_at).to eq_time(5.days.from_now)
     end
 
-    it "errors if admins try to exceed limit of one bulk invite per day" do
+    it "does not rate limit admins, however many times they dispatch bulk invites the same day -- the per-day limiter exists for non-admin staff, not admins" do
       sign_in(admin)
+      SiteSetting.bulk_invite_resend_rate_limit_per_day = 1
+      start = Time.now
+
+      freeze_time(start)
+      post "/invites/reinvite-all"
+      expect(response.parsed_body["errors"]).to_not be_present
+
+      freeze_time(start + 10.minutes)
+      post "/invites/reinvite-all"
+      expect(response.parsed_body["errors"]).to_not be_present
+    end
+
+    it "errors if a non-admin staff member resending their own invites exceeds the limit of one bulk invite per day" do
+      moderator = Fabricate(:moderator)
+      Fabricate(:invite, invited_by: moderator)
+      sign_in(moderator)
       start = Time.now
 
       freeze_time(start)
@@ -3307,8 +3323,10 @@ RSpec.describe InvitesController do
       expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
     end
 
-    it "honors bulk_invite_resend_rate_limit_per_day instead of a fixed limit" do
-      sign_in(admin)
+    it "honors bulk_invite_resend_rate_limit_per_day instead of a fixed limit, for a non-admin staff member" do
+      moderator = Fabricate(:moderator)
+      Fabricate(:invite, invited_by: moderator)
+      sign_in(moderator)
       SiteSetting.bulk_invite_resend_rate_limit_per_day = 2
 
       2.times do
@@ -3320,8 +3338,10 @@ RSpec.describe InvitesController do
       expect(response.parsed_body["errors"][0]).to eq(I18n.t("rate_limiter.slow_down"))
     end
 
-    it "logs the rate limit event" do
-      sign_in(admin)
+    it "logs the rate limit event for a non-admin staff member" do
+      moderator = Fabricate(:moderator)
+      Fabricate(:invite, invited_by: moderator)
+      sign_in(moderator)
       SiteSetting.bulk_invite_resend_rate_limit_per_day = 1
 
       post "/invites/reinvite-all"
@@ -3372,13 +3392,14 @@ RSpec.describe InvitesController do
       expect(other_invite.reload.expires_at).to eq_time(5.days.from_now)
     end
 
-    it "rate limits the ac.in umbrella resend independently from an individual institute's resend" do
+    it "rate limits the ac.in umbrella resend independently from an individual institute's resend, for a non-admin staff member" do
+      moderator = Fabricate(:moderator)
       start = Time.now
       freeze_time(start)
 
-      Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      Fabricate(:invite, invited_by: moderator, email: "student@nit.ac.in")
 
-      sign_in(admin)
+      sign_in(moderator)
       post "/invites/reinvite-all", params: { domain: "nit.ac.in" }
       expect(response.parsed_body["errors"]).to_not be_present
 
@@ -3388,14 +3409,15 @@ RSpec.describe InvitesController do
       expect(response.parsed_body["errors"]).to_not be_present
     end
 
-    it "rate limits per domain independently, so two different domains can each resend the same day" do
+    it "rate limits per domain independently, so two different domains can each resend the same day, for a non-admin staff member" do
+      moderator = Fabricate(:moderator)
       start = Time.now
       freeze_time(start)
 
-      Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
-      Fabricate(:invite, invited_by: admin, email: "student@iitb.ac.in")
+      Fabricate(:invite, invited_by: moderator, email: "student@nit.ac.in")
+      Fabricate(:invite, invited_by: moderator, email: "student@iitb.ac.in")
 
-      sign_in(admin)
+      sign_in(moderator)
       post "/invites/reinvite-all", params: { domain: "nit.ac.in" }
       expect(response.parsed_body["errors"]).to_not be_present
 
@@ -3625,11 +3647,12 @@ RSpec.describe InvitesController do
       )
     end
 
-    it "rate limits a status-filtered resend separately from a plain resend of the same domain" do
+    it "rate limits a status-filtered resend separately from a plain resend of the same domain, for a non-admin staff member" do
+      moderator = Fabricate(:moderator)
       freeze_time
-      Fabricate(:invite, invited_by: admin, email: "student@nit.ac.in")
+      Fabricate(:invite, invited_by: moderator, email: "student@nit.ac.in")
 
-      sign_in(admin)
+      sign_in(moderator)
       post "/invites/reinvite-all", params: { domain: "nit.ac.in" }
       expect(response.parsed_body["errors"]).to_not be_present
 
