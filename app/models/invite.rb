@@ -775,12 +775,16 @@ class Invite < ActiveRecord::Base
   def self.claim_all_for_status_cancel(invite_ids, from_statuses)
     return 0 if invite_ids.blank?
 
+    # Deliberately leaves updated_at untouched -- a cancel never sends
+    # anything, but the UI's "Created/Last Sent" column
+    # (frontend/discourse/app/templates/user-invited/show.gjs) reads this
+    # same column, so bumping it here made a cancelled invite look like it
+    # had just been (re)sent.
     claimable_statuses = emailed_status_types.values_at(*from_statuses)
     where(id: invite_ids, emailed_status: claimable_statuses).update_all(
       [
-        "emailed_status = COALESCE(last_emailed_status, ?), last_emailed_status = NULL, updated_at = ?",
+        "emailed_status = COALESCE(last_emailed_status, ?), last_emailed_status = NULL",
         emailed_status_types[:review],
-        Time.zone.now,
       ],
     )
   end

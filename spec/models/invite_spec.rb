@@ -1290,6 +1290,20 @@ RSpec.describe Invite do
     it "returns 0 for an empty id list" do
       expect(Invite.claim_all_for_status_cancel([], %i[pending bulk_pending])).to eq(0)
     end
+
+    it "leaves updated_at untouched -- the UI's Created/Last Sent column reads this same column, so a cancel must not make an invite that was never sent look like it just was" do
+      freeze_time
+      original_updated_at = 3.days.ago
+      invite.update_columns(
+        emailed_status: Invite.emailed_status_types[:bulk_pending],
+        last_emailed_status: Invite.emailed_status_types[:review],
+        updated_at: original_updated_at,
+      )
+
+      Invite.claim_all_for_status_cancel([invite.id], %i[pending bulk_pending])
+
+      expect(invite.reload.updated_at).to eq_time(original_updated_at)
+    end
   end
 
   describe "#update_emailed_status! / .set_emailed_status_sql" do
