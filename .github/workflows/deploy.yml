@@ -47,17 +47,25 @@ jobs:
       # the real root cause of the repeat 2026-11-04 outage (same libvips.so.42
       # crash recurred even after a verified-successful base-image pull). `git
       # reset --hard` only touches tracked files, so /var/discourse/shared
-      # (certs, logs) and the gitignored containers/app.yml are untouched -- but
-      # it also wipes the one intentional uncommitted local change, the
-      # git_url patch below, which must be reapplied every time.
+      # (certs, logs) and the gitignored containers/app.yml are untouched.
+      #
+      # Points at our own fork (PhantixAI/nvs-discourse_docker) rather than
+      # upstream discourse/discourse_docker -- the git_url fix (setting
+      # origin to this app's own git_url before the code hook's fetch/checkout,
+      # needed since this app repo is itself a fork) is committed there, so
+      # `git reset --hard` no longer needs to wipe and re-patch an uncommitted
+      # local change on every deploy. That re-patch previously used a
+      # hardcoded line number (`sed -i "100a..."`) that drifted out of sync
+      # with upstream template changes and started inserting mid-way through
+      # an adjacent multi-line `bash -c '...'` block, breaking every deploy
+      # with `sh: 1: Syntax error: Unterminated quoted string` (confirmed
+      # 2026-11-18). `git remote set-url` is idempotent, safe to run every time.
       - name: Refresh discourse_docker clone
         run: |
           cd /var/discourse
+          sudo git remote set-url origin https://github.com/PhantixAI/nvs-discourse_docker.git
           sudo git fetch origin
           sudo git reset --hard origin/main
-          if ! sudo grep -q "git remote set-url origin" templates/web.template.yml; then
-            sudo sed -i "100a\\        - sudo -H -E -u discourse git remote set-url origin \$git_url" templates/web.template.yml
-          fi
 
       - name: Write app.yml with secrets
         env:
