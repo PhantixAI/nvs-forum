@@ -691,14 +691,21 @@ class InvitesController < ApplicationController
       # too, same as any other domain string -- resending it doesn't
       # double-count against (or get blocked by) an individual institute's own
       # bucket, by design.
-      rate_limit_key = ["bulk-reinvite-per-day", user.id, domain, status].compact.join("-")
-      RateLimiter.new(
-        current_user,
-        rate_limit_key,
-        SiteSetting.bulk_invite_resend_rate_limit_per_day,
-        1.day,
-        apply_limit_to_staff: true,
-      ).performed!
+      # Admins are exempt -- this limiter exists to stop a non-admin staff
+      # member (the only other cohort that can reach this action -- see
+      # can_resend_all_invites? above) from hammering the mail provider, not
+      # to throttle admins dispatching fresh/review-status invites or
+      # resending delivered ones.
+      unless guardian.is_admin?
+        rate_limit_key = ["bulk-reinvite-per-day", user.id, domain, status].compact.join("-")
+        RateLimiter.new(
+          current_user,
+          rate_limit_key,
+          SiteSetting.bulk_invite_resend_rate_limit_per_day,
+          1.day,
+          apply_limit_to_staff: true,
+        ).performed!
+      end
     rescue RateLimiter::LimitExceeded => e
       log_invite_rate_limit_exceeded(e, action: "resend_all_invites")
       return render_json_error(I18n.t("rate_limiter.slow_down"))
@@ -1359,7 +1366,16 @@ class InvitesController < ApplicationController
       # below enqueues, keeps the per-row flag and this request's choice in
       # sync -- same as #perform_resend already does via
       # resend_overrides_from_params for a single invite.
-      invites.reorder(nil).update_all(ai_personalization: true)
+      #
+      # Materialize ids first, then update_all against a plain
+      # Invite.where(id:) relation -- invites carries Invite.pending's own
+      # DISTINCT + LEFT JOINs (invited_users, users), and update_all
+      # against a joined/distinct relation makes Rails emit an UPDATE whose
+      # WHERE clause can no longer resolve the unqualified
+      # "redemption_count < max_redemptions_allowed" from Invite.pending's
+      # own where(...), raising PG::AmbiguousColumn. Same reorder(nil)
+      # reasoning as the pluck(:id) calls below.
+      Invite.where(id: invites.reorder(nil).pluck(:id)).update_all(ai_personalization: true)
     end
 
     if personalize && schedule_send
